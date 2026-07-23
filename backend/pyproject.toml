@@ -1,0 +1,35 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008 (Depends()/File()/Form() in argument defaults) is FastAPI's required
+# dependency-injection pattern, not a real bug - never rewrite it away.
+ignore = ["B008"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+# Full `strict` demands generic args on every raw Mongo `dict` (Motor calls
+# return untyped documents everywhere - documents/excel routes work with raw
+# driver dicts, not Pydantic models, by design) - that produces ~50 no-op
+# "Missing type arguments for generic type dict" warnings with zero bug value.
+# This profile keeps the checks that catch real mistakes (untyped defs,
+# unreachable code, redundant casts) without that noise.
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

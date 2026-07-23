@@ -1,0 +1,41 @@
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+venv/
+.venv/
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Generated documents / test artifacts
+backend/exports/*.xlsx
+frontend/e2e/storage_state.json
+frontend/e2e/test_creds.json
+frontend/e2e/*.png
+admin/e2e/storage_state.json
+admin/e2e/test_creds.json
+admin/e2e/*.png
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# PaddleOCR model cache (large, machine-local, re-downloaded automatically)
+.paddlex/
