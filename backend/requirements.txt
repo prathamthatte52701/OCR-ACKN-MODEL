@@ -1,3 +1,12 @@
+# paddlepaddle's Linux CPU wheels are not reliably published on plain PyPI -
+# their own install docs require this index for `pip install paddlepaddle`
+# on Linux (https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/linux-pip_en.html).
+# Without this, `pip install -r requirements.txt` on a Linux host (Render,
+# Docker, any CI) fails with "Could not find a version that satisfies the
+# requirement paddlepaddle==3.3.1 (from versions: none)" even though the
+# exact same requirements.txt installs fine on Windows.
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
 fastapi==0.139.2
 uvicorn[standard]
 motor==3.7.1
