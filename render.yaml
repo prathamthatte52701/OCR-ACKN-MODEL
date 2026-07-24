@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ackintel-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # $PORT is injected by Render at runtime - never hardcode a port here.
+    # --host 0.0.0.0 is required, Render's health check can't reach 127.0.0.1.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: MONGO_DB_NAME
+        value: docintel_transport
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: ADMIN_ORIGIN
+        sync: false
+      - key: ADMIN_1_PASSWORD
+        sync: false
+      - key: ADMIN_2_PASSWORD
+        sync: false

@@ -14,8 +14,13 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+// '/api' only resolves correctly in dev, where vite.config.js proxies it to
+// the local backend - that proxy doesn't exist in a static production build
+// (e.g. Vercel), so a deployed build would hit its own domain instead of the
+// real API. VITE_API_URL (set at deploy time) overrides it; unset locally,
+// so dev keeps using the working proxy unchanged.
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 30000,
 })
 
