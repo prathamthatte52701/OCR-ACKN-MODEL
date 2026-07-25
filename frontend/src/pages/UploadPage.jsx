@@ -1,15 +1,51 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
-import { AlertCircle } from 'lucide-react'
-import { uploadDocument, getDocument, bulkUploadDocuments } from '../api/documents'
+import { AlertCircle, Check, AlertTriangle } from 'lucide-react'
+import { uploadDocument, getDocument, bulkUploadDocuments, correctDocument } from '../api/documents'
 import { validateDocumentFile } from '../utils/documentValidation'
 import UploadCard from '../components/UploadCard'
-import { displayNumber } from '../utils/documentDisplay'
+import CorrectionModal from '../components/CorrectionModal'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
+const LOW_CONFIDENCE_THRESHOLD = 80
+
+// Per-documentType editable field list for the bulk review view - mirrors
+// DocumentDetailPage's fieldsFor(), but reads from a bulk result item
+// (f.taxInvoiceNo/f.number/etc, populated by the poll loop) instead of a
+// full document object.
+function reviewFieldsFor(f) {
+  if (f.documentType === 'Tax Invoice') {
+    return [
+      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo, confidence: f.taxInvoiceNoConfidence },
+      { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo, confidence: f.referenceNoConfidence },
+      { key: 'date', label: 'Date', value: f.date, confidence: f.dateConfidence },
+    ]
+  }
+  return [
+    { key: 'number', label: 'Delivery Challan No.', value: f.number, confidence: f.numberConfidence },
+    { key: 'date', label: 'Date', value: f.date, confidence: f.dateConfidence },
+  ]
+}
+
+function ConfidenceBadge({ confidence }) {
+  const isLow = confidence == null || confidence < LOW_CONFIDENCE_THRESHOLD
+  if (!isLow) {
+    return (
+      <span title="High confidence" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-green-900/30 text-green-400" aria-label="High confidence">
+        <Check className="h-3 w-3" strokeWidth={3} />
+      </span>
+    )
+  }
+  return (
+    <span title="Low confidence — please verify" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-900/30 text-red-400" aria-label="Low confidence — please verify">
+      <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />
+    </span>
+  )
+}
+
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
-const MAX_BULK_FILES = 5
-const RESULTS_PAGE_SIZE = 5
+const MAX_BULK_FILES = 10
 // Bulk files process strictly sequentially on the server, but every file's
 // poll timer starts at upload time regardless of queue position - a flat
 // single-upload-sized budget (90 attempts/180s) meant a file queued behind
@@ -144,7 +180,8 @@ export default function UploadPage() {
   const [bulkFiles, setBulkFiles] = useState([]) // [{ file, documentType, status, error, docId }]
   const [bulkError, setBulkError] = useState('')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
-  const [resultsPage, setResultsPage] = useState(1)
+  const [reviewIndex, setReviewIndex] = useState(0)
+  const [reviewEditingField, setReviewEditingField] = useState(null) // { docId, key, label, value }
   const bulkPollRef = useRef(null)
   // setInterval's closure would otherwise see bulkFiles as it was when the
   // interval was created - this ref is kept in sync so each tick reads the
@@ -287,6 +324,10 @@ export default function UploadPage() {
               referenceNo: polled.referenceNo,
               number: polled.number,
               date: polled.date,
+              taxInvoiceNoConfidence: polled.taxInvoiceNoConfidence,
+              referenceNoConfidence: polled.referenceNoConfidence,
+              numberConfidence: polled.numberConfidence,
+              dateConfidence: polled.dateConfidence,
             }
           }
           if (polled?.uploadStatus === 'failed') return { docId: f.docId, status: 'failed', error: polled.processingError || 'Processing failed.' }
@@ -311,6 +352,10 @@ export default function UploadPage() {
             referenceNo: u.referenceNo,
             number: u.number,
             date: u.date,
+            taxInvoiceNoConfidence: u.taxInvoiceNoConfidence,
+            referenceNoConfidence: u.referenceNoConfidence,
+            numberConfidence: u.numberConfidence,
+            dateConfidence: u.dateConfidence,
           }
         }))
       }
@@ -351,7 +396,33 @@ export default function UploadPage() {
     setBulkFiles([])
     setBulkError('')
     setBulkSubmitting(false)
-    setResultsPage(1)
+    setReviewIndex(0)
+  }
+
+  const reviewCorrectMutation = useMutation({
+    mutationFn: ({ docId, field, value }) => correctDocument(docId, field, value),
+  })
+
+  async function handleReviewCorrect(field, newValue) {
+    try {
+      const updated = await reviewCorrectMutation.mutateAsync({ docId: field.docId, field: field.key, value: newValue })
+      setBulkFiles((prev) => prev.map((f) => (f.docId === field.docId
+        ? {
+            ...f,
+            taxInvoiceNo: updated.taxInvoiceNo,
+            referenceNo: updated.referenceNo,
+            number: updated.number,
+            date: updated.date,
+            taxInvoiceNoConfidence: updated.taxInvoiceNoConfidence,
+            referenceNoConfidence: updated.referenceNoConfidence,
+            numberConfidence: updated.numberConfidence,
+            dateConfidence: updated.dateConfidence,
+          }
+        : f)))
+      setReviewEditingField(null)
+    } catch {
+      // CorrectionModal stays open on failure so the user can retry.
+    }
   }
 
   const bulkDoneCount = bulkFiles.filter((f) => f.status === 'done').length
@@ -359,11 +430,8 @@ export default function UploadPage() {
   const bulkTotal = bulkFiles.length
   const bulkAllSettled = bulkTotal > 0 && bulkDoneCount + bulkFailedCount === bulkTotal
 
-  const resultsTotalPages = Math.max(1, Math.ceil(bulkFiles.length / RESULTS_PAGE_SIZE))
-  const resultsPageItems = bulkFiles.slice(
-    (resultsPage - 1) * RESULTS_PAGE_SIZE,
-    resultsPage * RESULTS_PAGE_SIZE
-  )
+  const reviewTotal = bulkFiles.length
+  const reviewItem = bulkFiles[reviewIndex] || null
 
   return (
     <div className="relative min-h-full overflow-hidden bg-[#020817]">
@@ -414,6 +482,7 @@ export default function UploadPage() {
 
           {mode === 'bulk' ? (
             bulkAllSettled ? (
+              <>
               <div className="flex min-h-[460px] flex-col gap-5 rounded-[26px] border border-blue-300/12 bg-slate-950/34 px-5 py-8">
                 <div className="flex flex-col items-center gap-4 text-center">
                   <div
@@ -425,7 +494,7 @@ export default function UploadPage() {
                   >
                     {bulkDoneCount}/{bulkTotal}
                   </div>
-                  <p className="text-xl font-black text-white">View All Results</p>
+                  <p className="text-xl font-black text-white">Review Results</p>
                   <p className="text-[14.7px] text-slate-400">
                     {bulkFailedCount === 0
                       ? `${bulkDoneCount}/${bulkTotal} processed successfully`
@@ -433,43 +502,66 @@ export default function UploadPage() {
                   </p>
                 </div>
 
-                <div className="w-full space-y-2 text-left">
-                  {resultsPageItems.map((f, i) => (
-                    <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                      <span className="min-w-0 truncate text-[13.6px] text-slate-300" title={f.file.name}>{f.file.name}</span>
-                      <span className="shrink-0 text-[12.6px] text-slate-500">{f.documentType}</span>
-                      <span className="shrink-0 text-[12.6px] font-semibold text-slate-300">{f.status === 'done' ? displayNumber(f) : '-'}</span>
-                      <span className="shrink-0 text-[12.6px] font-semibold text-slate-300">{f.status === 'done' ? (f.date || '-') : '-'}</span>
-                      {f.status === 'done' && f.docId ? (
-                        <Link to={`/documents/${f.docId}`} className="shrink-0 text-[12.6px] font-bold text-emerald-300 no-underline hover:underline">
-                          Review
-                        </Link>
-                      ) : (
-                        <span className="shrink-0 text-[12.6px] font-bold text-rose-300" title={f.error}>Failed</span>
-                      )}
+                {reviewItem && (
+                  <div className="w-full space-y-4 text-left">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                      <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={reviewItem.file.name}>{reviewItem.file.name}</span>
+                      <span className="shrink-0 text-[12.6px] text-slate-500">{reviewItem.documentType}</span>
                     </div>
-                  ))}
-                </div>
 
-                {resultsTotalPages > 1 && (
-                  <div className="flex items-center justify-center gap-4">
-                    <button
-                      onClick={() => setResultsPage((p) => Math.max(1, p - 1))}
-                      disabled={resultsPage <= 1}
-                      className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
-                    >
-                      Previous
-                    </button>
-                    <span className="text-[14.7px] font-bold text-slate-400">
-                      Page {resultsPage} of {resultsTotalPages}
-                    </span>
-                    <button
-                      onClick={() => setResultsPage((p) => Math.min(resultsTotalPages, p + 1))}
-                      disabled={resultsPage >= resultsTotalPages}
-                      className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
-                    >
-                      Next
-                    </button>
+                    {reviewItem.status === 'done' ? (
+                      <div className="space-y-2">
+                        {reviewFieldsFor(reviewItem).map((f) => {
+                          const isLow = f.confidence == null || f.confidence < LOW_CONFIDENCE_THRESHOLD
+                          return (
+                            <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-white/[0.03] px-4 py-3 ${isLow ? 'border-rose-400/40' : 'border-white/10'}`}>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-[12.6px] text-slate-500">{f.label}</p>
+                                  <p className="truncate text-[14.7px] font-semibold text-slate-200">{f.value || 'Not available'}</p>
+                                </div>
+                                <ConfidenceBadge confidence={f.confidence} />
+                              </div>
+                              <button
+                                onClick={() => setReviewEditingField({ docId: reviewItem.docId, key: f.key, label: f.label, value: f.value })}
+                                className="shrink-0 rounded-lg border border-blue-300/30 px-3 py-1.5 text-[12.6px] font-bold text-blue-200 transition-colors hover:bg-blue-500/10"
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          )
+                        })}
+                        <Link to={`/documents/${reviewItem.docId}`} className="inline-block text-[12.6px] font-bold text-emerald-300 no-underline hover:underline">
+                          Open full document detail
+                        </Link>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-[13.6px] text-rose-200">
+                        Failed: {reviewItem.error || 'Processing failed.'}
+                      </div>
+                    )}
+
+                    {reviewTotal > 1 && (
+                      <div className="flex items-center justify-center gap-4 pt-2">
+                        <button
+                          onClick={() => setReviewIndex((p) => Math.max(0, p - 1))}
+                          disabled={reviewIndex <= 0}
+                          className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
+                        >
+                          Previous
+                        </button>
+                        <span className="text-[14.7px] font-bold text-slate-400">
+                          {reviewIndex + 1} of {reviewTotal}
+                        </span>
+                        <button
+                          onClick={() => setReviewIndex((p) => Math.min(reviewTotal - 1, p + 1))}
+                          disabled={reviewIndex >= reviewTotal - 1}
+                          className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -480,6 +572,15 @@ export default function UploadPage() {
                   Start New Batch
                 </button>
               </div>
+
+              {reviewEditingField && (
+                <CorrectionModal
+                  field={{ label: reviewEditingField.label, value: reviewEditingField.value, key: reviewEditingField.key }}
+                  onSave={handleReviewCorrect}
+                  onClose={() => setReviewEditingField(null)}
+                />
+              )}
+              </>
             ) : bulkSubmitting ? (
               <div className="space-y-3">
                 <p className="flex items-center justify-center gap-2.5 text-center text-[14.7px] font-bold text-slate-300">

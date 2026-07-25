@@ -31,7 +31,7 @@ router = APIRouter()
 
 DOCUMENT_TYPES = {"Tax Invoice", "Delivery Challan"}
 MAX_FILE_SIZE = 5 * 1024 * 1024
-MAX_BULK_FILES = 5
+MAX_BULK_FILES = 10
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/jpg", "image/png", "application/pdf"}
 
 EDITABLE_FIELDS = {"taxInvoiceNo", "referenceNo", "number", "date"}
