@@ -42,6 +42,19 @@ def _get_ocr() -> Any:
 
                 _ocr_instance = PaddleOCR(
                     lang="en",
+                    # Mobile/lite models instead of the PP-OCRv6 "server"
+                    # models this defaulted to - the server models are
+                    # meaningfully heavier on RAM/CPU, which is the suspected
+                    # driver behind repeated crashes on this CPU-only
+                    # i5-12th-gen machine. Accuracy tradeoff is acceptable
+                    # here since the app already has the character-confusion
+                    # auto-correction and G/P-prefix validation safety nets
+                    # layered on top of raw OCR output (see
+                    # ocr/extraction.py) - those exist precisely to catch
+                    # exactly the kind of noisier reads a lighter model
+                    # produces.
+                    text_detection_model_name="PP-OCRv4_mobile_det",
+                    text_recognition_model_name="en_PP-OCRv4_mobile_rec",
                     use_doc_orientation_classify=False,
                     use_doc_unwarping=False,
                     use_textline_orientation=False,

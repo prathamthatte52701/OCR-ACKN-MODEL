@@ -46,7 +46,7 @@ Required env vars (`backend/.env`):
 | `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
 | `MONGO_DB_NAME` | no (default `docintel_transport`) | |
 | `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
-| `PORT` | no (default `5002`) | |
+| `PORT` | no (default `8000`) | |
 | `NODE_ENV` | no (default `development`) | set `production` to disable `/docs`/`/redoc` |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |
@@ -60,7 +60,7 @@ Run the API:
 
 ```bash
 cd backend
-../venv/Scripts/python.exe -m uvicorn app.main:app --port 5002 --reload
+../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --reload
 ```
 
 Seed the two admin accounts (idempotent, safe to re-run):
