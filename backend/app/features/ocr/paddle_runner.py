@@ -21,8 +21,25 @@ process.join's timeout dealt with hangs; a hard crash would have shown up as
 an empty result_queue, handled the same way here).
 """
 
+import os
 import threading
 from typing import Any
+
+# Confirmed root cause of "all GET APIs are slow" (measured, not assumed):
+# OpenBLAS/OMP default to using every logical core for PaddleOCR's internal
+# matrix math, unless told otherwise - on this 12-core machine that means an
+# in-flight OCR call saturates all 12 cores, starving the event-loop thread
+# of CPU time even though OCR itself runs off-loop via asyncio.to_thread.
+# Measured before this fix: GET /documents went from ~350ms idle to 8.8s
+# while one OCR job was running. Must be set before paddle/numpy import -
+# these libraries read the env var once at native-library load time.
+_CPU_THREAD_CAP = "6"
+os.environ.setdefault("OMP_NUM_THREADS", _CPU_THREAD_CAP)
+os.environ.setdefault("OPENBLAS_NUM_THREADS", _CPU_THREAD_CAP)
+os.environ.setdefault("MKL_NUM_THREADS", _CPU_THREAD_CAP)
+# PaddleX's own inference-thread-count knob (see pp_option.py) - defaults to
+# 10 if unset, same problem from a different config surface.
+os.environ.setdefault("PADDLE_PDX_CPU_NUM_THREADS", _CPU_THREAD_CAP)
 
 OCR_TIMEOUT_SECONDS_PDF = 180
 # Deliberately higher than the PDF path - buffer against slower image

@@ -20,6 +20,25 @@ async def connect_to_mongo() -> None:
     _db = _client[settings.mongo_db_name]
     _gridfs = AsyncIOMotorGridFSBucket(_db)
     await _client.admin.command("ping")
+    await _ensure_indexes(_db)
+
+
+async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
+    """No index existed on any collection except users.email (a leftover
+    unique constraint) - confirmed by listing indexes directly. Every list/
+    search query filters by userId and sorts by createdAt, so without this
+    every GET was a full collection scan - the other confirmed contributor
+    to "all GET APIs are slow" alongside the CPU-thread-cap fix in
+    paddle_runner.py. create_index is idempotent (no-op if already present),
+    safe to call on every startup."""
+    await db.documents.create_index([("userId", 1), ("isDeleted", 1), ("createdAt", -1)])
+    await db.documents.create_index([("userId", 1), ("documentType", 1)])
+    await db.workbooks.create_index([("userId", 1), ("year", -1)])
+    await db.exportedrows.create_index([("userId", 1), ("exportedAt", -1)])
+    await db.settings.create_index([("userId", 1), ("key", 1)], unique=True)
+    await db.corrections.create_index([("documentId", 1)])
+    await db.auditlogs.create_index([("userId", 1), ("createdAt", -1)])
+    await db.auditlogs.create_index([("action", 1)])
 
 
 async def close_mongo_connection() -> None:

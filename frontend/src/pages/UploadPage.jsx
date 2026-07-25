@@ -80,6 +80,38 @@ function UploadProcessingState({ message }) {
   )
 }
 
+// Single-upload only, by design - shows the actual selected file before
+// submit (image thumbnail, or the browser's native inline PDF viewer for a
+// PDF) so the user can confirm it's the right document. Bulk upload
+// deliberately has no equivalent - flagged as out of scope for that flow.
+function FilePreview({ file }) {
+  const [previewUrl, setPreviewUrl] = useState('')
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  if (!previewUrl) return null
+
+  const isPdf = file.type === 'application/pdf'
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40">
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
+        <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300">{file.name}</span>
+        <span className="shrink-0 text-[12.6px] text-slate-500">{(file.size / 1024).toFixed(1)} KB</span>
+      </div>
+      {isPdf ? (
+        <embed src={previewUrl} type="application/pdf" className="h-[420px] w-full bg-slate-900" />
+      ) : (
+        <img src={previewUrl} alt={`Preview of ${file.name}`} className="max-h-[420px] w-full object-contain bg-slate-900" />
+      )}
+    </div>
+  )
+}
+
 function StatusChip({ status }) {
   const styles = {
     waiting: 'border-slate-500/30 bg-slate-500/10 text-slate-400',
@@ -89,7 +121,10 @@ function StatusChip({ status }) {
   }
   const labels = { waiting: 'Waiting', processing: 'Processing', done: 'Done', failed: 'Failed' }
   return (
-    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11.6px] font-bold uppercase tracking-[0.1em] ${styles[status]}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.6px] font-bold uppercase tracking-[0.1em] ${styles[status]}`}>
+      {status === 'processing' && (
+        <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-transparent border-t-blue-300 border-r-blue-300" />
+      )}
       {labels[status]}
     </span>
   )
@@ -447,7 +482,8 @@ export default function UploadPage() {
               </div>
             ) : bulkSubmitting ? (
               <div className="space-y-3">
-                <p className="text-center text-[14.7px] font-bold text-slate-300">
+                <p className="flex items-center justify-center gap-2.5 text-center text-[14.7px] font-bold text-slate-300">
+                  <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-transparent border-r-cyan-300 border-t-blue-500" />
                   Processing {bulkDoneCount + bulkFailedCount}/{bulkTotal}...
                 </p>
                 {bulkFiles.map((f, i) => (
@@ -547,6 +583,8 @@ export default function UploadPage() {
               </div>
 
               <UploadCard onFileSelect={setFile} disabled={isProcessing} />
+
+              {file && !isProcessing && <FilePreview file={file} />}
 
               {error && (
                 <div className="flex items-start gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-[14.7px] text-rose-200">

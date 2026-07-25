@@ -232,7 +232,19 @@ async def save_document_to_excel(
     year, _ = excel_service.current_period()
     settings = await _get_settings(current_user.id)
     if not settings or not settings.get("activeWorkbookName"):
-        raise HTTPException(status_code=400, detail="No active Excel workbook. Start one first.")
+        # Structured the same way as the year-rollover 409 below (error code +
+        # message) so the frontend can auto-prompt for a filename instead of
+        # just displaying the message and telling the user to go find "Start
+        # New Excel File" themselves - this is the very first export ever for
+        # this user, so there's genuinely no workbook to append to yet.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "NO_ACTIVE_WORKBOOK",
+                "year": year,
+                "message": "No active Excel workbook yet. Name your first workbook to continue.",
+            },
+        )
 
     now = datetime.now(UTC)
     # Year rollover: archive the old workbook and ask the frontend to create a

@@ -22,22 +22,27 @@ export function newExcelFile(filename) {
 }
 
 // Save a processed document's row to the active Excel workbook - appends
-// only, no download. On a year rollover the backend responds 409 with a
-// structured { error: 'NEED_NEW_WORKBOOK', year, message } detail; this
-// prompts for the new workbook's name (styled Dialog, not window.prompt())
-// and retries once. If there's no active workbook at all yet, the backend
-// only gives a plain message (no structured code to auto-prompt from) - the
-// caller shows that as-is and points the user at "Start New Excel File".
+// only, no download. Two cases prompt for a workbook filename inline
+// (styled Dialog, not window.prompt()) and retry once, rather than failing
+// with a message that sends the user off to find "Start New Excel File"
+// themselves:
+//   - NEED_NEW_WORKBOOK: year rollover, the active workbook is for a past year
+//   - NO_ACTIVE_WORKBOOK: this user has never exported before, so there's no
+//     workbook yet at all - this is the first-export flow
 export async function saveDocument(docId) {
   try {
     const res = await api.post(`/documents/${docId}/save`)
     return res.data?.message || 'Excel file appended successfully.'
   } catch (err) {
-    if (err.errorCode === 'NEED_NEW_WORKBOOK') {
+    if (err.errorCode === 'NEED_NEW_WORKBOOK' || err.errorCode === 'NO_ACTIVE_WORKBOOK') {
+      const year = err.response.data.detail.year
       const filename = await promptText({
-        title: `New workbook needed for ${err.response.data.detail.year}`,
+        title:
+          err.errorCode === 'NO_ACTIVE_WORKBOOK'
+            ? `Name your first workbook for ${year}`
+            : `New workbook needed for ${year}`,
         message: err.userMessage,
-        defaultValue: `Bills_${err.response.data.detail.year}`,
+        defaultValue: `Bills_${year}`,
       })
       if (!filename) return null
       await newExcelFile(filename)
