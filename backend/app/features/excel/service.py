@@ -1,10 +1,12 @@
 import asyncio
 import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import openpyxl
+from filelock import FileLock
 from openpyxl.worksheet.worksheet import Worksheet
 
 EXPORT_DIR = Path(__file__).resolve().parents[3] / "exports"
@@ -26,13 +28,27 @@ MONTHS = [
 
 _DATE_RE = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
 
-# All workbook writes are serialized through this lock - two concurrent saves
-# would otherwise read-modify-write the same file and lose a row. Ported from
-# the old app's _writeChain promise-chain serialization.
-# ponytail: single global lock serializes ALL users' exports, not just same-
-# file ones - fine at this scale, upgrade to a per-filename lock if export
-# volume ever makes that a bottleneck.
-_write_lock = asyncio.Lock()
+# Workbook writes are serialized per physical filename, two-layer:
+#   1. An asyncio.Lock keyed by filename - cheap, sub-millisecond, handles the
+#      common case (multiple concurrent requests within this one process).
+#   2. An OS-level FileLock (filelock package) on a sidecar .lock file -
+#      handles the rarer but real case of two backend processes somehow
+#      bound to the same port at once (happened during dev testing here),
+#      where two independent asyncio.Lock instances in two processes cannot
+#      see each other and would otherwise silently interleave read-modify-
+#      write cycles, dropping rows. Per-filename (not global) so saves to
+#      different users'/years' workbooks never wait on each other.
+_locks_guard = threading.Lock()
+_write_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_write_lock(filename: str) -> asyncio.Lock:
+    with _locks_guard:
+        lock = _write_locks.get(filename)
+        if lock is None:
+            lock = asyncio.Lock()
+            _write_locks[filename] = lock
+        return lock
 
 
 class FileLockedError(Exception):
@@ -75,7 +91,15 @@ def _add_header_row(sheet: Worksheet) -> None:
         cell.font = openpyxl.styles.Font(bold=True)
 
 
+def _lock_path(target: Path) -> Path:
+    return target.with_suffix(".lock")
+
+
 def _create_workbook_sync(filename: str, month: str) -> Path:
+    """Assumes the caller already holds this filename's cross-process
+    FileLock - does not acquire it itself, so it can be called both
+    standalone (via _create_workbook_locked_sync) and inline from inside
+    _append_row_sync's own lock without a reentrant/nested acquisition."""
     _ensure_export_dir()
     workbook = openpyxl.Workbook()
     default_sheet = workbook.active
@@ -98,9 +122,17 @@ def _create_workbook_sync(filename: str, month: str) -> Path:
     return target
 
 
+def _create_workbook_locked_sync(filename: str, month: str) -> Path:
+    _ensure_export_dir()
+    target = file_path(filename)
+    with FileLock(str(_lock_path(target)), timeout=30):
+        return _create_workbook_sync(filename, month)
+
+
 async def create_workbook(filename: str, month: str | None = None) -> Path:
     month = month or current_period()[1]
-    return await asyncio.to_thread(_create_workbook_sync, filename, month)
+    async with _get_write_lock(filename):
+        return await asyncio.to_thread(_create_workbook_locked_sync, filename, month)
 
 
 def _format_number_cell(row: dict) -> str | None:
@@ -113,36 +145,52 @@ def _format_number_cell(row: dict) -> str | None:
 def _append_row_sync(filename: str, month: str, row: dict) -> Path:
     _ensure_export_dir()
     target = file_path(filename)
-    if not target.exists():
-        # Settings can point at a file that was deleted from disk - recreate it.
-        _create_workbook_sync(filename, month)
 
-    # Write to a temp file and swap it in with os.replace, rather than
-    # openpyxl.save(target) directly - if the target is locked open elsewhere
-    # (e.g. Excel), a direct save can truncate the file before the lock error
-    # surfaces, corrupting it for every save after the lock is released.
-    tmp_target = target.with_suffix(f".tmp{os.getpid()}.xlsx")
-    try:
-        workbook = openpyxl.load_workbook(target)
-        if month in workbook.sheetnames:
-            sheet = workbook[month]
-        else:
-            sheet = workbook.create_sheet(month)
-            _add_header_row(sheet)
-        sheet.append([row["documentType"], _format_number_cell(row), row["date"], row["timestamp"]])
-        workbook.save(tmp_target)
-        os.replace(tmp_target, target)
-    except PermissionError as exc:
-        tmp_target.unlink(missing_ok=True)
-        raise FileLockedError(
-            f'"{target.name}" is open in Excel. Close it and try saving again.'
-        ) from exc
-    except Exception:
-        tmp_target.unlink(missing_ok=True)
-        raise
-    return target
+    # Cross-process lock, held for the full read-modify-write below - closes
+    # the gap an in-process-only asyncio.Lock leaves if two backend
+    # processes ever end up bound to the same port (seen during dev here):
+    # two independent asyncio.Lock instances can't see each other and would
+    # otherwise let both processes load-modify-save concurrently, each
+    # unaware of the other's write, silently dropping whichever row lost the
+    # race to os.replace.
+    with FileLock(str(_lock_path(target)), timeout=30):
+        if not target.exists():
+            # Settings can point at a file that was deleted from disk - recreate it.
+            _create_workbook_sync(filename, month)
+
+        # Write to a temp file and swap it in with os.replace, rather than
+        # openpyxl.save(target) directly - if the target is locked open elsewhere
+        # (e.g. Excel), a direct save can truncate the file before the lock error
+        # surfaces, corrupting it for every save after the lock is released.
+        tmp_target = target.with_suffix(f".tmp{os.getpid()}.xlsx")
+        try:
+            workbook = openpyxl.load_workbook(target)
+            if month in workbook.sheetnames:
+                sheet = workbook[month]
+            else:
+                sheet = workbook.create_sheet(month)
+                _add_header_row(sheet)
+            sheet.append(
+                [row["documentType"], _format_number_cell(row), row["date"], row["timestamp"]]
+            )
+            workbook.save(tmp_target)
+            os.replace(tmp_target, target)
+        except PermissionError as exc:
+            tmp_target.unlink(missing_ok=True)
+            raise FileLockedError(
+                f'"{target.name}" is open in Excel. Close it and try saving again.'
+            ) from exc
+        except Exception:
+            tmp_target.unlink(missing_ok=True)
+            raise
+        return target
 
 
 async def append_row(filename: str, month: str, row: dict) -> Path:
-    async with _write_lock:
+    # Per-filename asyncio.Lock first (fast path, handles the common case of
+    # concurrent requests within this one process without ever touching the
+    # filesystem lock); the FileLock inside _append_row_sync is the second,
+    # cross-process layer. Keyed by filename (not global) so concurrent
+    # saves to different users'/years' workbooks never wait on each other.
+    async with _get_write_lock(filename):
         return await asyncio.to_thread(_append_row_sync, filename, month, row)

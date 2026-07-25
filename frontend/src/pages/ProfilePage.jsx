@@ -1,7 +1,13 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { AlertTriangle } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { validateUsername, validateEmail, validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
+import { purgeAllData } from '../api/documents'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-blue-300/60'
 const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
@@ -177,6 +183,131 @@ function ChangePasswordPanel({ changePassword }) {
   )
 }
 
+const CONFIRM_PHRASE = 'DELETE'
+
+// Visually and structurally distinct from GlobalConfirmDialog on purpose -
+// this is the single most destructive action in the app (irreversible full
+// account wipe), so it gets its own red/critical theme and a typed-phrase
+// gate instead of the shared one-click confirm dialog used everywhere else,
+// so an accidental double-click can never trigger it.
+function HardDeleteEverythingDialog({ open, onClose, onDeleted }) {
+  const [phrase, setPhrase] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  function handleClose() {
+    if (deleting) return
+    setPhrase('')
+    setError('')
+    onClose()
+  }
+
+  async function handleDestroy() {
+    if (phrase !== CONFIRM_PHRASE) return
+    setDeleting(true)
+    setError('')
+    try {
+      const result = await purgeAllData()
+      onDeleted(result?.message)
+    } catch (err) {
+      setError(err.userMessage || 'Could not delete your data. Please try again.')
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
+      {open && (
+        <DialogContent className="max-w-md border-red-500/40" showClose={!deleting}>
+          <DialogHeader className="border-red-900/60 bg-red-950/30">
+            <DialogTitle className="flex items-center gap-2 text-red-300">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              Critical Warning
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 px-5 py-5">
+            <p className="rounded-xl border border-red-800/60 bg-red-950/30 px-4 py-3 text-[13.6px] leading-6 text-red-200">
+              This will permanently delete ALL your documents, workbooks, and export history.
+              This action <span className="font-black">CANNOT be undone</span>. Please read
+              this carefully before continuing.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs text-gray-400">
+                Type <span className="font-mono font-bold text-red-300">{CONFIRM_PHRASE}</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+                disabled={deleting}
+                autoFocus
+                className="w-full rounded-lg border border-red-800/50 bg-gray-950 px-3 py-2.5 text-sm text-white outline-none transition-colors focus:border-red-500"
+                placeholder={CONFIRM_PHRASE}
+              />
+            </div>
+            {error && <p className="text-[13.6px] text-red-400">{error}</p>}
+          </div>
+
+          <DialogFooter>
+            <button
+              onClick={handleClose}
+              disabled={deleting}
+              className="rounded-lg bg-gray-800 px-4 py-2 text-sm text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDestroy}
+              disabled={phrase !== CONFIRM_PHRASE || deleting}
+              className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {deleting ? 'Deleting Everything...' : 'Permanently Delete Everything'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  )
+}
+
+function DangerZonePanel() {
+  const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  function handleDeleted(message) {
+    setOpen(false)
+    queryClient.clear()
+    toast.success(message || 'All your data has been permanently deleted.')
+    navigate('/')
+  }
+
+  return (
+    <div className="rounded-[28px] border border-red-900/50 bg-red-950/10 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
+      <h2 className="mb-1 text-xl font-black tracking-tight text-red-300">Danger Zone</h2>
+      <p className="mb-5 text-[13.6px] text-red-200/70">
+        Irreversible actions. Use only if you understand the consequences.
+      </p>
+      <div className="flex items-center justify-between gap-4 rounded-2xl border border-red-900/40 bg-red-950/20 px-4 py-3.5">
+        <div>
+          <p className="text-[14.7px] font-bold text-red-200">Hard Delete Everything</p>
+          <p className="text-[12.6px] text-red-300/60">
+            Permanently wipes every document, workbook, and export record you own.
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="shrink-0 rounded-xl border border-red-700 bg-red-900/40 px-4 py-2.5 text-[13.6px] font-black text-red-200 transition-colors hover:bg-red-800/50"
+        >
+          Hard Delete Everything
+        </button>
+      </div>
+      <HardDeleteEverythingDialog open={open} onClose={() => setOpen(false)} onDeleted={handleDeleted} />
+    </div>
+  )
+}
+
 export default function ProfilePage() {
   const { user, updateProfile, changePassword } = useAuth()
   if (!user) return null
@@ -187,6 +318,7 @@ export default function ProfilePage() {
       <div className="space-y-6">
         <ProfileDetailsPanel user={user} updateProfile={updateProfile} />
         <ChangePasswordPanel changePassword={changePassword} />
+        <DangerZonePanel />
       </div>
     </main>
   )

@@ -23,6 +23,7 @@ from app.core.rate_limit import limiter
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
 from app.features.documents.schemas import CorrectRequest, MessageResponse
+from app.features.excel import service as excel_service
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
@@ -384,6 +385,44 @@ async def reprocess_document(
 
     background_tasks.add_task(_reprocess_then_stamp)
     return MessageResponse(message="Reprocessing started. Check document status shortly.")
+
+
+@router.delete("/purge-all")
+async def purge_all_user_data(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> MessageResponse:
+    """Full nuclear delete - permanently wipes EVERY record this user owns
+    (documents, GridFS files, workbooks, settings, exported-row log) plus the
+    physical .xlsx files on disk. Genuinely irreversible: no soft-delete
+    flag, no recovery path. Registered before DELETE /{doc_id} so Starlette's
+    path-pattern matching (which tries routes in registration order) picks
+    this static route instead of matching "purge-all" as a doc_id and
+    failing PyObjectId validation."""
+    db = get_database()
+    user_id = current_user.id
+
+    await log_action(user_id, "purge_all_data", {})
+
+    docs = await db.documents.find({"userId": user_id}, {"gridFsFileId": 1}).to_list(None)
+    for doc in docs:
+        if doc.get("gridFsFileId"):
+            try:
+                await delete_file(doc["gridFsFileId"])
+            except Exception:  # noqa: BLE001
+                pass
+
+    workbooks = await db.workbooks.find({"userId": user_id}, {"filename": 1}).to_list(None)
+    for wb in workbooks:
+        target = excel_service.file_path(f"{user_id}_{wb['filename']}")
+        target.unlink(missing_ok=True)
+        target.with_suffix(".lock").unlink(missing_ok=True)
+
+    await db.documents.delete_many({"userId": user_id})
+    await db.workbooks.delete_many({"userId": user_id})
+    await db.settings.delete_many({"userId": user_id})
+    await db.exportedrows.delete_many({"userId": user_id})
+
+    return MessageResponse(message="All your data has been permanently deleted.")
 
 
 @router.delete("/{doc_id}")

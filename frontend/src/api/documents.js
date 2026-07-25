@@ -53,3 +53,10 @@ export function downloadDocument(id, fallbackFilename) {
 export function trainingStats() {
   return api.get('/documents/training-stats').then((res) => res.data)
 }
+
+// Full nuclear delete - irreversible, wipes every record this user owns
+// (documents, GridFS files, workbooks, settings, export log). Distinct
+// from deleteDocument()/purgeDocumentFile() above, which act on one document.
+export function purgeAllData() {
+  return api.delete('/documents/purge-all').then((res) => res.data)
+}
