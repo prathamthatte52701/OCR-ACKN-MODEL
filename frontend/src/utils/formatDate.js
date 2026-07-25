@@ -20,18 +20,6 @@ export function formatISTDate(dateStr) {
   return formatIST(dateStr, { hour: undefined, minute: undefined, hour12: undefined })
 }
 
-export function formatISTTime(dateStr) {
-  if (!dateStr) return '-'
-  const date = new Date(dateStr)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  }).format(date)
-}
-
 // "Today" boundary computed in IST, not server-local time - e.g. a doc
 // processed at 11:30pm UTC is already "tomorrow" in IST.
 export function isTodayIST(dateStr) {

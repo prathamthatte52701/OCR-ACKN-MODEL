@@ -15,7 +15,6 @@ pydantic-settings
 python-dotenv
 python-multipart
 python-jose[cryptography]
-passlib[bcrypt]
 bcrypt==5.0.0
 slowapi
 loguru==0.7.3

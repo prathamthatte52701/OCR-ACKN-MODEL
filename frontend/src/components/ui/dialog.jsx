@@ -4,8 +4,6 @@ import { cn } from '../../lib/utils'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const Dialog = DialogPrimitive.Root
-// eslint-disable-next-line react-refresh/only-export-components
-export const DialogTrigger = DialogPrimitive.Trigger
 
 export function DialogContent({ className, children, showClose = true, ...props }) {
   return (

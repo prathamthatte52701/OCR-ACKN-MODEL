@@ -58,7 +58,6 @@ def _get_ocr() -> Any:
                 from paddleocr import PaddleOCR
 
                 _ocr_instance = PaddleOCR(
-                    lang="en",
                     # Mobile/lite models instead of the PP-OCRv6 "server"
                     # models this defaulted to - the server models are
                     # meaningfully heavier on RAM/CPU, which is the suspected
