@@ -119,6 +119,14 @@ export default function DocumentDetailPage() {
   }
 
   async function handleSave() {
+    if (doc.exported) {
+      const ok = await confirmAction({
+        title: 'Save again?',
+        message: 'This document has already been saved to Excel. Save again?',
+        confirmLabel: 'Yes, Save Again',
+      })
+      if (!ok) return
+    }
     try {
       const message = await saveMutation.mutateAsync(id)
       if (message) toast.success(message)
@@ -220,7 +228,7 @@ export default function DocumentDetailPage() {
       <div className="mb-6 flex flex-wrap gap-2">
         {doc.uploadStatus === 'processed' && (
           <button onClick={handleSave} disabled={saveMutation.isPending} className="rounded-lg bg-emerald-700 px-4 py-2 text-[14.7px] font-medium text-white transition-colors hover:bg-emerald-600 disabled:opacity-50">
-            {saveMutation.isPending ? 'Saving...' : 'Save to Excel'}
+            {saveMutation.isPending ? 'Saving...' : doc.exported ? 'Save Again' : 'Save to Excel'}
           </button>
         )}
         {!doc.filePurged && (

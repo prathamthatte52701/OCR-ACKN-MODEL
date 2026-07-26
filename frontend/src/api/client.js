@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/authStore'
 // zero request/response transform layer.
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: '/api',
   timeout: 120000, // 2 min for OCR processing
 })
 

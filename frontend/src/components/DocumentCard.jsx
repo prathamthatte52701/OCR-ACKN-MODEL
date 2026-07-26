@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { displayNumber } from '../utils/documentDisplay'
 import { useSaveDocumentMutation } from '../hooks/useDocumentMutations'
+import { confirmAction } from '../store/dialogStore'
 
 const statusStyles = {
   uploaded: 'border-sky-400/25 bg-sky-400/10 text-sky-300',
@@ -29,6 +30,14 @@ export default function DocumentCard({ doc }) {
   const saveMutation = useSaveDocumentMutation()
 
   async function handleSave() {
+    if (doc.exported) {
+      const ok = await confirmAction({
+        title: 'Save again?',
+        message: 'This document has already been saved to Excel. Save again?',
+        confirmLabel: 'Yes, Save Again',
+      })
+      if (!ok) return
+    }
     try {
       const message = await saveMutation.mutateAsync(doc._id)
       if (message) toast.success(message)
@@ -73,7 +82,7 @@ export default function DocumentCard({ doc }) {
             disabled={saveMutation.isPending}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-3 py-3 text-[14.7px] font-black text-white shadow-[0_16px_38px_rgba(16,185,129,0.28)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_48px_rgba(16,185,129,0.38)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {saveMutation.isPending ? 'Saving...' : 'Save'}
+            {saveMutation.isPending ? 'Saving...' : doc.exported ? 'Save Again' : 'Save'}
           </button>
         ) : (
           <span className="inline-flex cursor-not-allowed items-center justify-center rounded-xl border border-white/8 bg-white/[0.025] px-3 py-3 text-[14.7px] font-bold text-slate-600">

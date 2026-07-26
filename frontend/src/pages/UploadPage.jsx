@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { AlertCircle, Check, AlertTriangle } from 'lucide-react'
 import { uploadDocument, getDocument, bulkUploadDocuments, correctDocument } from '../api/documents'
+import { saveDocument } from '../api/excel'
 import { validateDocumentFile } from '../utils/documentValidation'
 import UploadCard from '../components/UploadCard'
 import CorrectionModal from '../components/CorrectionModal'
+import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
 const LOW_CONFIDENCE_THRESHOLD = 80
@@ -328,6 +331,7 @@ export default function UploadPage() {
               referenceNoConfidence: polled.referenceNoConfidence,
               numberConfidence: polled.numberConfidence,
               dateConfidence: polled.dateConfidence,
+              exported: polled.exported,
             }
           }
           if (polled?.uploadStatus === 'failed') return { docId: f.docId, status: 'failed', error: polled.processingError || 'Processing failed.' }
@@ -356,6 +360,7 @@ export default function UploadPage() {
             referenceNoConfidence: u.referenceNoConfidence,
             numberConfidence: u.numberConfidence,
             dateConfidence: u.dateConfidence,
+            exported: u.exported,
           }
         }))
       }
@@ -403,6 +408,33 @@ export default function UploadPage() {
     mutationFn: ({ docId, field, value }) => correctDocument(docId, field, value),
   })
 
+  // Exposes the same saveDocument() flow used on DocumentDetailPage/
+  // DocumentCard directly from the paginated bulk-review card, so the user
+  // never has to leave this view to export what they're already reviewing.
+  const reviewSaveMutation = useMutation({
+    mutationFn: (docId) => saveDocument(docId),
+  })
+
+  async function handleReviewSave(docId, alreadyExported) {
+    if (alreadyExported) {
+      const ok = await confirmAction({
+        title: 'Save again?',
+        message: 'This document has already been saved to Excel. Save again?',
+        confirmLabel: 'Yes, Save Again',
+      })
+      if (!ok) return
+    }
+    try {
+      const message = await reviewSaveMutation.mutateAsync(docId)
+      if (message) {
+        toast.success(message)
+        setBulkFiles((prev) => prev.map((f) => (f.docId === docId ? { ...f, exported: true } : f)))
+      }
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not save this document to Excel. Please try again.')
+    }
+  }
+
   async function handleReviewCorrect(field, newValue) {
     try {
       const updated = await reviewCorrectMutation.mutateAsync({ docId: field.docId, field: field.key, value: newValue })
@@ -417,6 +449,7 @@ export default function UploadPage() {
             referenceNoConfidence: updated.referenceNoConfidence,
             numberConfidence: updated.numberConfidence,
             dateConfidence: updated.dateConfidence,
+            exported: updated.exported,
           }
         : f)))
       setReviewEditingField(null)
@@ -511,6 +544,19 @@ export default function UploadPage() {
 
                     {reviewItem.status === 'done' ? (
                       <div className="space-y-2">
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => handleReviewSave(reviewItem.docId, reviewItem.exported)}
+                            disabled={reviewSaveMutation.isPending}
+                            className="rounded-lg bg-emerald-700 px-4 py-2 text-[12.6px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {reviewSaveMutation.isPending
+                              ? 'Saving...'
+                              : reviewItem.exported
+                                ? 'Save Again'
+                                : 'Save to Excel'}
+                          </button>
+                        </div>
                         {reviewFieldsFor(reviewItem).map((f) => {
                           const isLow = f.confidence == null || f.confidence < LOW_CONFIDENCE_THRESHOLD
                           return (

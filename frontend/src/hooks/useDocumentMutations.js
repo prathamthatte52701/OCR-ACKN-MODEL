@@ -47,8 +47,16 @@ export function useSaveDocumentMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (docId) => saveDocument(docId),
-    onSuccess: () => {
+    // docId is the mutationFn's own argument here (this mutation is shared
+    // across whichever document is saved, not scoped to one id like the
+    // hooks above) - invalidate that specific document's cached detail/list
+    // entries too, not just export history, so `exported` flips to true
+    // immediately and a second Save shows the "Save Again" confirmation
+    // without needing a manual refetch/reload first.
+    onSuccess: (_message, docId) => {
       queryClient.invalidateQueries({ queryKey: ['exports', 'history'] })
+      queryClient.invalidateQueries({ queryKey: documentKeys.detail(docId) })
+      queryClient.invalidateQueries({ queryKey: ['documents', 'list'] })
     },
   })
 }

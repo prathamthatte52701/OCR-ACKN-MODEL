@@ -147,6 +147,7 @@ async def _validate_and_store(
             "filePurged": False,
             "filePurgedAt": None,
             "edited": False,
+            "exported": False,
             "isDeleted": False,
             "createdAt": now,
             "updatedAt": now,
@@ -372,6 +373,7 @@ async def reprocess_document(
                 "number": None,
                 "date": None,
                 "edited": False,
+                "exported": False,
                 "updatedAt": datetime.now(UTC),
             }
         },
@@ -517,6 +519,9 @@ async def correct_document(
     set_fields = {
         body.field: value,
         "edited": True,
+        # A correction changes what would be written to Excel - the previous
+        # export (if any) no longer reflects this document's current values.
+        "exported": False,
         # Manually verified by the user - no longer a "please verify" case.
         f"{body.field}Confidence": 100,
         "updatedAt": now,

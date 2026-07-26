@@ -305,6 +305,11 @@ async def save_document_to_excel(
             "updatedAt": now,
         }
     )
+    # No limit on Save Again - this just flips the flag so the frontend can
+    # show a "you've already saved this one" confirmation before a repeat
+    # save, not a block. Every save still logs its own ExportedRow above and
+    # its own audit_log entry below, repeats included, by design.
+    await db.documents.update_one({"_id": doc["_id"]}, {"$set": {"exported": True}})
 
     from app.core.audit_log import log_action
 
