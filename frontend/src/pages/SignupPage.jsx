@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { validateUsername, validateEmail, validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -94,6 +95,13 @@ export default function SignupPage() {
             {submitting ? 'Creating account...' : 'Sign up'}
           </button>
         </form>
+
+        <div className="my-5 flex items-center gap-3 text-[11.6px] font-semibold uppercase tracking-wide text-slate-600">
+          <span className="h-px flex-1 bg-white/10" />
+          or
+          <span className="h-px flex-1 bg-white/10" />
+        </div>
+        <GoogleSignInButton />
 
         <p className="mt-5 text-center text-[13.6px] text-slate-500">
           Already have an account? <Link to="/login" className="font-semibold text-blue-300 no-underline hover:text-blue-200">Log in</Link>

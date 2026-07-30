@@ -49,6 +49,12 @@ function DocumentsError({ message, onRetry }) {
 
 const PAGE_SIZE = 30
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
+const DATE_RANGES = [
+  { value: 'today', label: 'Today' },
+  { value: 'week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+  { value: 'year', label: 'This Year' },
+]
 
 export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -56,19 +62,21 @@ export default function DocumentsPage() {
   const dateQuery = searchParams.get('date') || ''
   const isSearching = Boolean(numberQuery || dateQuery)
   const selectedType = DOCUMENT_TYPES.includes(searchParams.get('type')) ? searchParams.get('type') : DOCUMENT_TYPES[0]
+  const rangeParam = searchParams.get('range') || ''
+  const selectedRange = DATE_RANGES.some((r) => r.value === rangeParam) ? rangeParam : ''
 
   const [page, setPage] = useState(1)
   const newExcelFileMutation = useNewExcelFileMutation()
 
-  // A new/changed search or group tab should always land on page 1.
-  const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}`)
+  // A new/changed search, group tab, or date range should always land on page 1.
+  const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`)
   useEffect(() => {
-    const searchKey = `${numberQuery}|${dateQuery}|${selectedType}`
+    const searchKey = `${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`
     if (searchKey !== prevSearchKeyRef.current) {
       prevSearchKeyRef.current = searchKey
       setPage(1)
     }
-  }, [numberQuery, dateQuery, selectedType])
+  }, [numberQuery, dateQuery, selectedType, selectedRange])
 
   const { data, isLoading, isError, error, refetch } = useDocumentsList({
     page,
@@ -76,6 +84,7 @@ export default function DocumentsPage() {
     documentType: selectedType,
     ...(numberQuery && { number: numberQuery }),
     ...(dateQuery && { date: dateQuery }),
+    ...(selectedRange && { range: selectedRange }),
   })
 
   const documents = data?.documents || []
@@ -85,12 +94,20 @@ export default function DocumentsPage() {
   function clearSearch() {
     const next = new URLSearchParams()
     if (searchParams.get('type')) next.set('type', searchParams.get('type'))
+    if (searchParams.get('range')) next.set('range', searchParams.get('range'))
     setSearchParams(next)
   }
 
   function selectType(type) {
     const next = new URLSearchParams(searchParams)
     next.set('type', type)
+    setSearchParams(next)
+  }
+
+  function selectRange(range) {
+    const next = new URLSearchParams(searchParams)
+    if (range) next.set('range', range)
+    else next.delete('range')
     setSearchParams(next)
   }
 
@@ -136,6 +153,12 @@ export default function DocumentsPage() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/documents/view-all"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 no-underline transition-colors hover:border-blue-300/30 hover:bg-blue-500/10"
+            >
+              View All Details
+            </Link>
             <button
               onClick={handleStartNewExcelFile}
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/20 bg-slate-900/60 px-5 py-3 text-[14.7px] font-bold text-blue-200 transition-all hover:border-blue-300/45 hover:bg-blue-500/10"
@@ -165,6 +188,34 @@ export default function DocumentsPage() {
               }`}
             >
               {type}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => selectRange('')}
+            className={`rounded-2xl border px-4 py-2 text-[13.6px] font-bold transition-all ${
+              !selectedRange
+                ? 'border-blue-300/50 bg-blue-500/15 text-blue-100'
+                : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
+            }`}
+          >
+            All
+          </button>
+          {DATE_RANGES.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => selectRange(value)}
+              className={`rounded-2xl border px-4 py-2 text-[13.6px] font-bold transition-all ${
+                selectedRange === value
+                  ? 'border-blue-300/50 bg-blue-500/15 text-blue-100'
+                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
+              }`}
+            >
+              {label}
             </button>
           ))}
         </div>

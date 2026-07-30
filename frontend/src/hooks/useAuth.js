@@ -17,6 +17,12 @@ export function useAuth() {
     return data.user
   }
 
+  async function loginWithGoogle(idToken) {
+    const data = await authApi.loginWithGoogle(idToken)
+    setSession(data.token, data.user)
+    return data.user
+  }
+
   async function signup(username, email, password) {
     const data = await authApi.signup(username, email, password)
     return data.message
@@ -38,5 +44,5 @@ export function useAuth() {
     return data.user
   }
 
-  return { user, loading, login, signup, logout, updateProfile, changePassword }
+  return { user, loading, login, loginWithGoogle, signup, logout, updateProfile, changePassword }
 }

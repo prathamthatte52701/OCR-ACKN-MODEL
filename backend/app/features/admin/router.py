@@ -48,6 +48,7 @@ def _serialize_user(user: dict) -> dict:
         "email": user["email"],
         "role": user["role"],
         "tokenVersion": user["tokenVersion"],
+        "authProvider": user.get("authProvider", "local"),
         "createdAt": user.get("createdAt"),
         "updatedAt": user.get("updatedAt"),
     }

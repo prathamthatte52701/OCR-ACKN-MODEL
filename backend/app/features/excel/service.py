@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import threading
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -194,3 +195,79 @@ async def append_row(filename: str, month: str, row: dict) -> Path:
     # saves to different users'/years' workbooks never wait on each other.
     async with _get_write_lock(filename):
         return await asyncio.to_thread(_append_row_sync, filename, month, row)
+
+
+def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, bool]:
+    """Surgically deletes specific rows rather than rewriting the whole file.
+    Rows have no stable ID (see _append_row_sync), so matching is by the same
+    (Document Type, Number, Date) tuple _format_number_cell already produces
+    for the Number column - grouped into a per-sheet Counter (multiset, not a
+    set) because "Save Again" can legitimately append more than one identical
+    row for the same document, and only as many rows as are actually being
+    purged should come out, not every row that happens to match. Within a
+    sheet, matched rows are deleted bottom-most-index-first so an earlier
+    delete_rows() call never shifts the index of a row still pending
+    deletion. Returns (rows_removed, workbook_is_now_fully_empty)."""
+    target = file_path(filename)
+    if not target.exists() or not rows_to_remove:
+        return 0, False
+
+    by_sheet: dict[str, Counter] = defaultdict(Counter)
+    for row in rows_to_remove:
+        sheet_name = month_from_date(row.get("date"))
+        key = (row["documentType"], _format_number_cell(row), row.get("date"))
+        by_sheet[sheet_name][key] += 1
+
+    removed = 0
+    fully_empty = False
+    # Cross-process lock, same as _append_row_sync - a concurrent save/remove
+    # against this same physical file must never interleave with this
+    # read-modify-write.
+    with FileLock(str(_lock_path(target)), timeout=30):
+        if not target.exists():
+            return 0, False
+        workbook = openpyxl.load_workbook(target)
+        for sheet_name, counter in by_sheet.items():
+            if sheet_name not in workbook.sheetnames:
+                continue
+            sheet = workbook[sheet_name]
+            remaining = Counter(counter)
+            rows_to_delete: list[int] = []
+            for row_cells in sheet.iter_rows(min_row=2):
+                key = (row_cells[0].value, row_cells[1].value, row_cells[2].value)
+                if remaining.get(key, 0) > 0:
+                    rows_to_delete.append(row_cells[0].row)
+                    remaining[key] -= 1
+            for idx in sorted(rows_to_delete, reverse=True):
+                sheet.delete_rows(idx)
+            removed += len(rows_to_delete)
+
+        fully_empty = all(sheet.max_row <= 1 for sheet in workbook.worksheets)
+        if not fully_empty:
+            tmp_target = target.with_suffix(f".tmp{os.getpid()}.xlsx")
+            try:
+                workbook.save(tmp_target)
+                os.replace(tmp_target, target)
+            except PermissionError as exc:
+                tmp_target.unlink(missing_ok=True)
+                raise FileLockedError(
+                    f'"{target.name}" is open in Excel. Close it and try saving again.'
+                ) from exc
+            except Exception:
+                tmp_target.unlink(missing_ok=True)
+                raise
+
+    # Unlink AFTER the FileLock context exits, not inside it - on Windows a
+    # file with an open handle (the lock file itself, held by this same
+    # process for the `with` block above) cannot be deleted while that
+    # handle is still open.
+    if fully_empty:
+        target.unlink(missing_ok=True)
+        _lock_path(target).unlink(missing_ok=True)
+
+    return removed, fully_empty
+
+
+async def remove_rows(filename: str, rows_to_remove: list[dict]) -> tuple[int, bool]:
+    async with _get_write_lock(filename):
+        return await asyncio.to_thread(_remove_rows_sync, filename, rows_to_remove)

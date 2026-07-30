@@ -12,6 +12,10 @@ class LoginRequest(CamelModel):
     password: str
 
 
+class GoogleLoginRequest(CamelModel):
+    id_token: str
+
+
 class UpdateProfileRequest(CamelModel):
     username: str | None = None
     email: str | None = None

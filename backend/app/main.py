@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,23 @@ from app.features.auth.router import router as auth_router
 from app.features.documents.router import recover_interrupted_uploads
 from app.features.documents.router import router as documents_router
 from app.features.excel.router import router as excel_router
+from app.features.ocr.pipeline import ocr_lock_status
+
+
+async def _recover_interrupted_uploads_in_background() -> None:
+    """Runs post-startup, never blocks the app from serving /health or any
+    other request. Previously this ran inline before `yield` in lifespan(),
+    which meant EVERY restart - including one caused by a crash - blocked
+    the whole app (health included) until every stuck document finished a
+    full sequential OCR pass. That's the actual cause of the reported "health
+    briefly ok then next request hangs" pattern: health wasn't lying, the
+    process just hadn't reached `yield` yet on the next restart either."""
+    try:
+        recovered = await recover_interrupted_uploads()
+        if recovered:
+            logger.warning(f"Requeued {recovered} interrupted document(s) for processing.")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Interrupted-upload recovery failed: {exc}")
 
 
 @asynccontextmanager
@@ -27,9 +45,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     await connect_to_mongo()
     logger.info("MongoDB connected successfully")
-    recovered = await recover_interrupted_uploads()
-    if recovered:
-        logger.warning(f"Requeued {recovered} interrupted document(s) for processing.")
+    # Fire-and-forget, started AFTER Mongo connects but BEFORE yield returns
+    # control - the app starts serving traffic immediately while recovery
+    # runs in the background. Task is pinned to app.state so it isn't
+    # garbage-collected mid-run.
+    app.state.recovery_task = asyncio.create_task(_recover_interrupted_uploads_in_background())
     yield
     await close_mongo_connection()
     logger.info("MongoDB connection closed")
@@ -93,5 +113,9 @@ app.include_router(documents_router, prefix="/api/documents", tags=["documents"]
 
 @app.get("/health")
 @app.get("/api/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, object]:
+    # ocrLockWedged: True only if the OCR lock has been held longer than the
+    # longest legitimate single-document OCR call - distinguishes "app is up"
+    # from "app is up but the OCR subsystem is stuck." Additive field only,
+    # existing {"status": "ok"} consumers are unaffected.
+    return {"status": "ok", "ocrLockWedged": ocr_lock_status()["wedged"]}

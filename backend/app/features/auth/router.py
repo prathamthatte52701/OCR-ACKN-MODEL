@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.audit_log import log_action
+from app.core.config import settings
 from app.core.database import get_database
 from app.core.rate_limit import enforce_login_email_limit, limiter
 from app.core.security import hash_password, sign_token, verify_password
@@ -18,6 +22,7 @@ from app.features.auth.schemas import (
     ChangePasswordRequest,
     ForgotPasswordResetRequest,
     ForgotPasswordVerifyRequest,
+    GoogleLoginRequest,
     LoginRequest,
     MessageResponse,
     SignupRequest,
@@ -34,6 +39,16 @@ router = APIRouter()
 GENERIC_SIGNUP_ERROR = "Could not create your account. Please check your details and try again."
 # Same reasoning, same wording pattern, for forgot-password.
 GENERIC_FORGOT_PASSWORD_ERROR = "Username and email do not match our records."
+GOOGLE_ONLY_FORGOT_PASSWORD_ERROR = (
+    "This account uses Google Sign-In - there's no password to reset."
+)
+
+
+def _is_google_only(user: dict) -> bool:
+    # Exactly "google" (not "local+google", which still has a real
+    # passwordHash to reset) - matches the presence/absence-of-passwordHash
+    # contract used everywhere else in this file.
+    return user.get("authProvider") == "google"
 
 
 def _user_out(user: dict) -> UserOut:
@@ -108,6 +123,80 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     return TokenResponse(token=token, user=_user_out(user))
 
 
+async def _derive_google_username(db: AsyncIOMotorDatabase, email: str) -> str:
+    """New Google signups have no username to collect (GSI hands us email +
+    name/sub, not a username) - derive one from the email local-part,
+    deduped against existing usernames the same way a manual signup would
+    collide on a duplicate, since `username` has no unique index of its own
+    but validate_username caps it at 3-8 chars."""
+    base = normalize_username(email.split("@")[0])[:8] or "user"
+    if len(base) < 3:
+        base = (base + "user")[:8]
+    candidate = base
+    suffix = 1
+    while await db.users.find_one({"username": candidate}):
+        suffix_str = str(suffix)
+        candidate = f"{base[: 8 - len(suffix_str)]}{suffix_str}"
+        suffix += 1
+    return candidate
+
+
+@router.post("/google", response_model=TokenResponse)
+@limiter.limit("100/15minute")
+async def google_login(request: Request, body: GoogleLoginRequest) -> TokenResponse:
+    try:
+        payload = google_id_token.verify_oauth2_token(
+            body.id_token, google_requests.Request(), settings.google_client_id
+        )
+    except Exception:  # noqa: BLE001 - never leak verification internals to the client
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in.") from None
+
+    if not payload.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in.")
+
+    email = normalize_email(payload["email"])
+    google_id = payload["sub"]
+    await enforce_login_email_limit(request, email)
+
+    db = get_database()
+    user = await db.users.find_one({"email": email})
+    now = datetime.now(UTC)
+
+    if not user:
+        username = await _derive_google_username(db, email)
+        await db.users.insert_one(
+            {
+                "username": username,
+                "email": email,
+                "role": "user",
+                "tokenVersion": 0,
+                "authProvider": "google",
+                "googleId": google_id,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+        user = await db.users.find_one({"email": email})
+        assert user is not None
+        await log_action(user["_id"], "signup", {"email": email, "method": "google"})
+    elif "google" not in user.get("authProvider", "local"):
+        # Existing local-password account signing in with Google for the
+        # first time - link the accounts, leave passwordHash untouched so
+        # the original password keeps working.
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"authProvider": "local+google", "googleId": google_id, "updatedAt": now}},
+        )
+        user = await db.users.find_one({"_id": user["_id"]})
+        assert user is not None
+        await log_action(user["_id"], "google_account_linked", {"email": email})
+    else:
+        await log_action(user["_id"], "login", {"email": email, "method": "google"})
+
+    token = sign_token(str(user["_id"]), user["tokenVersion"], user["role"])
+    return TokenResponse(token=token, user=_user_out(user))
+
+
 @router.get("/me", response_model=dict)
 async def get_me(current_user: CurrentUser = Depends(get_current_user)) -> dict:
     db = get_database()
@@ -167,6 +256,11 @@ async def change_password(
     user = await db.users.find_one({"_id": current_user.id})
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated.")
+    if "passwordHash" not in user:
+        raise HTTPException(
+            status_code=400,
+            detail="This account uses Google Sign-In - there's no password to change.",
+        )
 
     if not verify_password(body.current_password, user["passwordHash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
@@ -206,6 +300,8 @@ async def forgot_password_verify(request: Request, body: ForgotPasswordVerifyReq
     )
     if not user:
         raise HTTPException(status_code=400, detail=GENERIC_FORGOT_PASSWORD_ERROR)
+    if _is_google_only(user):
+        raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
     return {"verified": True}
 
 
@@ -223,6 +319,8 @@ async def forgot_password_reset(
     )
     if not user:
         raise HTTPException(status_code=400, detail=GENERIC_FORGOT_PASSWORD_ERROR)
+    if _is_google_only(user):
+        raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
 
     if err := validate_password(body.new_password):
         raise HTTPException(status_code=400, detail=err)

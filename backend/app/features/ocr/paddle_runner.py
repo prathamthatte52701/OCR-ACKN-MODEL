@@ -71,7 +71,18 @@ def _get_ocr() -> Any:
                     # produces.
                     text_detection_model_name="PP-OCRv4_mobile_det",
                     text_recognition_model_name="en_PP-OCRv4_mobile_rec",
-                    use_doc_orientation_classify=False,
+                    # True at init so the (tiny, PP-LCNet_x1_0_doc_ori)
+                    # classifier model is loaded once and available - but
+                    # run_ocr always explicitly passes
+                    # use_doc_orientation_classify=False per call unless
+                    # preprocessing.py's quality gate flagged likely
+                    # misorientation, so it never actually runs (and costs no
+                    # extra time) on the default path. Measured: ~10ms
+                    # overhead on a header crop when it IS invoked - cheap
+                    # enough that gating it per-call rather than globally is
+                    # about correctness (don't fix orientation on an
+                    # already-upright scan), not about raw cost.
+                    use_doc_orientation_classify=True,
                     use_doc_unwarping=False,
                     use_textline_orientation=False,
                     # This paddlepaddle CPU build's oneDNN backend throws
@@ -92,12 +103,26 @@ def _get_ocr() -> Any:
     return _ocr_instance
 
 
-def run_ocr(image_path: str) -> str | None:
+def run_ocr(
+    image_path: str,
+    *,
+    use_doc_orientation_classify: bool = False,
+    text_det_limit_side_len: int | None = None,
+) -> str | None:
     """Blocking call - invoke via asyncio.to_thread from async code. Reuses
-    the cached PaddleOCR singleton instead of loading the model fresh."""
+    the cached PaddleOCR singleton instead of loading the model fresh.
+
+    use_doc_orientation_classify/text_det_limit_side_len are per-call
+    overrides threaded from preprocessing.py's quality gate (Feature 6) -
+    defaults reproduce the original fast path exactly (classifier off,
+    detector limit falls back to the singleton's init-time 960)."""
     try:
         ocr = _get_ocr()
-        results = ocr.predict(image_path)
+        results = ocr.predict(
+            image_path,
+            use_doc_orientation_classify=use_doc_orientation_classify,
+            text_det_limit_side_len=text_det_limit_side_len,
+        )
         lines: list[str] = []
         for r in results:
             texts = r.json.get("res", {}).get("rec_texts", [])

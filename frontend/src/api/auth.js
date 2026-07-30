@@ -4,6 +4,10 @@ export function login(email, password) {
   return api.post('/auth/login', { email, password }).then((res) => res.data)
 }
 
+export function loginWithGoogle(idToken) {
+  return api.post('/auth/google', { idToken }).then((res) => res.data)
+}
+
 export function signup(username, email, password) {
   return api.post('/auth/signup', { username, email, password }).then((res) => res.data)
 }

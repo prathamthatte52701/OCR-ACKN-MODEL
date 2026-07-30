@@ -13,9 +13,36 @@ from app.features.ocr.paddle_runner import (
     OCR_TIMEOUT_SECONDS_PDF,
     run_ocr,
 )
-from app.features.ocr.preprocessing import crop_header, get_pdf_header_text_or_image
+from app.features.ocr.preprocessing import (
+    LARGE_TEXT_DET_LIMIT,
+    LARGE_TEXT_DET_LIMIT_STEP,
+    ORIENTATION_CHECK_STEP,
+    assess_and_preprocess,
+    crop_header,
+    get_pdf_header_text_or_image,
+)
 
 _ocr_lock = asyncio.Lock()  # only 1 OCR job runs at a time - mirrors old app's single-slot queue
+
+# Timestamp the lock was last acquired, or None while free. asyncio.Lock can't
+# itself deadlock from a hard thread crash (asyncio.wait_for's timeout still
+# fires and the `async with` block still exits), but a wedge is still
+# possible if something upstream hangs holding it without going through
+# run_ocr's timeout path. Tracking this lets /health tell "OCR subsystem
+# stuck" apart from "app fine, just mid-job."
+_lock_held_since: datetime | None = None
+# Generous ceiling above the longest legitimate hold (OCR_TIMEOUT_SECONDS_IMAGE)
+# to absorb scheduling jitter before flagging a false positive.
+_LOCK_WEDGED_THRESHOLD_SECONDS = OCR_TIMEOUT_SECONDS_IMAGE + 60
+
+
+def ocr_lock_status() -> dict:
+    """Used by /health. wedged=True only if the lock has been held longer
+    than any legitimate single-document OCR call should ever take."""
+    if _lock_held_since is None:
+        return {"held": False, "wedged": False}
+    held_seconds = (datetime.now(UTC) - _lock_held_since).total_seconds()
+    return {"held": True, "wedged": held_seconds > _LOCK_WEDGED_THRESHOLD_SECONDS}
 
 
 async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
@@ -32,6 +59,18 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         else:
             image_bytes = crop_header(buffer)
 
+        # Feature 6: quality-gated preprocessing on the header crop itself -
+        # skips straight through (unmodified bytes) when the crop is already
+        # good quality. See preprocessing.py's module-level docstring for the
+        # scope boundaries (header-only, not full-page rotation recovery).
+        image_bytes, preprocess_steps = assess_and_preprocess(image_bytes)
+        if preprocess_steps:
+            logger.info(f"OCR preprocessing steps triggered: {preprocess_steps}")
+        use_doc_orientation_classify = ORIENTATION_CHECK_STEP in preprocess_steps
+        text_det_limit_side_len = (
+            LARGE_TEXT_DET_LIMIT if LARGE_TEXT_DET_LIMIT_STEP in preprocess_steps else None
+        )
+
         # Timeout is keyed on the ORIGINAL upload's mime type, not the
         # post-processing form (a PDF page is also "an image" by the time it
         # reaches run_ocr, but should keep the PDF budget).
@@ -44,13 +83,23 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(image_bytes)
+            global _lock_held_since
             async with _ocr_lock:
+                _lock_held_since = datetime.now(UTC)
                 try:
                     text = await asyncio.wait_for(
-                        asyncio.to_thread(run_ocr, tmp_path), timeout=timeout
+                        asyncio.to_thread(
+                            run_ocr,
+                            tmp_path,
+                            use_doc_orientation_classify=use_doc_orientation_classify,
+                            text_det_limit_side_len=text_det_limit_side_len,
+                        ),
+                        timeout=timeout,
                     )
                 except TimeoutError:
                     text = None
+                finally:
+                    _lock_held_since = None
             return text
         finally:
             try:

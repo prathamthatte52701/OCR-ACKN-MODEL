@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     admin_origin: str = Field(default="http://localhost:5175", alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
     admin_2_password: str = Field(default="", alias="ADMIN_2_PASSWORD")
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
 
     @field_validator("jwt_secret")
     @classmethod

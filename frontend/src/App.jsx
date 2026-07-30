@@ -14,6 +14,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import Dashboard from './pages/Dashboard'
 import UploadPage from './pages/UploadPage'
 import DocumentsPage from './pages/DocumentsPage'
+import DocumentsViewAllPage from './pages/DocumentsViewAllPage'
 import DocumentDetailPage from './pages/DocumentDetailPage'
 import ExportHistoryPage from './pages/ExportHistoryPage'
 import ProfilePage from './pages/ProfilePage'
@@ -44,6 +45,7 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/upload" element={<UploadPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/documents/view-all" element={<DocumentsViewAllPage />} />
                 <Route path="/documents/:id" element={<DocumentDetailPage />} />
                 <Route path="/export-history" element={<ExportHistoryPage />} />
                 <Route path="/profile" element={<ProfilePage />} />

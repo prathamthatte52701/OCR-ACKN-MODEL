@@ -57,6 +57,22 @@ export function trainingStats() {
 // Full nuclear delete - irreversible, wipes every record this user owns
 // (documents, GridFS files, workbooks, settings, export log). Distinct
 // from deleteDocument()/purgeDocumentFile() above, which act on one document.
-export function purgeAllData() {
-  return api.delete('/documents/purge-all').then((res) => res.data)
+// Gated server-side behind password + typed phrase - body: { password, confirmationPhrase }.
+export function purgeAllData(body) {
+  return api.delete('/documents/purge-all', { data: body }).then((res) => res.data)
+}
+
+// Read-only - previews how many documents/how much data an age-bucket or
+// specific-year purge would remove, before the user confirms anything.
+// params: { olderThanMonths } or { year }.
+export function purgeRangePreview(params) {
+  return api.get('/documents/purge-range/preview', { params }).then((res) => res.data)
+}
+
+// Partial delete - same password + typed phrase gate as purgeAllData, plus
+// either olderThanMonths or year. Surgically removes just the matching Excel
+// rows (or the whole workbook file if that empties it) rather than wiping
+// everything.
+export function purgeRange(body) {
+  return api.delete('/documents/purge-range', { data: body }).then((res) => res.data)
 }

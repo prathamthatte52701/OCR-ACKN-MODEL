@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import PasswordInput from '../components/PasswordInput'
+import GoogleSignInButton from '../components/GoogleSignInButton'
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -84,6 +85,13 @@ export default function LoginPage() {
             {submitting ? 'Logging in...' : 'Log in'}
           </button>
         </form>
+
+        <div className="my-5 flex items-center gap-3 text-[11.6px] font-semibold uppercase tracking-wide text-slate-600">
+          <span className="h-px flex-1 bg-white/10" />
+          or
+          <span className="h-px flex-1 bg-white/10" />
+        </div>
+        <GoogleSignInButton />
 
         <p className="mt-5 text-center text-[13.6px] text-slate-500">
           No account? <Link to="/signup" className="font-semibold text-blue-300 no-underline hover:text-blue-200">Sign up</Link>
