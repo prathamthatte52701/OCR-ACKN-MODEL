@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { getDocument, listDocuments, trainingStats } from '../api/documents'
+import { getDocument, listDocuments, myActivity, trainingStats } from '../api/documents'
 import { exportHistory } from '../api/excel'
 
 export const documentKeys = {
   list: (params) => ['documents', 'list', params],
   detail: (id) => ['documents', 'detail', id],
   trainingStats: ['documents', 'training-stats'],
+  myActivity: (params) => ['documents', 'my-activity', params],
 }
 
 export function useDocumentsList(params, options = {}) {
@@ -56,5 +57,12 @@ export function useExportHistory() {
   return useQuery({
     queryKey: ['exports', 'history'],
     queryFn: exportHistory,
+  })
+}
+
+export function useMyActivity(params) {
+  return useQuery({
+    queryKey: documentKeys.myActivity(params),
+    queryFn: () => myActivity(params),
   })
 }

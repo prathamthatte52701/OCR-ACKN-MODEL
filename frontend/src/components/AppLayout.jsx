@@ -8,6 +8,7 @@ const navLinks = [
   { to: '/upload', label: 'Upload' },
   { to: '/documents', label: 'My Documents' },
   { to: '/export-history', label: 'Export History' },
+  { to: '/my-activity', label: 'My Activity' },
   { to: '/help', label: 'Help' },
 ]
 

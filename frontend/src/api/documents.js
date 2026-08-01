@@ -53,3 +53,10 @@ export function downloadDocument(id, fallbackFilename) {
 export function trainingStats() {
   return api.get('/documents/training-stats').then((res) => res.data)
 }
+
+// Read-only timeline of the current user's own activity (auditlogs, scoped
+// server-side to the JWT's user id - no id param to pass here). params:
+// { page, limit } - defaults to 40/page server-side if omitted.
+export function myActivity(params) {
+  return api.get('/documents/my-activity', { params }).then((res) => res.data)
+}

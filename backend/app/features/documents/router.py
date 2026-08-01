@@ -343,6 +343,101 @@ async def training_stats(current_user: CurrentUser = Depends(get_current_user)) 
     return {"trainedCount": trained_count, "correctedCount": corrected_count}
 
 
+# Action types relevant to a regular user's own "My Activity" timeline -
+# admin-only/system entries (login, signup, password_change, user_updated,
+# admin_nuke_*, orphaned_file_*, purge_*_blocked, ...) are deliberately
+# excluded. Only "document_deleted" and "document_file_purged" are actually
+# logged for a user's own documents today (upload/OCR-processing, manual
+# corrections, and reprocess don't call log_action anywhere in this
+# codebase - corrections go to the separate `corrections` collection
+# instead) - the other names are listed for forward-compatibility only, so
+# nothing else needs to change here if logging is ever added for them.
+MY_ACTIVITY_ACTIONS = [
+    "document_processed",
+    "document_uploaded",
+    "document_corrected",
+    "document_edited",
+    "document_deleted",
+    "document_file_purged",
+    "document_reprocessed",
+]
+
+
+def _serialize_activity(log: dict, doc_lookup: dict) -> dict:
+    context = log.get("context") or {}
+    doc = doc_lookup.get(context.get("documentId"))
+    return {
+        "id": str(log["_id"]),
+        "action": log["action"],
+        "context": context,
+        "createdAt": log.get("createdAt"),
+        "document": (
+            {
+                "id": str(doc["_id"]),
+                "documentType": doc.get("documentType"),
+                "number": doc.get("taxInvoiceNo") or doc.get("number"),
+                "date": doc.get("date"),
+            }
+            if doc
+            else None
+        ),
+    }
+
+
+@router.get("/my-activity")
+async def my_activity(
+    page: int | None = Query(default=None),
+    limit: int | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Read-only timeline of the authenticated user's OWN activity, sourced
+    entirely from the existing auditlogs collection - no new logging, no
+    change to what gets logged or when. Always scoped to current_user.id
+    from the JWT (re-verified via get_current_user, same as every other
+    user-scoped route) - there is no id parameter here for a caller to
+    manipulate. Paginated at 40/page, distinct from the 30/page used
+    elsewhere - intentional, not a bug. Registered before GET /{doc_id} so
+    "my-activity" is never matched as a doc_id (same reasoning as the
+    former /purge-* routes)."""
+    db = get_database()
+    lim = max(1, limit or 40)
+    pg = max(1, page or 1)
+    skip = (pg - 1) * lim
+    filt = {"userId": current_user.id, "action": {"$in": MY_ACTIVITY_ACTIONS}}
+
+    total = await db.auditlogs.count_documents(filt)
+    cursor = db.auditlogs.find(filt).sort("createdAt", -1).skip(skip).limit(lim)
+    logs = await cursor.to_list(length=None)
+
+    doc_ids: list[ObjectId] = []
+    for log in logs:
+        doc_id_str = (log.get("context") or {}).get("documentId")
+        if doc_id_str:
+            try:
+                doc_ids.append(ObjectId(doc_id_str))
+            except Exception:  # noqa: BLE001
+                pass
+    doc_lookup: dict[str, dict] = {}
+    if doc_ids:
+        # Deliberately unfiltered by isDeleted - a soft-deleted document
+        # still has a live record and should still resolve here; only a
+        # hard-deleted one (no tier of delete in this app does that to a
+        # user's OWN documents today) would fail this lookup, which is
+        # exactly the "log entry persists independently" behavior wanted.
+        async for d in db.documents.find(
+            {"_id": {"$in": doc_ids}},
+            {"documentType": 1, "taxInvoiceNo": 1, "number": 1, "date": 1},
+        ):
+            doc_lookup[str(d["_id"])] = d
+
+    return {
+        "activity": [_serialize_activity(log, doc_lookup) for log in logs],
+        "totalActivity": total,
+        "totalPages": max(1, -(-total // lim)),
+        "currentPage": pg,
+    }
+
+
 async def _get_owned_document(doc_id: PyObjectId, user_id: ObjectId) -> dict:
     db = get_database()
     doc = await db.documents.find_one(
