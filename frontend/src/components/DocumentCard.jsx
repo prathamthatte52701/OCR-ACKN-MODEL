@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { displayNumber } from '../utils/documentDisplay'
+import { confidenceBorder } from '../utils/confidence'
 import { useSaveDocumentMutation } from '../hooks/useDocumentMutations'
 import { confirmAction } from '../store/dialogStore'
 
@@ -25,9 +26,10 @@ function StatusBadge({ status }) {
   )
 }
 
-export default function DocumentCard({ doc }) {
+export default function DocumentCard({ doc, serialNumber }) {
   const status = doc.uploadStatus || 'uploaded'
   const saveMutation = useSaveDocumentMutation()
+  const border = confidenceBorder(doc)
 
   async function handleSave() {
     if (doc.exported) {
@@ -47,13 +49,20 @@ export default function DocumentCard({ doc }) {
   }
 
   return (
-    <article className="group relative overflow-hidden rounded-3xl border border-blue-300/12 bg-slate-900/64 p-5 shadow-[0_24px_90px_rgba(2,8,23,0.34)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-blue-300/40 hover:shadow-[0_28px_110px_rgba(37,99,235,0.16)]">
+    <article className={`group relative overflow-hidden rounded-3xl border-2 ${border.base} bg-slate-900/64 p-5 shadow-[0_24px_90px_rgba(2,8,23,0.34)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 ${border.hover} hover:shadow-[0_28px_110px_rgba(37,99,235,0.16)]`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_0%_0%,rgba(37,99,235,0.22),transparent_26%),linear-gradient(135deg,rgba(59,130,246,0.08),transparent_42%)] opacity-80" />
 
       <div className="relative flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-lg font-black tracking-tight text-white">{doc.autoName}</h3>
-          <p className="mt-1 truncate text-[14.7px] text-slate-500">{doc.documentType}</p>
+        <div className="flex min-w-0 items-start gap-2.5">
+          {serialNumber != null && (
+            <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border border-white/12 bg-white/[0.04] text-[11.6px] font-black text-slate-400">
+              {serialNumber}
+            </span>
+          )}
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-black tracking-tight text-white">{doc.autoName}</h3>
+            <p className="mt-1 truncate text-[14.7px] text-slate-500">{doc.documentType}</p>
+          </div>
         </div>
         <StatusBadge status={status} />
       </div>

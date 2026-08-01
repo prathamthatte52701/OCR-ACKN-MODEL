@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { FileText } from 'lucide-react'
 import DocumentCard from './DocumentCard'
 
-export default function DocumentList({ documents }) {
+export default function DocumentList({ documents, startIndex = 0 }) {
   if (!documents || documents.length === 0) {
     return (
       <div className="rounded-[30px] border border-blue-300/12 bg-slate-900/62 p-10 text-center shadow-[0_28px_100px_rgba(2,8,23,0.35)] backdrop-blur-xl">
@@ -25,8 +25,8 @@ export default function DocumentList({ documents }) {
 
   return (
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-      {documents.map((doc) => (
-        <DocumentCard key={doc._id} doc={doc} />
+      {documents.map((doc, index) => (
+        <DocumentCard key={doc._id} doc={doc} serialNumber={startIndex + index + 1} />
       ))}
     </div>
   )

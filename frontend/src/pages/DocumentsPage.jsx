@@ -241,21 +241,29 @@ export default function DocumentsPage() {
           </div>
         </div>
 
-        <div className="mb-6 flex gap-2">
-          {DOCUMENT_TYPES.map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => selectType(type)}
-              className={`flex-1 rounded-2xl border px-4 py-2.5 text-[13.6px] font-bold transition-all sm:flex-none ${
-                selectedType === type
-                  ? 'border-blue-300/50 bg-blue-500/15 text-blue-100'
-                  : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
-              }`}
-            >
-              {type}
-            </button>
-          ))}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-2">
+            {DOCUMENT_TYPES.map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => selectType(type)}
+                className={`flex-1 rounded-2xl border px-4 py-2.5 text-[13.6px] font-bold transition-all sm:flex-none ${
+                  selectedType === type
+                    ? 'border-blue-300/50 bg-blue-500/15 text-blue-100'
+                    : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
+                }`}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+          <div className="inline-flex items-center gap-2.5 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-4 py-2 shadow-[0_0_28px_rgba(37,99,235,0.15)]">
+            <span className="text-2xl font-black leading-none text-white">{isLoading ? '-' : totalDocuments}</span>
+            <span className="text-[12.6px] font-bold uppercase tracking-wide text-blue-300">
+              {selectedType}{totalDocuments !== 1 ? 's' : ''} total
+            </span>
+          </div>
         </div>
 
         <div className="mb-6 flex flex-wrap gap-2">
@@ -324,7 +332,7 @@ export default function DocumentsPage() {
                 {bulkSaveMutation.isPending ? `Saving ${documents.length}...` : `Save All (${documents.length} on this page)`}
               </button>
             </div>
-            <DocumentList documents={documents} />
+            <DocumentList documents={documents} startIndex={(page - 1) * PAGE_SIZE} />
             {totalPages > 1 && (
               <div className="mt-8 flex items-center justify-center gap-4">
                 <button

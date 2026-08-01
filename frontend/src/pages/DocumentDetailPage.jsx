@@ -176,6 +176,7 @@ export default function DocumentDetailPage() {
   async function handleDownload() {
     try {
       await downloadDocument(id, doc.originalFilename)
+      toast.success('Original file downloaded.')
     } catch (err) {
       toast.error(err.userMessage || 'Could not download the original file. Please try again.')
     }
