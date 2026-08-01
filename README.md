@@ -8,6 +8,34 @@ and an admin panel with cross-user CRUD + telemetry.
 Python/FastAPI rewrite of an earlier Node.js/Express app — same product,
 new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 
+## Recent features
+
+- **Google Sign-In** — alongside the existing email/password login, on both
+  the login and signup pages. Same JWT/session contract as normal login, so
+  nothing else in the app needed to change. Existing accounts with a
+  matching email get linked automatically instead of creating a duplicate
+  user. Google-only accounts (no password set) are blocked from the
+  forgot-password flow, since there's no password to reset.
+- **Bulk-upload crash fix** — the app used to briefly hang after a restart
+  because startup recovery of interrupted uploads ran before the server
+  started accepting requests at all. That recovery step now runs in the
+  background after the app is already serving traffic, so `/health` and
+  every other route stay responsive immediately on startup.
+- **Date-range filter** on the Documents page — Today / This Week / This
+  Month / This Year, alongside the existing document-type and pagination
+  filters.
+- **View All Details** — a read-only, spreadsheet-style page
+  (`/documents/view-all`) showing every saved document's extracted fields
+  in one table, matching what the real Excel export contains.
+- **Admin nuclear/age-based delete** — admins can permanently wipe a user's
+  documents (full account or just documents older than a chosen age/year),
+  gated behind a typed-confirmation-phrase + password dialog. This lives in
+  the admin app only, not the main user-facing app.
+- **Smarter OCR preprocessing** — before running OCR, a quick quality check
+  (blur, tilt, contrast, lighting) decides whether a scan needs cleanup
+  first. Good scans skip straight to OCR unchanged; only rough scans get
+  the extra processing, so normal uploads aren't slowed down.
+
 ## Stack
 
 - **Backend**: FastAPI, Motor (async MongoDB), PaddleOCR (CPU), Groq (field
@@ -51,6 +79,7 @@ Required env vars (`backend/.env`):
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |
 | `ADMIN_1_PASSWORD` / `ADMIN_2_PASSWORD` | only for seeding | plaintext used once by the seed script, then only the bcrypt hash is stored |
+| `GOOGLE_CLIENT_ID` | only for Google Sign-In | verifies Google ID tokens server-side; frontend needs the matching `VITE_GOOGLE_CLIENT_ID` in its own `.env`. Without it, Google Sign-In simply doesn't render — email/password login is unaffected |
 
 Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
 the app refuse to start with a clear error — it will never silently boot

@@ -200,11 +200,11 @@ established pattern for filter state on list pages (see
 shareable/bookmarkable; follow it for new filters rather than local state.
 No table library is installed — the existing plain-`<table>` pattern in
 `admin/src/pages/AdminDocumentsPage.jsx` is the reuse point for any new
-tabular view rather than adding one. Destructive account-wide actions use a
-typed-confirmation-phrase dialog pattern (see `ProfilePage.jsx`'s
-`HardDeleteEverythingDialog`), distinct from the shared one-click
-`GlobalConfirmDialog`/`confirmAction()` (`store/dialogStore.js`) used for
-lighter confirmations.
+tabular view rather than adding one. The frontend's own destructive actions
+(Delete, File Delete) use the shared one-click `GlobalConfirmDialog`/
+`confirmAction()` (`store/dialogStore.js`); only admin's Nuke Delete uses a
+typed-confirmation-phrase + double-password dialog (`ConfirmPurgeModal.jsx`)
+— there is no equivalent typed-phrase dialog anywhere on the main frontend.
 
 ## Known gotchas / gaps (read before touching these areas)
 
