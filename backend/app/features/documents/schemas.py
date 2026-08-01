@@ -1,5 +1,3 @@
-from typing import Literal
-
 from app.core.base_model import CamelModel
 
 
@@ -33,21 +31,13 @@ class MessageResponse(CamelModel):
     message: str
 
 
-class ConfirmedDeleteRequest(CamelModel):
-    """Shared confirmation gate for irreversible bulk-delete actions:
-    re-entering the account password plus a typed confirmation phrase
-    (checked against a per-action expected value in the router). There is no
-    email/OTP channel anywhere in this app (see CLAUDE.md), so this is the
-    whole gate - no separate token/one-time-key mechanism."""
+class PurgeFileResponse(MessageResponse):
+    """gridFsCleanupFailed lets the frontend distinguish a fully-clean purge
+    from one where the document's metadata was purged successfully but the
+    underlying GridFS binary couldn't be removed (tracked in orphanedfiles,
+    see app.core.orphaned_files) - the action itself still succeeded from
+    the user's perspective, this is purely an extra signal for the UI to
+    show a softer "flagged for admin review" message instead of the normal
+    success toast."""
 
-    password: str
-    confirmation_phrase: str
-
-
-class PurgeRangeRequest(ConfirmedDeleteRequest):
-    """Exactly one of older_than_months/year must be set - validated in the
-    router (single source of truth, shared with the read-only preview
-    endpoint's query params)."""
-
-    older_than_months: Literal[3, 6, 9] | None = None
-    year: int | None = None
+    grid_fs_cleanup_failed: bool = False

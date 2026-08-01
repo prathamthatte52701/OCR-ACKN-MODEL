@@ -112,7 +112,16 @@ export default function DocumentDetailPage() {
     if (!ok) return
     try {
       const result = await purgeMutation.mutateAsync()
-      toast.success(result.message || 'Original file permanently removed.')
+      if (result.gridFsCleanupFailed) {
+        toast.warning(
+          result.message ||
+            "Your document's data was removed, but we couldn't fully clean up the original " +
+              'file due to a system issue. This has been flagged for admin review - no action ' +
+              'needed from you.'
+        )
+      } else {
+        toast.success(result.message || 'Original file permanently removed.')
+      }
     } catch (err) {
       toast.error(err.userMessage || 'Could not remove the original file. Please try again.')
     }

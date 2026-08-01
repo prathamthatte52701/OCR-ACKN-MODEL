@@ -13,6 +13,7 @@ import AdminUserDetailPage from './pages/AdminUserDetailPage'
 import AdminDocumentsPage from './pages/AdminDocumentsPage'
 import AdminWorkbooksPage from './pages/AdminWorkbooksPage'
 import AdminLogsPage from './pages/AdminLogsPage'
+import AdminOrphanedFilesPage from './pages/AdminOrphanedFilesPage'
 
 function FadeIn({ children }) {
   return (
@@ -43,6 +44,7 @@ function AppRoutes() {
             <Route path="/documents" element={<FadeIn><AdminDocumentsPage /></FadeIn>} />
             <Route path="/workbooks" element={<FadeIn><AdminWorkbooksPage /></FadeIn>} />
             <Route path="/logs" element={<FadeIn><AdminLogsPage /></FadeIn>} />
+            <Route path="/orphaned-files" element={<FadeIn><AdminOrphanedFilesPage /></FadeIn>} />
             <Route path="/profile" element={<FadeIn><AdminProfilePage /></FadeIn>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

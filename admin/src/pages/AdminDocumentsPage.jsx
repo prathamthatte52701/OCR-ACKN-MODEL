@@ -136,7 +136,11 @@ export default function AdminDocumentsPage() {
     setSuccess('')
     try {
       const res = await api.post(`/admin/documents/${doc._id}/purge-file`)
-      setSuccess(res.data.message || 'Original file removed.')
+      if (res.data.gridFsCleanupFailed) {
+        setError(res.data.message || 'Document data was removed, but the file cleanup failed - see Orphaned Files.')
+      } else {
+        setSuccess(res.data.message || 'Original file removed.')
+      }
       setPurgingDoc(null)
       load(page)
     } catch (err) {

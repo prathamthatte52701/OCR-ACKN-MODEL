@@ -1,5 +1,4 @@
 import re
-from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
@@ -22,17 +21,11 @@ from loguru import logger
 from app.core.audit_log import log_action
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
+from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import limiter
-from app.core.security import verify_password
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
-from app.features.documents.schemas import (
-    ConfirmedDeleteRequest,
-    CorrectRequest,
-    MessageResponse,
-    PurgeRangeRequest,
-)
-from app.features.excel import service as excel_service
+from app.features.documents.schemas import CorrectRequest, MessageResponse, PurgeFileResponse
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
@@ -350,98 +343,6 @@ async def training_stats(current_user: CurrentUser = Depends(get_current_user)) 
     return {"trainedCount": trained_count, "correctedCount": corrected_count}
 
 
-def _build_range_filter(
-    user_id: ObjectId, older_than_months: int | None, year: int | None
-) -> tuple[dict, datetime | None, datetime | None]:
-    """Shared by the read-only preview and the actual purge-range delete, so
-    "what will be deleted" and "what gets deleted" can never drift apart.
-    Exactly one of older_than_months/year must be set (400 otherwise) - the
-    single validation point for both endpoints."""
-    if (older_than_months is None) == (year is None):
-        raise HTTPException(
-            status_code=400, detail="Specify exactly one of olderThanMonths or year."
-        )
-    # older_than_months arrives typed as plain int (not Literal[3, 6, 9]) on
-    # the GET preview's Query param - FastAPI/pydantic Literal validation
-    # doesn't coerce a query string ("6") the way it coerces JSON body
-    # numbers, so the DELETE body keeps the Literal (422 on garbage there);
-    # this is the one shared checkpoint for both callers.
-    if older_than_months is not None and older_than_months not in (3, 6, 9):
-        raise HTTPException(status_code=400, detail="olderThanMonths must be 3, 6, or 9.")
-    filter_query: dict = {"userId": user_id, "isDeleted": {"$ne": True}}
-    if year is not None:
-        range_start = datetime(year, 1, 1, tzinfo=UTC)
-        range_end = datetime(year + 1, 1, 1, tzinfo=UTC)
-        filter_query["createdAt"] = {"$gte": range_start, "$lt": range_end}
-        return filter_query, range_start, range_end
-
-    # Rolling window from "now", not calendar-aligned - N*30 days, same
-    # simplifying convention this file already uses for RANGE_DAYS above
-    # (deterministic, avoids month-length/timezone-boundary edge cases).
-    assert older_than_months is not None  # guaranteed by the XOR check above
-    range_end = datetime.now(UTC) - timedelta(days=older_than_months * 30)
-    filter_query["createdAt"] = {"$lt": range_end}
-    return filter_query, None, range_end
-
-
-@router.get("/purge-range/preview")
-async def purge_range_preview(
-    older_than_months: int | None = Query(default=None, alias="olderThanMonths"),
-    year: int | None = Query(default=None),
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    """Read-only - no confirmation needed. Registered before GET /{doc_id} so
-    "purge-range" is never matched as a doc_id (same reasoning as DELETE
-    /purge-all above DELETE /{doc_id})."""
-    db = get_database()
-    filter_query, range_start, range_end = _build_range_filter(
-        current_user.id, older_than_months, year
-    )
-    docs = await db.documents.find(filter_query, {"size": 1}).to_list(None)
-    return {
-        "count": len(docs),
-        "dateRangeStart": range_start,
-        "dateRangeEnd": range_end,
-        "approxSizeBytes": sum(d.get("size") or 0 for d in docs),
-    }
-
-
-async def _verify_delete_confirmation(
-    current_user: CurrentUser,
-    body: ConfirmedDeleteRequest,
-    expected_phrase: str,
-    blocked_action: str,
-) -> None:
-    """Shared gate for both irreversible bulk-delete endpoints. Re-fetches the
-    user (never trusts anything off the JWT) and requires BOTH the account
-    password and an exact typed phrase - there's no email/OTP channel
-    anywhere in this app to use instead (see CLAUDE.md). Every blocked
-    attempt is audit-logged before raising; the caller logs the success case
-    itself once the actual delete completes."""
-    # 400, not 401, for the password/no-password failures below: the axios
-    # client interceptor (client.js) treats ANY 401 outside /auth/* as an
-    # expired session - it force-clears the token and redirects to /login.
-    # That's correct for a stale JWT but would be a broken UX here (kicks the
-    # user off the Danger Zone dialog they're actively filling in just
-    # because they mistyped their password).
-    db = get_database()
-    user = await db.users.find_one({"_id": current_user.id})
-    if not user or "passwordHash" not in user:
-        await log_action(current_user.id, blocked_action, {"reason": "no_password"})
-        raise HTTPException(
-            status_code=400,
-            detail="This account uses Google Sign-In - there's no password to confirm with.",
-        )
-    if not verify_password(body.password, user["passwordHash"]):
-        await log_action(current_user.id, blocked_action, {"reason": "wrong_password"})
-        raise HTTPException(status_code=400, detail="Incorrect password.")
-    if body.confirmation_phrase != expected_phrase:
-        await log_action(current_user.id, blocked_action, {"reason": "wrong_phrase"})
-        raise HTTPException(
-            status_code=400, detail=f'Confirmation phrase must be exactly "{expected_phrase}".'
-        )
-
-
 async def _get_owned_document(doc_id: PyObjectId, user_id: ObjectId) -> dict:
     db = get_database()
     doc = await db.documents.find_one(
@@ -524,154 +425,6 @@ async def reprocess_document(
     return MessageResponse(message="Reprocessing started. Check document status shortly.")
 
 
-@router.delete("/purge-all")
-async def purge_all_user_data(
-    body: ConfirmedDeleteRequest,
-    current_user: CurrentUser = Depends(get_current_user),
-) -> MessageResponse:
-    """Full nuclear delete - permanently wipes EVERY record this user owns
-    (documents, GridFS files, workbooks, settings, exported-row log) plus the
-    physical .xlsx files on disk. Genuinely irreversible: no soft-delete
-    flag, no recovery path. Gated behind password + typed phrase ("DELETE",
-    matching the frontend's existing constant) via _verify_delete_confirmation.
-    Registered before DELETE /{doc_id} so Starlette's path-pattern matching
-    (which tries routes in registration order) picks this static route
-    instead of matching "purge-all" as a doc_id and failing PyObjectId
-    validation."""
-    db = get_database()
-    user_id = current_user.id
-
-    await _verify_delete_confirmation(current_user, body, "DELETE", "purge_all_blocked")
-
-    await log_action(user_id, "purge_all_data", {})
-
-    docs = await db.documents.find({"userId": user_id}, {"gridFsFileId": 1}).to_list(None)
-    for doc in docs:
-        if doc.get("gridFsFileId"):
-            try:
-                await delete_file(doc["gridFsFileId"])
-            except Exception:  # noqa: BLE001
-                pass
-
-    workbooks = await db.workbooks.find({"userId": user_id}, {"filename": 1}).to_list(None)
-    for wb in workbooks:
-        target = excel_service.file_path(f"{user_id}_{wb['filename']}")
-        target.unlink(missing_ok=True)
-        target.with_suffix(".lock").unlink(missing_ok=True)
-
-    await db.documents.delete_many({"userId": user_id})
-    await db.workbooks.delete_many({"userId": user_id})
-    await db.settings.delete_many({"userId": user_id})
-    await db.exportedrows.delete_many({"userId": user_id})
-
-    return MessageResponse(message="All your data has been permanently deleted.")
-
-
-async def _remove_exported_rows_from_workbooks(exported_rows: list[dict]) -> tuple[int, list[str]]:
-    """Groups the exported-row records being purged by workbookId, surgically
-    removes just those rows from each workbook's physical .xlsx (matching by
-    (documentType, formatted-number, date) - rows have no stable ID, same
-    convention as excel/service.py's append path), and reports which
-    workbooks ended up with zero data rows left across every sheet (deleted
-    from disk entirely rather than left as an empty shell)."""
-    by_workbook: dict[ObjectId, list[dict]] = defaultdict(list)
-    for row in exported_rows:
-        if row.get("workbookId"):
-            by_workbook[row["workbookId"]].append(row)
-
-    db = get_database()
-    total_removed = 0
-    fully_deleted_filenames: list[str] = []
-    now = datetime.now(UTC)
-    for workbook_id, rows in by_workbook.items():
-        wb = await db.workbooks.find_one({"_id": workbook_id})
-        if not wb:
-            continue
-        physical_filename = f"{wb['userId']}_{wb['filename']}"
-        removed, fully_empty = await excel_service.remove_rows(physical_filename, rows)
-        total_removed += removed
-        if fully_empty:
-            fully_deleted_filenames.append(wb["filename"])
-            # File is gone from disk - mark the DB row inactive/archived
-            # (same field pair year-rollover already uses) rather than
-            # hard-deleting it, so historical references (audit context,
-            # ExportedRow rows for OTHER users sharing export-history) still
-            # resolve a filename/year. If this happened to be the user's
-            # CURRENTLY active workbook, append_row's existing self-heal
-            # (recreate the file if the target is missing on next save)
-            # keeps future saves working even though this row is now inactive.
-            await db.workbooks.update_one(
-                {"_id": workbook_id},
-                {"$set": {"isActive": False, "archivedAt": now, "updatedAt": now}},
-            )
-    return total_removed, fully_deleted_filenames
-
-
-@router.delete("/purge-range")
-async def purge_range_user_data(
-    body: PurgeRangeRequest, current_user: CurrentUser = Depends(get_current_user)
-) -> dict:
-    """Partial delete gated the same way as /purge-all (password + typed
-    phrase, "DELETE RANGE" - deliberately distinct from /purge-all's "DELETE"
-    to reduce fat-finger cross-action mistakes), scoped to documents whose
-    createdAt falls in the requested age bucket/year. Unlike /purge-all this
-    surgically removes only the matching Excel rows rather than deleting
-    whole workbooks (see _remove_exported_rows_from_workbooks), except when a
-    workbook's rows are removed down to zero. Registered before DELETE
-    /{doc_id} for the same route-ordering reason as /purge-all above."""
-    db = get_database()
-    user_id = current_user.id
-    filter_query, _range_start, _range_end = _build_range_filter(
-        user_id, body.older_than_months, body.year
-    )
-
-    await log_action(
-        user_id,
-        "purge_range_attempted",
-        {"olderThanMonths": body.older_than_months, "year": body.year},
-    )
-    await _verify_delete_confirmation(current_user, body, "DELETE RANGE", "purge_range_blocked")
-
-    docs = await db.documents.find(filter_query).to_list(None)
-    doc_ids = [d["_id"] for d in docs]
-
-    for doc in docs:
-        if doc.get("gridFsFileId"):
-            try:
-                await delete_file(doc["gridFsFileId"])
-            except Exception:  # noqa: BLE001
-                pass
-
-    rows_removed = 0
-    workbooks_fully_deleted: list[str] = []
-    if doc_ids:
-        exported_rows = await db.exportedrows.find({"documentId": {"$in": doc_ids}}).to_list(None)
-        rows_removed, workbooks_fully_deleted = await _remove_exported_rows_from_workbooks(
-            exported_rows
-        )
-        await db.documents.delete_many({"_id": {"$in": doc_ids}})
-        await db.exportedrows.delete_many({"documentId": {"$in": doc_ids}})
-
-    await log_action(
-        user_id,
-        "purge_range_data",
-        {
-            "olderThanMonths": body.older_than_months,
-            "year": body.year,
-            "documentsDeleted": len(doc_ids),
-            "rowsRemoved": rows_removed,
-            "workbooksFullyDeleted": workbooks_fully_deleted,
-        },
-    )
-
-    return {
-        "message": f"{len(doc_ids)} document(s) permanently deleted.",
-        "documentsDeleted": len(doc_ids),
-        "workbooksFullyDeleted": workbooks_fully_deleted,
-        "rowsRemoved": rows_removed,
-    }
-
-
 @router.delete("/{doc_id}")
 async def delete_document(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
@@ -685,8 +438,10 @@ async def delete_document(
     if doc.get("gridFsFileId"):
         try:
             await delete_file(doc["gridFsFileId"])
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await record_orphaned_file(
+                doc["gridFsFileId"], doc["_id"], current_user.id, "soft_delete", exc
+            )
     await log_action(current_user.id, "document_deleted", {"documentId": str(doc["_id"])})
     return MessageResponse(message="Document deleted successfully.")
 
@@ -694,12 +449,16 @@ async def delete_document(
 @router.post("/{doc_id}/purge-file")
 async def purge_document_file(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
-) -> MessageResponse:
+) -> PurgeFileResponse:
     """Space-saving, irreversible action: permanently removes the stored
     original file from GridFS while leaving the Document record's extracted
     metadata (number, date, type, status, confidence, timestamps) untouched.
     Distinct from DELETE /{doc_id} (soft-delete of the whole record) - this
-    only purges the heavy file data."""
+    only purges the heavy file data. A GridFS failure here does NOT block
+    the user's action (filePurged is still set) - it's tracked in
+    orphanedfiles and surfaced via gridFsCleanupFailed so the frontend can
+    show a softer "flagged for admin review" message instead of a plain
+    success toast."""
     doc = await _get_owned_document(doc_id, current_user.id)
     if doc.get("filePurged"):
         raise HTTPException(
@@ -708,7 +467,14 @@ async def purge_document_file(
     if not doc.get("gridFsFileId"):
         raise HTTPException(status_code=400, detail="No original file is stored for this document.")
 
-    await delete_file(doc["gridFsFileId"])
+    cleanup_failed = False
+    try:
+        await delete_file(doc["gridFsFileId"])
+    except Exception as exc:  # noqa: BLE001
+        await record_orphaned_file(
+            doc["gridFsFileId"], doc["_id"], current_user.id, "purge_file", exc
+        )
+        cleanup_failed = True
 
     db = get_database()
     now = datetime.now(UTC)
@@ -716,9 +482,16 @@ async def purge_document_file(
         {"_id": doc["_id"]}, {"$set": {"filePurged": True, "filePurgedAt": now, "updatedAt": now}}
     )
     await log_action(current_user.id, "document_file_purged", {"documentId": str(doc["_id"])})
-    return MessageResponse(
-        message="Original file permanently removed. Extracted data remains fully accessible."
+    message = (
+        "Original file permanently removed. Extracted data remains fully accessible."
+        if not cleanup_failed
+        else (
+            "Your document's data was removed, but we couldn't fully clean up the original "
+            "file due to a system issue. This has been flagged for admin review - no action "
+            "needed from you."
+        )
     )
+    return PurgeFileResponse(message=message, grid_fs_cleanup_failed=cleanup_failed)
 
 
 @router.patch("/{doc_id}/correct")

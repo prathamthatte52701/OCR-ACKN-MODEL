@@ -9,6 +9,7 @@ const navLinks = [
   { to: '/documents', label: 'Documents' },
   { to: '/workbooks', label: 'Workbooks' },
   { to: '/logs', label: 'Logs' },
+  { to: '/orphaned-files', label: 'Orphaned Files' },
 ]
 
 export default function AdminLayout() {

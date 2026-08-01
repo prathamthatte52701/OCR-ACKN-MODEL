@@ -39,6 +39,11 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.corrections.create_index([("documentId", 1)])
     await db.auditlogs.create_index([("userId", 1), ("createdAt", -1)])
     await db.auditlogs.create_index([("action", 1)])
+    # unique on gridFsFileId - record_orphaned_file() upserts on this key so a
+    # repeated failure on the same file (e.g. a failed retry) updates the
+    # existing record instead of creating a duplicate.
+    await db.orphanedfiles.create_index([("gridFsFileId", 1)], unique=True)
+    await db.orphanedfiles.create_index([("createdAt", -1)])
 
 
 async def close_mongo_connection() -> None:

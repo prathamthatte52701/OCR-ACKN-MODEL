@@ -1,19 +1,26 @@
 from datetime import UTC, datetime, timedelta
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from app.core.audit_log import log_action
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
+from app.core.orphaned_files import record_orphaned_file
+from app.core.rate_limit import limiter, user_or_ip_key
 from app.core.validators import (
     normalize_email,
     normalize_username,
     validate_email,
     validate_username,
 )
-from app.features.admin.schemas import AdminUpdateUserRequest
+from app.features.admin import purge_service
+from app.features.admin.schemas import (
+    AdminAgeRangeRequest,
+    AdminMonthsRequest,
+    AdminUpdateUserRequest,
+)
 from app.features.auth.dependencies import CurrentUser, require_admin
 from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
@@ -21,6 +28,16 @@ from app.features.excel import service as excel_service
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 
 router = APIRouter()
+
+# Every nuke-delete variant (per-user age-based, global age-based, global
+# year+month) shares ONE 5-attempts/24h budget per admin account, not 5
+# separate budgets per mode - slowapi's plain @limiter.limit gives each
+# decorated endpoint its own independent bucket even with an identical limit
+# string, so this requires shared_limit() with an explicit shared `scope`
+# (see slowapi/extension.py - the storage key is (key_func result, scope),
+# and scope defaults to the endpoint's own function name unless given).
+NUKE_RATE_LIMIT = "5/24hour"
+NUKE_RATE_SCOPE = "admin_nuke"
 
 EDITABLE_FIELDS = {"taxInvoiceNo", "referenceNo", "number", "date"}
 FIELDS_BY_DOCUMENT_TYPE = {
@@ -177,8 +194,10 @@ async def delete_user(
         if doc.get("gridFsFileId"):
             try:
                 await delete_file(doc["gridFsFileId"])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                await record_orphaned_file(
+                    doc["gridFsFileId"], doc["_id"], user_id, "admin_cascade_delete", exc
+                )
 
     await db.corrections.delete_many({"documentId": {"$in": doc_ids}})
     await db.documents.delete_many({"userId": user_id})
@@ -210,6 +229,187 @@ async def delete_user(
         },
     )
     return {"message": "User and all associated data deleted successfully."}
+
+
+async def _execute_purge(filter_query: dict) -> tuple[int, int, list[str]]:
+    """Shared execution tail for every nuke variant below, once the filter is
+    built and the confirmation gate has passed: delete each matched
+    document's GridFS file, surgically remove its exported Excel rows (or
+    the whole workbook if that empties it), then hard-delete the document
+    and exportedrows records themselves. Returns
+    (documentsDeleted, rowsRemoved, workbooksFullyDeleted)."""
+    db = get_database()
+    docs = await db.documents.find(filter_query).to_list(None)
+    doc_ids = [d["_id"] for d in docs]
+
+    for doc in docs:
+        if doc.get("gridFsFileId"):
+            try:
+                await delete_file(doc["gridFsFileId"])
+            except Exception as exc:  # noqa: BLE001
+                await record_orphaned_file(
+                    doc["gridFsFileId"], doc["_id"], doc.get("userId"), "admin_nuke_purge", exc
+                )
+
+    rows_removed = 0
+    workbooks_fully_deleted: list[str] = []
+    if doc_ids:
+        exported_rows = await db.exportedrows.find({"documentId": {"$in": doc_ids}}).to_list(None)
+        rows_removed, workbooks_fully_deleted = (
+            await purge_service.remove_exported_rows_from_workbooks(exported_rows)
+        )
+        await db.documents.delete_many({"_id": {"$in": doc_ids}})
+        await db.exportedrows.delete_many({"documentId": {"$in": doc_ids}})
+
+    return len(doc_ids), rows_removed, workbooks_fully_deleted
+
+
+@router.delete("/users/{user_id}/purge-range")
+@limiter.shared_limit(NUKE_RATE_LIMIT, scope=NUKE_RATE_SCOPE, key_func=user_or_ip_key)
+async def admin_purge_user_range(
+    request: Request,
+    user_id: PyObjectId,
+    body: AdminAgeRangeRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """ "Nuke This User" - age-based only (1/2/3/6/9 months, oldest-first),
+    scoped strictly to this one user's data. Reuses the exact same
+    confirmation gate, surgical row-removal mechanism, and rate limit as the
+    two global variants below - only the filter's userId scope differs."""
+    db = get_database()
+    target = await db.users.find_one({"_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    filter_query, range_end = purge_service.build_age_filter(user_id, body.older_than_months)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_user_range_attempted",
+        {
+            "mode": "age_range",
+            "scope": "user",
+            "targetUserId": str(user_id),
+            "olderThanMonths": body.older_than_months,
+        },
+    )
+    await purge_service.verify_delete_confirmation(
+        current_user, body, "NUKE USER", "admin_nuke_user_range_blocked"
+    )
+
+    documents_deleted, rows_removed, workbooks_fully_deleted = await _execute_purge(filter_query)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_user_range_data",
+        {
+            "mode": "age_range",
+            "scope": "user",
+            "targetUserId": str(user_id),
+            "olderThanMonths": body.older_than_months,
+            "dateRangeEnd": range_end,
+            "documentsDeleted": documents_deleted,
+            "rowsRemoved": rows_removed,
+            "workbooksFullyDeleted": workbooks_fully_deleted,
+        },
+    )
+    return {
+        "message": f"{documents_deleted} document(s) permanently deleted for this user.",
+        "documentsDeleted": documents_deleted,
+        "workbooksFullyDeleted": workbooks_fully_deleted,
+        "rowsRemoved": rows_removed,
+    }
+
+
+@router.delete("/purge-range")
+@limiter.shared_limit(NUKE_RATE_LIMIT, scope=NUKE_RATE_SCOPE, key_func=user_or_ip_key)
+async def admin_purge_global_range(
+    request: Request,
+    body: AdminAgeRangeRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """ "Global Nuke" - age-based mode: 1/2/3/6/9 months, oldest-first,
+    applied across EVERY user's data simultaneously. Same body shape as the
+    per-user variant above (build_age_filter(user_id=None, ...) is what
+    turns this global instead of scoped)."""
+    filter_query, range_end = purge_service.build_age_filter(None, body.older_than_months)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_global_range_attempted",
+        {"mode": "age_range", "scope": "global", "olderThanMonths": body.older_than_months},
+    )
+    await purge_service.verify_delete_confirmation(
+        current_user, body, "NUKE ALL RANGE", "admin_nuke_global_range_blocked"
+    )
+
+    documents_deleted, rows_removed, workbooks_fully_deleted = await _execute_purge(filter_query)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_global_range_data",
+        {
+            "mode": "age_range",
+            "scope": "global",
+            "olderThanMonths": body.older_than_months,
+            "dateRangeEnd": range_end,
+            "documentsDeleted": documents_deleted,
+            "rowsRemoved": rows_removed,
+            "workbooksFullyDeleted": workbooks_fully_deleted,
+        },
+    )
+    return {
+        "message": f"{documents_deleted} document(s) permanently deleted across all users.",
+        "documentsDeleted": documents_deleted,
+        "workbooksFullyDeleted": workbooks_fully_deleted,
+        "rowsRemoved": rows_removed,
+    }
+
+
+@router.delete("/purge-months")
+@limiter.shared_limit(NUKE_RATE_LIMIT, scope=NUKE_RATE_SCOPE, key_func=user_or_ip_key)
+async def admin_purge_global_months(
+    request: Request,
+    body: AdminMonthsRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """ "Global Nuke" - Year+Month mode: admin picks an exact year and one or
+    more specific months; ALL users' data in exactly those month(s) is
+    deleted, everything else (other months of the same year, every other
+    user's data outside the range) is untouched. Always global - there is no
+    per-user version of this mode."""
+    filter_query = purge_service.build_months_filter(body.year, body.months)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_global_months_attempted",
+        {"mode": "year_months", "scope": "global", "year": body.year, "months": body.months},
+    )
+    await purge_service.verify_delete_confirmation(
+        current_user, body, "NUKE ALL MONTHS", "admin_nuke_global_months_blocked"
+    )
+
+    documents_deleted, rows_removed, workbooks_fully_deleted = await _execute_purge(filter_query)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_global_months_data",
+        {
+            "mode": "year_months",
+            "scope": "global",
+            "year": body.year,
+            "months": body.months,
+            "documentsDeleted": documents_deleted,
+            "rowsRemoved": rows_removed,
+            "workbooksFullyDeleted": workbooks_fully_deleted,
+        },
+    )
+    return {
+        "message": f"{documents_deleted} document(s) permanently deleted across all users.",
+        "documentsDeleted": documents_deleted,
+        "workbooksFullyDeleted": workbooks_fully_deleted,
+        "rowsRemoved": rows_removed,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -323,8 +523,10 @@ async def delete_document_as_admin(
     if doc.get("gridFsFileId"):
         try:
             await delete_file(doc["gridFsFileId"])
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            await record_orphaned_file(
+                doc["gridFsFileId"], doc["_id"], doc["userId"], "admin_soft_delete", exc
+            )
     await log_action(
         current_user.id,
         "document_deleted",
@@ -339,7 +541,10 @@ async def purge_document_file_as_admin(
 ) -> dict:
     """Admin equivalent of the user-scoped purge-file action - permanently
     removes the stored original file from GridFS, cross-user, leaving the
-    Document record's extracted metadata untouched."""
+    Document record's extracted metadata untouched. A GridFS failure does
+    NOT block the admin's action (filePurged is still set) - it's tracked
+    in orphanedfiles and surfaced via gridFsCleanupFailed, same contract as
+    the user-scoped purge-file endpoint."""
     db = get_database()
     doc = await db.documents.find_one({"_id": doc_id, "isDeleted": {"$ne": True}})
     if not doc:
@@ -351,7 +556,14 @@ async def purge_document_file_as_admin(
     if not doc.get("gridFsFileId"):
         raise HTTPException(status_code=400, detail="No original file is stored for this document.")
 
-    await delete_file(doc["gridFsFileId"])
+    cleanup_failed = False
+    try:
+        await delete_file(doc["gridFsFileId"])
+    except Exception as exc:  # noqa: BLE001
+        await record_orphaned_file(
+            doc["gridFsFileId"], doc["_id"], doc["userId"], "admin_purge_file", exc
+        )
+        cleanup_failed = True
 
     now = datetime.now(UTC)
     await db.documents.update_one(
@@ -362,9 +574,113 @@ async def purge_document_file_as_admin(
         "document_file_purged",
         {"documentId": str(doc_id), "ownerUserId": str(doc["userId"]), "byAdmin": True},
     )
+    message = (
+        "Original file permanently removed. Extracted data remains fully accessible."
+        if not cleanup_failed
+        else (
+            "Document data was removed, but the original file could not be fully cleaned up "
+            "from storage. Flagged in Orphaned Files for follow-up."
+        )
+    )
+    return {"message": message, "gridFsCleanupFailed": cleanup_failed}
+
+
+# ---------------------------------------------------------------------------
+# Orphaned files (GridFS deletions that failed and were tracked instead of
+# silently swallowed - see app.core.orphaned_files.record_orphaned_file)
+# ---------------------------------------------------------------------------
+
+
+def _serialize_orphaned_file(record: dict, owner: dict | None) -> dict:
     return {
-        "message": "Original file permanently removed. Extracted data remains fully accessible."
+        "id": str(record["_id"]),
+        "gridFsFileId": str(record["gridFsFileId"]),
+        "documentId": str(record["documentId"]) if record.get("documentId") else None,
+        "userId": str(record["userId"]) if record.get("userId") else None,
+        "context": record.get("context"),
+        "errorType": record.get("errorType"),
+        "errorMessage": record.get("errorMessage"),
+        "attemptCount": record.get("attemptCount", 1),
+        "createdAt": record.get("createdAt"),
+        "updatedAt": record.get("updatedAt"),
+        "owner": (
+            {"id": str(owner["_id"]), "username": owner["username"], "email": owner["email"]}
+            if owner
+            else None
+        ),
     }
+
+
+@router.get("/orphaned-files")
+async def list_orphaned_files(
+    page: int | None = Query(default=None),
+    limit: int | None = Query(default=None),
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    db = get_database()
+    lim, pg, skip = _pagination(page, limit)
+    total = await db.orphanedfiles.count_documents({})
+    cursor = db.orphanedfiles.find({}).sort("createdAt", -1).skip(skip).limit(lim)
+    records = await cursor.to_list(length=None)
+    owner_ids = {r["userId"] for r in records if r.get("userId")}
+    owners = {
+        o["_id"]: o
+        async for o in db.users.find({"_id": {"$in": list(owner_ids)}}, {"username": 1, "email": 1})
+    }
+    return {
+        "orphanedFiles": [
+            _serialize_orphaned_file(r, owners.get(r.get("userId"))) for r in records
+        ],
+        "totalOrphanedFiles": total,
+        "totalPages": max(1, -(-total // lim)),
+        "currentPage": pg,
+    }
+
+
+@router.post("/orphaned-files/{orphan_id}/retry")
+async def retry_orphaned_file(
+    orphan_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+) -> dict:
+    """Re-attempts the GridFS delete. Success removes the tracking record
+    entirely; failure updates it in place (record_orphaned_file upserts by
+    gridFsFileId) with the new error/timestamp rather than duplicating it."""
+    db = get_database()
+    record = await db.orphanedfiles.find_one({"_id": orphan_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="Orphaned file record not found.")
+
+    try:
+        await delete_file(record["gridFsFileId"])
+    except Exception as exc:  # noqa: BLE001
+        await record_orphaned_file(
+            record["gridFsFileId"],
+            record.get("documentId"),
+            record.get("userId"),
+            record.get("context") or "retry",
+            exc,
+        )
+        await log_action(
+            current_user.id, "orphaned_file_retry_failed", {"orphanId": str(orphan_id)}
+        )
+        return {"success": False, "message": "Retry failed - this file still could not be deleted."}
+
+    await db.orphanedfiles.delete_one({"_id": orphan_id})
+    await log_action(current_user.id, "orphaned_file_retry_succeeded", {"orphanId": str(orphan_id)})
+    return {"success": True, "message": "File deleted successfully. Removed from Orphaned Files."}
+
+
+@router.delete("/orphaned-files/{orphan_id}")
+async def dismiss_orphaned_file(
+    orphan_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+) -> dict:
+    """Removes the tracking record without attempting another delete - for
+    when an admin has verified/handled the file some other way."""
+    db = get_database()
+    result = await db.orphanedfiles.delete_one({"_id": orphan_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Orphaned file record not found.")
+    await log_action(current_user.id, "orphaned_file_dismissed", {"orphanId": str(orphan_id)})
+    return {"message": "Orphaned file record dismissed."}
 
 
 # ---------------------------------------------------------------------------
