@@ -52,3 +52,14 @@ export async function saveDocument(docId) {
     throw err
   }
 }
+
+// "Save All" on a documents page - saves every document id currently
+// rendered on that page (already-exported ones included, same as an
+// individual "Save Again"). No NEED_NEW_WORKBOOK/NO_ACTIVE_WORKBOOK
+// auto-retry like saveDocument() above - if there's no active workbook yet,
+// every entry in the batch just comes back failed with that reason; the
+// user resolves it once via a single Save or "Start New Excel File", same
+// as today, then Save All works.
+export function bulkSaveDocuments(documentIds) {
+  return api.post('/documents/bulk-save', { documentIds }).then((res) => res.data)
+}

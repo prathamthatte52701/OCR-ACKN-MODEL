@@ -3,10 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
-import { useNewExcelFileMutation } from '../hooks/useDocumentMutations'
+import { useBulkSaveDocumentsMutation, useNewExcelFileMutation } from '../hooks/useDocumentMutations'
 import DocumentList from '../components/DocumentList'
 import PageBackground from '../components/PageBackground'
-import { promptText } from '../store/dialogStore'
+import { confirmAction, promptText } from '../store/dialogStore'
+import { displayNumber } from '../utils/documentDisplay'
 
 function DocumentsSkeleton() {
   return (
@@ -67,6 +68,7 @@ export default function DocumentsPage() {
 
   const [page, setPage] = useState(1)
   const newExcelFileMutation = useNewExcelFileMutation()
+  const bulkSaveMutation = useBulkSaveDocumentsMutation()
 
   // A new/changed search, group tab, or date range should always land on page 1.
   const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`)
@@ -109,6 +111,38 @@ export default function DocumentsPage() {
     if (range) next.set('range', range)
     else next.delete('range')
     setSearchParams(next)
+  }
+
+  // Scoped strictly to `documents` - the already-paginated (30/page) result
+  // for the CURRENT page/type/search, never the user's whole dataset. Skips
+  // the per-document "already saved, are you sure?" popup on purpose (every
+  // doc gets re-saved regardless of `exported`, same as an individual Save
+  // Again) but still gates behind one page-level confirmation so a whole
+  // page of duplicate rows is never a surprise.
+  async function handleSaveAll() {
+    if (documents.length === 0) return
+    const ok = await confirmAction({
+      title: 'Save all documents on this page?',
+      message: `This will save all ${documents.length} document${documents.length !== 1 ? 's' : ''} on this page to Excel, including any already saved before. Continue?`,
+      confirmLabel: 'Yes, Save All',
+    })
+    if (!ok) return
+
+    try {
+      const result = await bulkSaveMutation.mutateAsync(documents.map((d) => d._id))
+      const failed = result.failed || []
+      if (failed.length === 0) {
+        toast.success(result.message)
+      } else {
+        const byId = new Map(documents.map((d) => [d._id, d]))
+        const failedNames = failed
+          .map((f) => (byId.has(f.documentId) ? displayNumber(byId.get(f.documentId)) : f.documentId))
+          .join(', ')
+        toast.error(`${result.message} Failed: ${failedNames}.`)
+      }
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not save documents. Please try again.')
+    }
   }
 
   async function handleStartNewExcelFile() {
@@ -240,6 +274,16 @@ export default function DocumentsPage() {
           </div>
         ) : (
           <>
+            <div className="mb-5 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveAll}
+                disabled={documents.length === 0 || bulkSaveMutation.isPending}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-5 py-2.5 text-[13.6px] font-black text-emerald-200 transition-all hover:border-emerald-300/45 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkSaveMutation.isPending ? `Saving ${documents.length}...` : `Save All (${documents.length} on this page)`}
+              </button>
+            </div>
             <DocumentList documents={documents} />
             {totalPages > 1 && (
               <div className="mt-8 flex items-center justify-center gap-4">

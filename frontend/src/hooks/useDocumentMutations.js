@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { correctDocument, deleteDocument, purgeDocumentFile, reprocessDocument } from '../api/documents'
-import { newExcelFile, saveDocument } from '../api/excel'
+import { bulkSaveDocuments, newExcelFile, saveDocument } from '../api/excel'
 import { documentKeys } from './useDocumentsQueries'
 
 export function useCorrectDocument(id) {
@@ -56,6 +56,17 @@ export function useSaveDocumentMutation() {
     onSuccess: (_message, docId) => {
       queryClient.invalidateQueries({ queryKey: ['exports', 'history'] })
       queryClient.invalidateQueries({ queryKey: documentKeys.detail(docId) })
+      queryClient.invalidateQueries({ queryKey: ['documents', 'list'] })
+    },
+  })
+}
+
+export function useBulkSaveDocumentsMutation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (documentIds) => bulkSaveDocuments(documentIds),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['exports', 'history'] })
       queryClient.invalidateQueries({ queryKey: ['documents', 'list'] })
     },
   })

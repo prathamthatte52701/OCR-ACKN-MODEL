@@ -9,7 +9,7 @@ from app.core.object_id import PyObjectId
 from app.core.rate_limit import limiter
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.excel import service as excel_service
-from app.features.excel.schemas import NewExcelFileRequest
+from app.features.excel.schemas import BulkSaveRequest, NewExcelFileRequest
 
 router = APIRouter()
 
@@ -216,10 +216,14 @@ async def new_excel_file(
     return {"message": "New Excel workbook started.", "filename": trimmed, "year": year}
 
 
-@router.post("/{doc_id}/save")
-async def save_document_to_excel(
-    doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
-) -> dict:
+async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -> dict:
+    """Core of a single document's save-to-Excel, shared by the individual
+    Save/Save Again endpoint below and the bulk "Save All" endpoint - same
+    lookup, same year-rollover/no-workbook handling, same locked
+    excel_service.append_row call, same ExportedRow + audit log write.
+    Raises HTTPException on any failure, exactly as before this was split
+    out; callers decide whether that aborts the request (single save) or is
+    caught per-document and continues the batch (bulk save)."""
     db = get_database()
     doc = await db.documents.find_one(
         {"_id": doc_id, "userId": current_user.id, "isDeleted": {"$ne": True}}
@@ -322,4 +326,48 @@ async def save_document_to_excel(
         "message": "Excel file appended successfully.",
         "worksheet": sheet_month,
         "workbook": active_filename,
+    }
+
+
+@router.post("/{doc_id}/save")
+async def save_document_to_excel(
+    doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    return await _save_document_to_excel(doc_id, current_user)
+
+
+@router.post("/bulk-save")
+async def bulk_save_documents_to_excel(
+    body: BulkSaveRequest, current_user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    """ "Save All" for one documents page: re-saves every document id the
+    frontend sends (already-exported ones included, matching what an
+    individual "Save Again" would do) - processed as a plain sequential
+    loop, not asyncio.gather, so this request never issues concurrent
+    writes itself; excel_service.append_row's per-filename asyncio.Lock +
+    cross-process FileLock (see excel/service.py) is what actually protects
+    against a *different* concurrent request (another tab, another bulk
+    save) hitting the same workbook at the same time. Per-document
+    ownership is enforced the same way as the single-save route -
+    _save_document_to_excel's own userId-scoped lookup 404s (not 403s) on
+    any id that doesn't belong to this user, so a manipulated id list can
+    only ever fail that one entry, never touch another user's document."""
+    succeeded: list[str] = []
+    failed: list[dict] = []
+    for doc_id in body.document_ids:
+        try:
+            await _save_document_to_excel(doc_id, current_user)
+            succeeded.append(str(doc_id))
+        except HTTPException as exc:
+            reason = (
+                exc.detail
+                if isinstance(exc.detail, str)
+                else exc.detail.get("message", "Could not save.")
+            )
+            failed.append({"documentId": str(doc_id), "reason": reason})
+
+    return {
+        "message": f"{len(succeeded)}/{len(body.document_ids)} saved successfully.",
+        "succeeded": succeeded,
+        "failed": failed,
     }
