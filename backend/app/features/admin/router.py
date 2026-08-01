@@ -321,6 +321,67 @@ async def admin_purge_user_range(
     }
 
 
+@router.delete("/users/{user_id}/purge-months")
+@limiter.shared_limit(NUKE_RATE_LIMIT, scope=NUKE_RATE_SCOPE, key_func=user_or_ip_key)
+async def admin_purge_user_months(
+    request: Request,
+    user_id: PyObjectId,
+    body: AdminMonthsRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """ "Nuke This User" - Year+Month mode: admin picks an exact year and one
+    or more specific months; ONLY this one user's data in exactly those
+    month(s) is deleted, everything else (other months/years of this user,
+    every other user entirely) is untouched. Reuses the exact same
+    confirmation gate, surgical row-removal mechanism, and rate limit as the
+    global year+month variant below - only the filter's userId scope
+    differs."""
+    db = get_database()
+    target = await db.users.find_one({"_id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    filter_query = purge_service.build_months_filter(body.year, body.months, user_id)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_user_months_attempted",
+        {
+            "mode": "year_months",
+            "scope": "user",
+            "targetUserId": str(user_id),
+            "year": body.year,
+            "months": body.months,
+        },
+    )
+    await purge_service.verify_delete_confirmation(
+        current_user, body, "NUKE USER MONTHS", "admin_nuke_user_months_blocked"
+    )
+
+    documents_deleted, rows_removed, workbooks_fully_deleted = await _execute_purge(filter_query)
+
+    await log_action(
+        current_user.id,
+        "admin_nuke_user_months_data",
+        {
+            "mode": "year_months",
+            "scope": "user",
+            "targetUserId": str(user_id),
+            "year": body.year,
+            "months": body.months,
+            "documentsDeleted": documents_deleted,
+            "rowsRemoved": rows_removed,
+            "workbooksFullyDeleted": workbooks_fully_deleted,
+        },
+    )
+    return {
+        "message": f"{documents_deleted} document(s) permanently deleted for this user.",
+        "documentsDeleted": documents_deleted,
+        "workbooksFullyDeleted": workbooks_fully_deleted,
+        "rowsRemoved": rows_removed,
+    }
+
+
 @router.delete("/purge-range")
 @limiter.shared_limit(NUKE_RATE_LIMIT, scope=NUKE_RATE_SCOPE, key_func=user_or_ip_key)
 async def admin_purge_global_range(

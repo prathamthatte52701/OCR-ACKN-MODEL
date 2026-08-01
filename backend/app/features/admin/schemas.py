@@ -38,8 +38,9 @@ class AdminAgeRangeRequest(AdminConfirmedDeleteRequest):
 
 
 class AdminMonthsRequest(AdminConfirmedDeleteRequest):
-    """Precise calendar-range delete: exact year + specific month(s).
-    Always global/all-users - there is no per-user version of this mode."""
+    """Precise calendar-range delete: exact year + specific month(s). Used
+    both for the per-user admin mode (target user comes from the URL path)
+    and the global/all-users admin mode - same body shape either way."""
 
     year: int
     months: list[Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]] = Field(min_length=1)

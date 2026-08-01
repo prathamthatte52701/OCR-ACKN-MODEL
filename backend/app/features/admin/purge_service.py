@@ -79,11 +79,13 @@ def build_age_filter(user_id: ObjectId | None, older_than_months: int) -> tuple[
     return filter_query, range_end
 
 
-def build_months_filter(year: int, months: Sequence[int]) -> dict:
+def build_months_filter(year: int, months: Sequence[int], user_id: ObjectId | None = None) -> dict:
     """Precise calendar-range filter: exact year + one or more specific
     months, ANDed together via $or of per-month [start, end) windows on the
-    same createdAt field build_age_filter uses. Always global (no userId key)
-    - this mode has no per-user variant, by design."""
+    same createdAt field build_age_filter uses. `user_id=None` means every
+    user (the global admin-dashboard mode); a real ObjectId scopes to
+    exactly that one user (the per-user admin mode) - same userId-key
+    convention as build_age_filter."""
     if not months:
         raise HTTPException(status_code=400, detail="Select at least one month.")
     ranges = []
@@ -95,7 +97,10 @@ def build_months_filter(year: int, months: Sequence[int]) -> dict:
             else datetime(year, month + 1, 1, tzinfo=UTC)
         )
         ranges.append({"createdAt": {"$gte": start, "$lt": end}})
-    return {"isDeleted": {"$ne": True}, "$or": ranges}
+    filter_query: dict = {"isDeleted": {"$ne": True}, "$or": ranges}
+    if user_id is not None:
+        filter_query["userId"] = user_id
+    return filter_query
 
 
 async def remove_exported_rows_from_workbooks(
