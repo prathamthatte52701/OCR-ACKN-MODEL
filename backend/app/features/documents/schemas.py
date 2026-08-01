@@ -1,9 +1,22 @@
+from pydantic import Field
+
 from app.core.base_model import CamelModel
+from app.core.object_id import PyObjectId
 
 
 class CorrectRequest(CamelModel):
     field: str
     value: str
+
+
+class DownloadAllRequest(CamelModel):
+    """ "Download All" on a documents page - same page-scoping contract as
+    BulkSaveRequest (excel/schemas.py): the frontend sends exactly the
+    document ids currently rendered on that page, never the user's whole
+    dataset. max_length guards the endpoint itself against a manipulated
+    request past the UI."""
+
+    document_ids: list[PyObjectId] = Field(min_length=1, max_length=200)
 
 
 class DocumentOut(CamelModel):

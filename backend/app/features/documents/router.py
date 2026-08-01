@@ -1,4 +1,6 @@
+import io
 import re
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
@@ -25,7 +27,12 @@ from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import limiter
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
-from app.features.documents.schemas import CorrectRequest, MessageResponse, PurgeFileResponse
+from app.features.documents.schemas import (
+    CorrectRequest,
+    DownloadAllRequest,
+    MessageResponse,
+    PurgeFileResponse,
+)
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
@@ -84,6 +91,40 @@ def _sanitize_content_disposition_filename(filename: str) -> str:
     working while making header injection structurally impossible here."""
     cleaned = _UNSAFE_HEADER_CHARS_RE.sub("", filename)
     return cleaned or "document"
+
+
+_UNSAFE_ZIP_ENTRY_CHARS_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+_EXTENSION_BY_MIME = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "application/pdf": ".pdf",
+}
+
+
+def _zip_entry_name(doc: dict, seen: dict[str, int]) -> str:
+    """Builds a distinguishable in-archive filename from the document's own
+    identifying number/date - e.g. "TI-482910_15-03-2026.pdf" - rather than
+    a generic id-based name, so extracted files are recognizable at a
+    glance. `seen` dedupes within one zip (same number+date could repeat
+    across genuinely different documents)."""
+    if doc["documentType"] == "Tax Invoice":
+        parts = [p for p in (doc.get("taxInvoiceNo"), doc.get("referenceNo")) if p]
+        base = "-".join(parts) if parts else str(doc["_id"])
+    else:
+        base = doc.get("number") or str(doc["_id"])
+    if doc.get("date"):
+        base = f"{base}_{doc['date'].replace('/', '-')}"
+
+    ext = PurePosixPath(doc.get("originalFilename") or "").suffix
+    if not ext:
+        ext = _EXTENSION_BY_MIME.get(doc.get("mimeType") or "", "")
+
+    safe_base = _UNSAFE_ZIP_ENTRY_CHARS_RE.sub("_", base).strip() or str(doc["_id"])
+    count = seen.get(safe_base, 0)
+    seen[safe_base] = count + 1
+    suffix = f" ({count})" if count else ""
+    return f"{safe_base}{suffix}{ext}"
 
 
 async def _validate_and_store(
@@ -472,6 +513,58 @@ async def download_document(
         content=buffer,
         media_type=doc["mimeType"],
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+    )
+
+
+@router.post("/download-all")
+async def download_all_documents(
+    body: DownloadAllRequest, current_user: CurrentUser = Depends(get_current_user)
+) -> Response:
+    """ "Download All" for one documents page: bundles every requested
+    document's original file into a single ZIP, same page-scoping contract
+    as bulk-save (excel/router.py::bulk_save_documents_to_excel) - the
+    frontend sends exactly the ids currently on that page. Any id that
+    doesn't belong to this user (ownership lookup 404s the same way
+    _get_owned_document does, just non-fatally here), any document with no
+    file (filePurged, or a GridFS fetch that fails for any reason) is
+    silently skipped and counted rather than aborting the whole archive -
+    a manipulated id list can only ever skip an entry, never leak another
+    user's file into the zip."""
+    db = get_database()
+    seen_names: dict[str, int] = {}
+    included = 0
+    skipped = 0
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for doc_id in body.document_ids:
+            doc = await db.documents.find_one(
+                {"_id": doc_id, "userId": current_user.id, "isDeleted": {"$ne": True}}
+            )
+            if not doc or doc.get("filePurged") or not doc.get("gridFsFileId"):
+                skipped += 1
+                continue
+            try:
+                file_buffer = await download_buffer(doc["gridFsFileId"])
+            except Exception:  # noqa: BLE001
+                skipped += 1
+                continue
+            zf.writestr(_zip_entry_name(doc, seen_names), file_buffer)
+            included += 1
+
+    await log_action(
+        current_user.id,
+        "documents_download_all",
+        {"requested": len(body.document_ids), "included": included, "skipped": skipped},
+    )
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="documents.zip"',
+            "X-Download-Included": str(included),
+            "X-Download-Skipped": str(skipped),
+            "X-Download-Total": str(len(body.document_ids)),
+        },
     )
 
 

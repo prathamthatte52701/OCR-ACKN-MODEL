@@ -103,6 +103,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Browsers only expose CORS-safelisted response headers to JS by default -
+    # Content-Disposition (filename) and the Download All skip-count headers
+    # (documents/router.py::download_all_documents) need to be readable by
+    # the frontend across origins, not just same-origin dev proxying.
+    expose_headers=[
+        "Content-Disposition",
+        "X-Download-Included",
+        "X-Download-Skipped",
+        "X-Download-Total",
+    ],
 )
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

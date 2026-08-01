@@ -50,6 +50,18 @@ export function downloadDocument(id, fallbackFilename) {
   return downloadBlob(`/documents/${id}/download`, { fallbackFilename })
 }
 
+// "Download All" for one documents page - bundles every requested document's
+// original file into a single ZIP (page-scoped, same ids the caller already
+// has from the current page's list). Returns the response so the caller can
+// read the X-Download-Included/Skipped/Total headers for a summary toast.
+export function downloadAllDocuments(documentIds) {
+  return downloadBlob('/documents/download-all', {
+    method: 'post',
+    data: { documentIds },
+    fallbackFilename: 'documents.zip',
+  })
+}
+
 export function trainingStats() {
   return api.get('/documents/training-stats').then((res) => res.data)
 }

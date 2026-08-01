@@ -3,7 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
-import { useBulkSaveDocumentsMutation, useNewExcelFileMutation } from '../hooks/useDocumentMutations'
+import {
+  useBulkSaveDocumentsMutation,
+  useDownloadAllDocumentsMutation,
+  useNewExcelFileMutation,
+} from '../hooks/useDocumentMutations'
 import DocumentList from '../components/DocumentList'
 import PageBackground from '../components/PageBackground'
 import { confirmAction, promptText } from '../store/dialogStore'
@@ -69,6 +73,7 @@ export default function DocumentsPage() {
   const [page, setPage] = useState(1)
   const newExcelFileMutation = useNewExcelFileMutation()
   const bulkSaveMutation = useBulkSaveDocumentsMutation()
+  const downloadAllMutation = useDownloadAllDocumentsMutation()
 
   // A new/changed search, group tab, or date range should always land on page 1.
   const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`)
@@ -142,6 +147,33 @@ export default function DocumentsPage() {
       }
     } catch (err) {
       toast.error(err.userMessage || 'Could not save documents. Please try again.')
+    }
+  }
+
+  // Scoped strictly to `documents` - same page-scoping contract as Save
+  // All. Documents whose original file was already hard-deleted (purge
+  // file) are silently skipped server-side and reported back via response
+  // headers, not an error - no confirmation needed here since downloading
+  // is non-destructive, only Save All (which writes duplicate rows) gates
+  // behind a popup.
+  async function handleDownloadAll() {
+    if (documents.length === 0) return
+    try {
+      const res = await downloadAllMutation.mutateAsync(documents.map((d) => d._id))
+      const included = Number(res.headers?.['x-download-included'] ?? 0)
+      const skipped = Number(res.headers?.['x-download-skipped'] ?? 0)
+      const total = Number(res.headers?.['x-download-total'] ?? documents.length)
+      if (skipped === 0) {
+        toast.success(`${included} of ${total} file${total !== 1 ? 's' : ''} downloaded.`)
+      } else if (included === 0) {
+        toast.error(`0 of ${total} downloaded - all files were previously deleted (hard delete).`)
+      } else {
+        toast.warning(
+          `${included} of ${total} files downloaded. ${skipped} document${skipped !== 1 ? 's were' : ' was'} skipped because ${skipped !== 1 ? 'their' : 'its'} original file was previously deleted (hard delete).`
+        )
+      }
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not download documents. Please try again.')
     }
   }
 
@@ -274,7 +306,15 @@ export default function DocumentsPage() {
           </div>
         ) : (
           <>
-            <div className="mb-5 flex justify-end">
+            <div className="mb-5 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleDownloadAll}
+                disabled={documents.length === 0 || downloadAllMutation.isPending}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-5 py-2.5 text-[13.6px] font-black text-blue-200 transition-all hover:border-blue-300/45 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {downloadAllMutation.isPending ? `Zipping ${documents.length}...` : `Download All (${documents.length} on this page)`}
+              </button>
               <button
                 type="button"
                 onClick={handleSaveAll}
