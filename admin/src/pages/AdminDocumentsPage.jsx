@@ -120,8 +120,12 @@ export default function AdminDocumentsPage() {
     setError('')
     setSuccess('')
     try {
-      await api.delete(`/admin/documents/${doc._id}`)
-      setSuccess('Document deleted.')
+      const res = await api.delete(`/admin/documents/${doc._id}`)
+      if (res.data.gridFsCleanupFailed) {
+        setError(res.data.message || 'Document was permanently deleted, but the file cleanup failed - see Orphaned Files.')
+      } else {
+        setSuccess(res.data.message || 'Document permanently deleted.')
+      }
       setDeletingDoc(null)
       load(page)
     } catch (err) {
@@ -209,7 +213,7 @@ export default function AdminDocumentsPage() {
                       </button>
                       {!d.filePurged && (
                         <button disabled={busyId === d._id} onClick={() => setPurgingDoc(d)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-amber-300 hover:border-amber-300/30 hover:bg-amber-500/10 disabled:opacity-50">
-                          Free Space
+                          File Delete
                         </button>
                       )}
                       <button disabled={busyId === d._id} onClick={() => setDeletingDoc(d)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
@@ -240,8 +244,9 @@ export default function AdminDocumentsPage() {
         )}
         {deletingDoc && (
           <ConfirmModal
-            title="Delete this document?"
-            message={`Delete this ${deletingDoc.documentType} document owned by ${deletingDoc.owner?.username || 'unknown'}? This cannot be undone.`}
+            title="Permanently delete this document?"
+            message={`This will PERMANENTLY delete this ${deletingDoc.documentType} document owned by ${deletingDoc.owner?.username || 'unknown'} - both the original file and all its extracted data. This cannot be undone and there is no recovery path.`}
+            confirmLabel="Yes, Delete Permanently"
             onConfirm={() => deleteDoc(deletingDoc)}
             onClose={() => setDeletingDoc(null)}
             busy={busyId === deletingDoc._id}
@@ -250,9 +255,9 @@ export default function AdminDocumentsPage() {
         )}
         {purgingDoc && (
           <ConfirmModal
-            title="Permanently remove the original file?"
+            title="File Delete - permanently remove the original file?"
             message={`This will permanently delete the original uploaded file for this ${purgingDoc.documentType} document owned by ${purgingDoc.owner?.username || 'unknown'}. The extracted Number/Date data will NOT be affected and will remain fully accessible. This cannot be undone.`}
-            confirmLabel="Yes, Permanently Remove File"
+            confirmLabel="Yes, File Delete"
             onConfirm={() => purgeDocFile(purgingDoc)}
             onClose={() => setPurgingDoc(null)}
             busy={busyId === purgingDoc._id}

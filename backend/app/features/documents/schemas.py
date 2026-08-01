@@ -54,3 +54,12 @@ class PurgeFileResponse(MessageResponse):
     success toast."""
 
     grid_fs_cleanup_failed: bool = False
+
+
+class DeleteResponse(MessageResponse):
+    """Same gridFsCleanupFailed contract as PurgeFileResponse - "Delete" now
+    permanently removes both the GridFS file and the Document record, and a
+    GridFS failure doesn't block that (the record is still removed either
+    way), it's just flagged for the frontend to show a softer message."""
+
+    grid_fs_cleanup_failed: bool = False

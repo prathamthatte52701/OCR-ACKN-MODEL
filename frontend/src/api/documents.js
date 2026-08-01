@@ -39,9 +39,10 @@ export function deleteDocument(id) {
   return api.delete(`/documents/${id}`).then((res) => res.data)
 }
 
-// Permanently removes the stored original file (GridFS) while leaving the
-// document's extracted metadata untouched - distinct from deleteDocument()
-// (soft-delete of the whole record). Irreversible.
+// "File Delete" - permanently removes the stored original file (GridFS)
+// while leaving the document's extracted metadata untouched - distinct
+// from deleteDocument() ("Delete" - a full permanent delete of the whole
+// record). Irreversible.
 export function purgeDocumentFile(id) {
   return api.post(`/documents/${id}/purge-file`).then((res) => res.data)
 }

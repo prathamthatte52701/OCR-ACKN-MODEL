@@ -29,6 +29,7 @@ from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
 from app.features.documents.schemas import (
     CorrectRequest,
+    DeleteResponse,
     DownloadAllRequest,
     MessageResponse,
     PurgeFileResponse,
@@ -460,11 +461,12 @@ async def my_activity(
                 pass
     doc_lookup: dict[str, dict] = {}
     if doc_ids:
-        # Deliberately unfiltered by isDeleted - a soft-deleted document
-        # still has a live record and should still resolve here; only a
-        # hard-deleted one (no tier of delete in this app does that to a
-        # user's OWN documents today) would fail this lookup, which is
-        # exactly the "log entry persists independently" behavior wanted.
+        # "Delete" now permanently removes the Document record itself, so
+        # this lookup can legitimately come back empty for a deleted
+        # document's log entries - _serialize_activity() below already
+        # handles that (`document: null`), by design: the audit-log entry
+        # persists independently of whether the document it references
+        # still exists.
         async for d in db.documents.find(
             {"_id": {"$in": doc_ids}},
             {"documentType": 1, "taxInvoiceNo": 1, "number": 1, "date": 1},
@@ -616,33 +618,51 @@ async def reprocess_document(
 @router.delete("/{doc_id}")
 async def delete_document(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
-) -> MessageResponse:
+) -> DeleteResponse:
+    """Full, permanent delete: removes both the GridFS file and the Document
+    record itself - there is no soft-delete/hidden state anymore (previously
+    this only set isDeleted/deletedAt and hid the row from every list/detail
+    query). ExportedRow/export-history entries for this document are
+    deliberately left untouched - already-exported data stays independent of
+    the source document's lifecycle. A GridFS failure does NOT block the
+    delete (mirrors purge-file's cleanup_failed contract below) - the record
+    is removed regardless and the failure is tracked in orphanedfiles."""
     doc = await _get_owned_document(doc_id, current_user.id)
-    db = get_database()
-    await db.documents.update_one(
-        {"_id": doc["_id"]},
-        {"$set": {"isDeleted": True, "deletedAt": datetime.now(UTC)}},
-    )
+    cleanup_failed = False
     if doc.get("gridFsFileId"):
         try:
             await delete_file(doc["gridFsFileId"])
         except Exception as exc:  # noqa: BLE001
             await record_orphaned_file(
-                doc["gridFsFileId"], doc["_id"], current_user.id, "soft_delete", exc
+                doc["gridFsFileId"], doc["_id"], current_user.id, "document_deleted", exc
             )
+            cleanup_failed = True
+
+    db = get_database()
+    await db.documents.delete_one({"_id": doc["_id"]})
     await log_action(current_user.id, "document_deleted", {"documentId": str(doc["_id"])})
-    return MessageResponse(message="Document deleted successfully.")
+    message = (
+        "Document permanently deleted."
+        if not cleanup_failed
+        else (
+            "Document permanently deleted, but we couldn't fully clean up the original file "
+            "due to a system issue. This has been flagged for admin review - no action needed "
+            "from you."
+        )
+    )
+    return DeleteResponse(message=message, grid_fs_cleanup_failed=cleanup_failed)
 
 
 @router.post("/{doc_id}/purge-file")
 async def purge_document_file(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
 ) -> PurgeFileResponse:
-    """Space-saving, irreversible action: permanently removes the stored
-    original file from GridFS while leaving the Document record's extracted
-    metadata (number, date, type, status, confidence, timestamps) untouched.
-    Distinct from DELETE /{doc_id} (soft-delete of the whole record) - this
-    only purges the heavy file data. A GridFS failure here does NOT block
+    """ "File Delete" in the UI - space-saving, irreversible action: permanently
+    removes the stored original file from GridFS while leaving the Document
+    record's extracted metadata (number, date, type, status, confidence,
+    timestamps) untouched. Distinct from DELETE /{doc_id} ("Delete" in the
+    UI - a full permanent delete of the whole record) - this only purges the
+    heavy file data. A GridFS failure here does NOT block
     the user's action (filePurged is still set) - it's tracked in
     orphanedfiles and surfaced via gridFsCleanupFailed so the frontend can
     show a softer "flagged for admin review" message instead of a plain

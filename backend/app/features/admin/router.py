@@ -573,34 +573,48 @@ async def correct_document_as_admin(
 async def delete_document_as_admin(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
 ) -> dict:
+    """Admin equivalent of the user-scoped "Delete" action - full, permanent
+    delete of both the GridFS file and the Document record (cross-user),
+    same contract as documents/router.py::delete_document. No soft-delete/
+    hidden state is ever set. ExportedRow/export-history entries are
+    deliberately left untouched, same as the user-scoped route."""
     db = get_database()
     doc = await db.documents.find_one({"_id": doc_id, "isDeleted": {"$ne": True}})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    await db.documents.update_one(
-        {"_id": doc_id}, {"$set": {"isDeleted": True, "deletedAt": datetime.now(UTC)}}
-    )
+    cleanup_failed = False
     if doc.get("gridFsFileId"):
         try:
             await delete_file(doc["gridFsFileId"])
         except Exception as exc:  # noqa: BLE001
             await record_orphaned_file(
-                doc["gridFsFileId"], doc["_id"], doc["userId"], "admin_soft_delete", exc
+                doc["gridFsFileId"], doc["_id"], doc["userId"], "admin_document_deleted", exc
             )
+            cleanup_failed = True
+
+    await db.documents.delete_one({"_id": doc_id})
     await log_action(
         current_user.id,
         "document_deleted",
         {"documentId": str(doc_id), "ownerUserId": str(doc["userId"]), "byAdmin": True},
     )
-    return {"message": "Document deleted successfully."}
+    message = (
+        "Document permanently deleted."
+        if not cleanup_failed
+        else (
+            "Document permanently deleted, but the original file could not be fully cleaned "
+            "up from storage. Flagged in Orphaned Files for follow-up."
+        )
+    )
+    return {"message": message, "gridFsCleanupFailed": cleanup_failed}
 
 
 @router.post("/documents/{doc_id}/purge-file")
 async def purge_document_file_as_admin(
     doc_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
 ) -> dict:
-    """Admin equivalent of the user-scoped purge-file action - permanently
+    """Admin equivalent of the user-scoped "File Delete" action - permanently
     removes the stored original file from GridFS, cross-user, leaving the
     Document record's extracted metadata untouched. A GridFS failure does
     NOT block the admin's action (filePurged is still set) - it's tracked

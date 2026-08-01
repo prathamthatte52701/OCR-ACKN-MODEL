@@ -166,10 +166,10 @@ export default function DocumentsPage() {
       if (skipped === 0) {
         toast.success(`${included} of ${total} file${total !== 1 ? 's' : ''} downloaded.`)
       } else if (included === 0) {
-        toast.error(`0 of ${total} downloaded - all files were previously deleted (hard delete).`)
+        toast.error(`0 of ${total} downloaded - all files were previously removed (File Delete).`)
       } else {
         toast.warning(
-          `${included} of ${total} files downloaded. ${skipped} document${skipped !== 1 ? 's were' : ' was'} skipped because ${skipped !== 1 ? 'their' : 'its'} original file was previously deleted (hard delete).`
+          `${included} of ${total} files downloaded. ${skipped} document${skipped !== 1 ? 's were' : ' was'} skipped because ${skipped !== 1 ? 'their' : 'its'} original file was previously removed (File Delete).`
         )
       }
     } catch (err) {

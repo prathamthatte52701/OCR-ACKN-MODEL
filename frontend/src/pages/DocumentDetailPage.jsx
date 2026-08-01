@@ -102,11 +102,11 @@ export default function DocumentDetailPage() {
 
   async function handlePurgeFile() {
     const ok = await confirmAction({
-      title: 'Permanently remove the original file?',
+      title: 'File Delete - permanently remove the original file?',
       message:
         'This will permanently delete the original uploaded file. The extracted Number/Date ' +
         'data will NOT be affected and will remain fully accessible. This cannot be undone.',
-      confirmLabel: 'Yes, Permanently Remove File',
+      confirmLabel: 'Yes, File Delete',
       danger: true,
     })
     if (!ok) return
@@ -146,15 +146,26 @@ export default function DocumentDetailPage() {
 
   async function handleDelete() {
     const ok = await confirmAction({
-      title: 'Delete this document?',
-      message: 'Are you sure you want to delete this document? This cannot be undone.',
-      confirmLabel: 'Yes, Delete',
+      title: 'Permanently delete this document?',
+      message:
+        'This will PERMANENTLY delete this document - both the original file and all its ' +
+        'extracted data. This cannot be undone and there is no recovery path.',
+      confirmLabel: 'Yes, Delete Permanently',
       danger: true,
     })
     if (!ok) return
     setDeleting(true)
     try {
-      await deleteMutation.mutateAsync()
+      const result = await deleteMutation.mutateAsync()
+      if (result?.gridFsCleanupFailed) {
+        toast.warning(
+          result.message ||
+            "This document was permanently deleted, but we couldn't fully clean up the " +
+              'original file due to a system issue. This has been flagged for admin review.'
+        )
+      } else {
+        toast.success(result?.message || 'Document permanently deleted.')
+      }
       navigate('/documents')
     } catch (err) {
       toast.error(err.userMessage || 'Could not delete this document. Please try again.')
@@ -249,7 +260,7 @@ export default function DocumentDetailPage() {
               {reprocessing ? 'Reprocessing...' : 'Reprocess'}
             </button>
             <button onClick={handlePurgeFile} disabled={purgeMutation.isPending} className="rounded-lg border border-amber-800/50 bg-amber-900/20 px-4 py-2 text-[14.7px] text-amber-400 transition-colors hover:bg-amber-900/40 disabled:opacity-50">
-              {purgeMutation.isPending ? 'Removing...' : 'Free Up Space'}
+              {purgeMutation.isPending ? 'Removing...' : 'File Delete'}
             </button>
           </>
         )}
