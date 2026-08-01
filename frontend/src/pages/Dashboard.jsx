@@ -240,6 +240,7 @@ function DocumentSearchBar() {
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             className="[color-scheme:dark] rounded-2xl border border-white/10 bg-white/[0.045] px-4 py-3 text-[14.7px] text-white transition-colors focus:border-blue-300/40 focus:outline-none"
           />
         </div>

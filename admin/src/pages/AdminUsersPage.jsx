@@ -40,7 +40,7 @@ function EditUserModal({ user, onClose, onSaved }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Name</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={8} className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60" />
+          <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={8} className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60" />
         </div>
         <div>
           <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Email</label>

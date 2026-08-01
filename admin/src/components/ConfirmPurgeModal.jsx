@@ -9,6 +9,13 @@ import PasswordInput from './PasswordInput'
 // genuinely irreversible cross-cutting delete: the admin's own password
 // TWICE (must match) plus a typed confirmation phrase unique to the
 // action, so a fat-fingered confirm can never trigger the wrong mode.
+//
+// DELIBERATELY NO Enter-to-submit anywhere in this component (unlike every
+// other confirm/prompt dialog in the app) - Enter must never be able to
+// fire handleDestroy() while tabbing/typing through these three fields,
+// even once canSubmit is true. The nuke action is only ever reachable via
+// an explicit click on the destroy button below. Esc-to-close still works
+// normally (inherited from Modal) since cancelling is always safe.
 export default function ConfirmPurgeModal({ title, message, phrase, purgeFn, extraBody, onClose, onDeleted, submitLabel = 'Permanently Delete', pendingLabel = 'Deleting...' }) {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')

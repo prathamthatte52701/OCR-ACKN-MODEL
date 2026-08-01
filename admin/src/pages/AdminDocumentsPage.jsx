@@ -45,13 +45,15 @@ function EditDocumentModal({ doc, onClose, onSaved }) {
       <h2 className="mb-1 text-lg font-black text-white">Edit document</h2>
       <p className="mb-4 text-[12.6px] text-slate-500">{doc.documentType} - owned by {doc.owner?.username || 'unknown'}</p>
       <div className="space-y-4">
-        {fields.map((f) => (
+        {fields.map((f, idx) => (
           <div key={f.key}>
             <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">{f.label}</label>
             <div className="flex gap-2">
               <input
+                autoFocus={idx === 0}
                 value={values[f.key]}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                onKeyDown={(e) => e.key === 'Enter' && saveField(f.key)}
                 className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60"
               />
               <button
