@@ -687,7 +687,20 @@ async def purge_document_file(
     db = get_database()
     now = datetime.now(UTC)
     await db.documents.update_one(
-        {"_id": doc["_id"]}, {"$set": {"filePurged": True, "filePurgedAt": now, "updatedAt": now}}
+        {"_id": doc["_id"]},
+        {
+            "$set": {
+                "filePurged": True,
+                "filePurgedAt": now,
+                # Clear the now-dangling reference - otherwise a later full
+                # DELETE /{doc_id} still sees a truthy gridFsFileId, retries
+                # deleting a file that's already gone, gets a NoFile error,
+                # and wrongly logs a false-positive orphaned-file record for
+                # a file that was actually cleaned up correctly right here.
+                "gridFsFileId": None,
+                "updatedAt": now,
+            }
+        },
     )
     await log_action(current_user.id, "document_file_purged", {"documentId": str(doc["_id"])})
     message = (
