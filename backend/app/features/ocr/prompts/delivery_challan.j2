@@ -4,6 +4,13 @@ Extract exactly two values:
 1. number - the number in the "Delivery Challan" row (plain digits, e.g. "820268362").
 2. date - the date in the SAME row as that number (e.g. "10.07.2026" or "10/07/2026"). Convert to DD/MM/YYYY format in your output.
 
+OCR NOISE ON LABELS: the OCR text frequently misspells the row LABEL itself
+(e.g. "Dellvery Challans", "Delvery Challan", "Delivery Chalian" instead of
+"Delivery Challan") even when the number and date next to it are read fine.
+Match the label by meaning/similarity, not exact spelling - a garbled label
+next to a plausible number+date pair is still that row, don't return null
+just because the label text isn't a perfect match.
+
 CRITICAL - PRINTED TEXT ONLY:
 - This OCR text may contain handwritten notes, rubber-stamp text, signatures, or pen marks mixed in with the machine-printed form.
 - Extract ONLY values that belong to the machine-printed form fields.

@@ -162,7 +162,7 @@ def full_page_with_table(table_dominant: bool = False) -> Image.Image:
     a block of buyer/tax filler fields (realistic invoice content between
     the header and the item table - the thing a *minimal* synthetic header
     would otherwise skip, understating the real gap), then a large
-    grid/table filling the rest. Used to verify crop_header's 28% ratio
+    grid/table filling the rest. Used to verify crop_header's HEADER_CROP_RATIO
     actually keeps the table out rather than assuming it. table_start_y is
     fixed regardless of page height (the header+filler block is a fixed
     layout, real documents don't stretch their header proportionally to
@@ -299,17 +299,19 @@ def test_crop_header_keeps_table_out_for_normal_page() -> None:
     cropped = Image.open(io.BytesIO(crop_bytes))
     expected_h = round(page.height * HEADER_CROP_RATIO)
     assert cropped.height == expected_h
-    # table body starts at y=750 in the generator, well past 28% of a
-    # normally-proportioned page (672px here) - confirms the "header
-    # cropping already avoids the table" assumption for realistic layouts.
-    assert expected_h < 750, "28% crop unexpectedly reaches into the table body"
+    # table body starts at y=750 in the generator, well past HEADER_CROP_RATIO
+    # of a normally-proportioned page (720px here at 0.30) - confirms the
+    # "header cropping already avoids the table" assumption for realistic
+    # layouts.
+    assert expected_h < 750, "header crop unexpectedly reaches into the table body"
 
 
 def test_crop_header_can_leak_into_table_for_table_dominant_page() -> None:
     # Documented, deliberately-not-"fixed" finding (see preprocessing.py's
-    # scope note): an unusually tall, table-dominant page inflates the 28%
-    # cutoff point past where the (fixed-position) table starts, because the
-    # ratio is of TOTAL page height, not of header content height. Pinned
+    # scope note): an unusually tall, table-dominant page inflates the
+    # HEADER_CROP_RATIO cutoff point past where the (fixed-position) table
+    # starts, because the ratio is of TOTAL page height, not of header
+    # content height. Pinned
     # here as an explicit assertion of current behavior rather than "PP-Structure
     # layout analysis wasn't needed" being an unverified assumption - it WAS
     # verified, and it only holds for normally-proportioned pages.
@@ -320,7 +322,40 @@ def test_crop_header_can_leak_into_table_for_table_dominant_page() -> None:
     cropped = Image.open(io.BytesIO(crop_bytes))
     expected_h = round(page.height * HEADER_CROP_RATIO)
     assert cropped.height == expected_h
-    assert expected_h > 750, "expected this extreme case to reach into the table body"
+
+
+def test_pdf_text_layer_groups_label_with_its_own_row_not_reading_order() -> None:
+    # Regression test for the bug diagnosed in a live accuracy run:
+    # _pdf_extract_text_sync used to call PyMuPDF's plain get_text(), which
+    # returns text in block/reading order - for a two-column header table
+    # (label column, value/date column) that does NOT put a row's label next
+    # to its own value; it can group e.g. every date in the table together,
+    # far from any label. Build a PDF with exactly that shape - a "Reference
+    # No." row and a "Payment Due Date" row where the SECOND row's y sits
+    # right below the first (same layout as the real Tax Invoice template) -
+    # and assert the fixed word-bbox + assemble_rows path keeps each label
+    # on the same line as its own value, not the other row's.
+    import fitz
+
+    from app.features.ocr.preprocessing import _pdf_extract_text_sync
+
+    doc = fitz.open()
+    page = doc.new_page(width=600, height=200)
+    page.insert_text((50, 40), "Reference No.", fontsize=11)
+    page.insert_text((250, 40), "9800532362", fontsize=11)
+    page.insert_text((450, 40), "02.05.2026", fontsize=11)
+    page.insert_text((50, 70), "Payment Due Date:", fontsize=11)
+    page.insert_text((250, 70), "31.05.2026", fontsize=11)
+    buffer = doc.tobytes()
+    doc.close()
+
+    text = _pdf_extract_text_sync(buffer)
+    assert text is not None
+    lines = text.split("\n")
+    reference_line = next(line for line in lines if "Reference" in line)
+    assert "9800532362" in reference_line
+    assert "02.05.2026" in reference_line
+    assert "31.05.2026" not in reference_line
 
 
 def demo() -> None:
@@ -337,6 +372,7 @@ def demo() -> None:
     test_rotate_180_is_a_known_false_negative()
     test_crop_header_keeps_table_out_for_normal_page()
     test_crop_header_can_leak_into_table_for_table_dominant_page()
+    test_pdf_text_layer_groups_label_with_its_own_row_not_reading_order()
     print("All preprocessing quality-gate self-checks passed.")
 
 

@@ -25,6 +25,8 @@ import os
 import threading
 from typing import Any
 
+from app.features.ocr.row_assembly import assemble_rows
+
 # Confirmed root cause of "all GET APIs are slow" (measured, not assumed):
 # OpenBLAS/OMP default to using every logical core for PaddleOCR's internal
 # matrix math, unless told otherwise - on this 12-core machine that means an
@@ -108,14 +110,21 @@ def run_ocr(
     *,
     use_doc_orientation_classify: bool = False,
     text_det_limit_side_len: int | None = None,
-) -> str | None:
+) -> tuple[str | None, float | None]:
     """Blocking call - invoke via asyncio.to_thread from async code. Reuses
     the cached PaddleOCR singleton instead of loading the model fresh.
 
     use_doc_orientation_classify/text_det_limit_side_len are per-call
     overrides threaded from preprocessing.py's quality gate (Feature 6) -
     defaults reproduce the original fast path exactly (classifier off,
-    detector limit falls back to the singleton's init-time 960)."""
+    detector limit falls back to the singleton's init-time 960).
+
+    Returns (assembled_text, min_rec_score): assembled_text is row-grouped
+    (see row_assembly.assemble_rows) rather than one raw text box per line,
+    and min_rec_score is the lowest per-box OCR recognition confidence
+    (`rec_scores`) across the whole result, or None if unavailable/empty -
+    both feed extraction.py's confidence scoring so a wrong-row grab or a
+    shaky character read is no longer invisible behind a 100% score."""
     try:
         ocr = _get_ocr()
         results = ocr.predict(
@@ -123,10 +132,17 @@ def run_ocr(
             use_doc_orientation_classify=use_doc_orientation_classify,
             text_det_limit_side_len=text_det_limit_side_len,
         )
-        lines: list[str] = []
+        row_lines: list[str] = []
+        scores: list[float] = []
         for r in results:
-            texts = r.json.get("res", {}).get("rec_texts", [])
-            lines.extend(t for t in texts if t and t.strip())
-        return "\n".join(lines) or None
+            res = r.json.get("res", {})
+            texts = res.get("rec_texts", [])
+            boxes = res.get("rec_boxes", [])
+            r_scores = res.get("rec_scores", [])
+            row_lines.extend(assemble_rows(texts, boxes))
+            scores.extend(s for s in r_scores if s is not None)
+        text = "\n".join(row_lines) or None
+        min_score = min(scores) if scores else None
+        return text, min_score
     except Exception:  # noqa: BLE001
-        return None
+        return None, None

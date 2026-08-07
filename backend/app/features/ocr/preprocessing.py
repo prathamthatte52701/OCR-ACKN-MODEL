@@ -6,11 +6,28 @@ import fitz  # PyMuPDF
 import numpy as np
 from PIL import Image
 
-# Crops to the top ~28% of the page (Reference No./Delivery Challan No. + date
+from app.features.ocr.row_assembly import assemble_rows
+
+# Crops to the top ~30% of the page (Reference No./Delivery Challan No. + date
 # row always lives there on both templates) before OCR - ported from the old
 # ocr.js HEADER_CROP_RATIO, so OCR never has to fight the item table/stamps/
 # signatures below it.
-HEADER_CROP_RATIO = 0.28
+#
+# Raised from 0.28 to 0.30: a live accuracy test found 6/8 and 5/6 digit
+# misreads in the Tax Invoice No./Reference No. row on documents whose
+# printed header table runs slightly taller than 28% of the page (scan DPI,
+# margins, and address-block length vary per document) - the last header row
+# was getting its glyphs shaved at the crop boundary, and those two digit
+# pairs are exactly the ones most sensitive to a clipped stroke. This is a
+# conservative, empirical safety-margin increase, not content-aware boundary
+# detection - a two-pass "find the real table start" approach would double
+# OCR calls per document and is deliberately out of scope (see the
+# module-level scope note below). Capped at 0.30 rather than going higher:
+# test_preprocessing.py's test_crop_header_keeps_table_out_for_normal_page
+# fixture puts a normally-proportioned invoice's item table at 31.25% of
+# page height, so anything past that starts eating into the item
+# table/stamps/signatures region this ratio exists to keep out.
+HEADER_CROP_RATIO = 0.30
 
 # Wraps in-process PDF parsing (PyMuPDF) in a timeout - a malformed/hostile
 # PDF must never be able to hang the whole server, mirrors the old app's
@@ -43,11 +60,29 @@ def _pdf_page_count_sync(buffer: bytes) -> int | None:
 
 
 def _pdf_extract_text_sync(buffer: bytes) -> str | None:
-    """Returns page-1 text if the PDF has a text layer, else None (scanned)."""
+    """Returns page-1 text if the PDF has a text layer, else None (scanned).
+
+    Uses per-word bounding boxes (`get_text("words")`) run through the same
+    row-reconstruction as the OCR path (row_assembly.assemble_rows), not
+    plain `get_text()` - a two-column header table (label column + value/
+    date column) has its columns in separate text blocks, so PyMuPDF's own
+    default reading order does not reliably interleave a row's label with
+    its own value; it can put e.g. every date in the table one after
+    another, textually far from any label. That was silently feeding the AI
+    extraction prompt structure-free text and is the same class of bug the
+    OCR path had (see paddle_runner.py's module docstring) - this path just
+    never went through OCR in the first place, since a digital PDF with an
+    embedded text layer skips the OCR branch entirely (see
+    get_pdf_header_text_or_image below)."""
     with fitz.open(stream=buffer, filetype="pdf") as doc:
         if doc.page_count == 0:
             return None
-        text = doc[0].get_text().strip()
+        words = doc[0].get_text("words")
+        if not words:
+            return None
+        texts = [w[4] for w in words]
+        boxes = [[w[0], w[1], w[2], w[3]] for w in words]
+        text = "\n".join(assemble_rows(texts, boxes)).strip()
         return text if len(text) > 20 else None
 
 
@@ -97,7 +132,7 @@ async def get_pdf_header_text_or_image(buffer: bytes) -> tuple[str | None, bytes
 # its own heuristic; there is no single on/off switch.
 #
 # Scope boundary (deliberate, not an oversight): this pipeline only ever OCRs
-# the top-28% header crop (see HEADER_CROP_RATIO), not the full page. So:
+# the top-30% header crop (see HEADER_CROP_RATIO), not the full page. So:
 #   - "Watermark/stamp/seal suppression" here means adaptive contrast-based
 #     text-vs-background separation *within that crop*, not general watermark
 #     segmentation - there's no dedicated segmentation model, that would be

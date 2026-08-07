@@ -17,7 +17,10 @@ _TEMPLATE_BY_TYPE = {
 
 
 async def extract_header(
-    document_type: str, header_text: str | None, provider: AIProvider | None = None
+    document_type: str,
+    header_text: str | None,
+    provider: AIProvider | None = None,
+    min_rec_score: float | None = None,
 ) -> dict:
     if not header_text or not header_text.strip():
         return empty_extraction_result(document_type)
@@ -28,4 +31,4 @@ async def extract_header(
 
     raw_response = await provider.extract(system_prompt, user_prompt)
     parsed = parse_extraction_json(raw_response)
-    return build_extraction_result(document_type, parsed)
+    return build_extraction_result(document_type, parsed, header_text, min_rec_score=min_rec_score)
