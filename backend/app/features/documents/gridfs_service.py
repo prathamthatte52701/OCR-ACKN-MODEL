@@ -1,4 +1,5 @@
 from bson import ObjectId
+from gridfs.errors import NoFile
 
 from app.core.database import get_gridfs
 
@@ -18,5 +19,11 @@ async def download_buffer(file_id: ObjectId) -> bytes:
 
 
 async def delete_file(file_id: ObjectId) -> None:
+    """An already-missing file is success, not an error: concurrent deletes
+    (or File Delete then Delete) hit NoFile on the loser, which used to be
+    logged as a bogus 'orphaned file' for a file that was cleaned up fine."""
     bucket = get_gridfs()
-    await bucket.delete(file_id)
+    try:
+        await bucket.delete(file_id)
+    except NoFile:
+        return

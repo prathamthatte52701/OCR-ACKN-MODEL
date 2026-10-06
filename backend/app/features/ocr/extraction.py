@@ -3,6 +3,7 @@ services/groq.js post-processing (normalizeDateToDDMMYYYY, numberConfidence,
 dateConfidence, taxInvoiceNoConfidence). No AI involved in this file."""
 
 import re
+from datetime import datetime
 
 DATE_RE = re.compile(r"^(\d{2})[./-](\d{2})[./-](\d{4})$")
 PLAUSIBLE_NUMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9/-]{2,}$")
@@ -277,8 +278,14 @@ def normalize_date_to_ddmmyyyy(raw: str | None) -> str | None:
     if not match:
         return None
     dd, mm, yyyy = match.groups()
-    d, m = int(dd), int(mm)
-    if d < 1 or d > 31 or m < 1 or m > 12:
+    d, m, y = int(dd), int(mm), int(yyyy)
+    # A real calendar date in a sane range: 31/02/2026 and 01/01/1900 used to
+    # pass (only 1-31 / 1-12 were checked) and were filed into a made-up month.
+    if not 2000 <= y <= 2100:
+        return None
+    try:
+        datetime(y, m, d)
+    except ValueError:
         return None
     return f"{dd}/{mm}/{yyyy}"
 

@@ -13,11 +13,21 @@ def _page(width: int = 600, height: int = 850) -> np.ndarray:
     page = np.full((height, width, 3), 245, dtype=np.uint8)
     for i in range(12):  # header-ish text rows near the top, body further down
         y = 40 + i * 22
-        cv2.putText(page, f"TAX INVOICE ROW {i} 9800{i}12345", (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (20, 20, 20), 1)
+        cv2.putText(
+            page,
+            f"TAX INVOICE ROW {i} 9800{i}12345",
+            (20, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (20, 20, 20),
+            1,
+        )
     return page
 
 
-def _on_background(page: np.ndarray, canvas=(1000, 1400), offset=(180, 260)) -> np.ndarray:
+def _on_background(
+    page: np.ndarray, canvas: tuple[int, int] = (1000, 1400), offset: tuple[int, int] = (180, 260)
+) -> np.ndarray:
     rng = np.random.default_rng(1)
     bg = rng.integers(20, 90, size=(canvas[1], canvas[0], 3), dtype=np.uint8)
     x, y = offset
@@ -32,7 +42,9 @@ def _png(img: np.ndarray) -> bytes:
 
 
 def _decode(b: bytes) -> np.ndarray:
-    return cv2.imdecode(np.frombuffer(b, dtype=np.uint8), cv2.IMREAD_COLOR)
+    img = cv2.imdecode(np.frombuffer(b, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert img is not None
+    return img
 
 
 def test_full_bleed_scan_is_returned_untouched() -> None:

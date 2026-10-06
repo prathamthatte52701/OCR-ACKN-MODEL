@@ -81,9 +81,7 @@ def assemble_rows(texts: list[str], boxes: list[list[float]]) -> list[str]:
     output_lines: list[str] = []
     for row in rows:
         row_sorted = sorted(row, key=lambda item: item[1][0])
-        gaps = [
-            row_sorted[i + 1][1][0] - row_sorted[i][1][2] for i in range(len(row_sorted) - 1)
-        ]
+        gaps = [row_sorted[i + 1][1][0] - row_sorted[i][1][2] for i in range(len(row_sorted) - 1)]
         if len(gaps) >= 2:
             sorted_gaps = sorted(gaps)
             median_gap = sorted_gaps[len(sorted_gaps) // 2]

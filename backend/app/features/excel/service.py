@@ -8,6 +8,7 @@ from pathlib import Path
 
 import openpyxl
 from filelock import FileLock
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.worksheet.worksheet import Worksheet
 
 EXPORT_DIR = Path(__file__).resolve().parents[3] / "exports"
@@ -58,6 +59,23 @@ class FileLockedError(Exception):
 
 def _ensure_export_dir() -> None:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# Characters that can steer a path (or are invalid in Windows file names). A
+# user-chosen workbook name containing "/" used to survive into the physical
+# name, and file_path()'s os.path.basename() then threw away everything
+# before it - including the owner's userId prefix - so "x/<victimId>_Bills"
+# resolved to ANOTHER user's workbook (overwrite on create, unlink on user
+# delete). Neutralizing them here keeps the prefix intact for every caller.
+_UNSAFE_NAME_CHARS = re.compile(r'[\/:*?"<>|\x00-\x1f]')
+
+
+def physical_workbook_filename(user_id: object, filename: str) -> str:
+    """Single source of truth for the on-disk name of a user's workbook:
+    `{userId}_{display name}` with path-steering characters neutralized.
+    Ordinary names are unchanged, so existing files keep resolving."""
+    safe = _UNSAFE_NAME_CHARS.sub("_", str(filename)).replace("..", "_")
+    return f"{user_id}_{safe}"
 
 
 def file_path(filename: str) -> Path:
@@ -136,6 +154,29 @@ async def create_workbook(filename: str, month: str | None = None) -> Path:
         return await asyncio.to_thread(_create_workbook_locked_sync, filename, month)
 
 
+# Leading characters Excel/LibreOffice treat as the start of a formula.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _clean_cell(value: object) -> object:
+    """Strips characters XML cannot hold (a control character in a corrected
+    value made openpyxl raise IllegalCharacterError, i.e. a 500 on save)."""
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    return value
+
+
+def _force_text_cells(cells: tuple) -> None:
+    """A value like =HYPERLINK("http://evil","x") or =cmd|' /C calc'!A0 was
+    written as a LIVE formula (openpyxl infers one from a leading "="), and
+    Export History lets other users download this workbook - classic
+    spreadsheet formula injection. Anything starting like a formula is stored
+    as a plain string cell instead, so it displays as text and never runs."""
+    for cell in cells:
+        if isinstance(cell.value, str) and cell.value.startswith(_FORMULA_PREFIXES):
+            cell.data_type = "s"
+
+
 def _format_number_cell(row: dict) -> str | None:
     if row["documentType"] == "Tax Invoice":
         parts = [p for p in (row.get("taxInvoiceNo"), row.get("referenceNo")) if p]
@@ -172,8 +213,14 @@ def _append_row_sync(filename: str, month: str, row: dict) -> Path:
                 sheet = workbook.create_sheet(month)
                 _add_header_row(sheet)
             sheet.append(
-                [row["documentType"], _format_number_cell(row), row["date"], row["timestamp"]]
+                [
+                    _clean_cell(row["documentType"]),
+                    _clean_cell(_format_number_cell(row)),
+                    _clean_cell(row["date"]),
+                    _clean_cell(row["timestamp"]),
+                ]
             )
+            _force_text_cells(sheet[sheet.max_row])
             workbook.save(tmp_target)
             os.replace(tmp_target, target)
         except PermissionError as exc:

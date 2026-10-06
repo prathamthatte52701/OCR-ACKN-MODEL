@@ -8,6 +8,7 @@ import AppLayout from './components/AppLayout'
 import ServerDownBanner from './components/ServerDownBanner'
 import GlobalConfirmDialog from './components/GlobalConfirmDialog'
 import GlobalPromptDialog from './components/GlobalPromptDialog'
+import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
@@ -36,6 +37,7 @@ export default function App() {
         <GlobalPromptDialog />
         <Toaster theme="dark" position="top-right" richColors closeButton />
         <AuthGate>
+          <ErrorBoundary>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
@@ -61,6 +63,7 @@ export default function App() {
                 an unknown path saw nothing at all. Ported fix. */}
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
+          </ErrorBoundary>
         </AuthGate>
       </BrowserRouter>
     </QueryClientProvider>

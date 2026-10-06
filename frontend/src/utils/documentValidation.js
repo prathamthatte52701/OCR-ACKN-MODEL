@@ -6,6 +6,7 @@ const MAX_SIZE_MB = 5
 // bulk-upload flow, so both enforce the exact same type/size rules the
 // backend does, without duplicating them.
 export function validateDocumentFile(file, { imageOnly = false } = {}) {
+  if (file.size === 0) return 'This file is empty.'
   const acceptedTypes = imageOnly ? IMAGE_ONLY_TYPES : ACCEPTED_TYPES
   if (!acceptedTypes.includes(file.type)) {
     return imageOnly ? 'Only JPG, JPEG, and PNG files are allowed.' : 'Only JPG, JPEG, PNG, and PDF files are allowed.'

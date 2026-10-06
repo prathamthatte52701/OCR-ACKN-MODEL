@@ -84,7 +84,8 @@ def _longest_run(flags: np.ndarray) -> tuple[int, int] | None:
 
 def _central_band_box(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     """Axis-aligned page extent from the mask's central band: rows where the
-    middle 30% of columns are mostly paper (0.6, so a dark QR block can not split the run), columns where the middle
+    middle 30% of columns are mostly paper (0.6, so a dark QR block can not
+    split the run), columns where the middle
     30% of rows are. Robust to bright background merged onto the page's
     edges, but assumes the page is roughly upright in the frame."""
     h, w = mask.shape[:2]

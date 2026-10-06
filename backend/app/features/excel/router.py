@@ -20,7 +20,7 @@ def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
     display name would otherwise collide on the SAME physical .xlsx file even
     though their Workbook/Settings records are isolated. Namespacing the
     on-disk filename with the owning userId keeps the files isolated too."""
-    return f"{user_id}_{filename}"
+    return excel_service.physical_workbook_filename(user_id, filename)
 
 
 async def _get_settings(user_id: ObjectId) -> dict | None:
@@ -186,16 +186,33 @@ async def new_excel_file(
 
     db = get_database()
     now = datetime.now(UTC)
+    # create_workbook always replaces the physical file, so reusing a name
+    # would silently wipe that workbook's rows.
+    if await db.workbooks.find_one({"userId": current_user.id, "filename": trimmed}):
+        raise HTTPException(
+            status_code=400, detail="You already have a workbook with that name. Pick another."
+        )
+
+    # Create the file FIRST. It used to archive the active workbook before
+    # creating the new one, so a failed create left the user with no active
+    # workbook at all.
+    try:
+        await excel_service.create_workbook(
+            _physical_workbook_filename(current_user.id, trimmed), month
+        )
+    except excel_service.FileLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400, detail="That workbook name can't be used. Try a simpler name."
+        ) from exc
+
     # Archive whatever workbook THIS USER currently has active, regardless of
     # year - covers both year rollover AND a same-year "start new file" click,
     # which the old app's earlier (buggy) version silently overwrote instead.
     await db.workbooks.update_many(
         {"userId": current_user.id, "isActive": True},
         {"$set": {"isActive": False, "archivedAt": now, "updatedAt": now}},
-    )
-
-    await excel_service.create_workbook(
-        _physical_workbook_filename(current_user.id, trimmed), month
     )
     await db.workbooks.insert_one(
         {

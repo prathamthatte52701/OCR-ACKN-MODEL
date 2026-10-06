@@ -4,6 +4,7 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
+from urllib.parse import quote
 
 from bson import ObjectId
 from fastapi import (
@@ -45,6 +46,10 @@ DOCUMENT_TYPES = {"Tax Invoice", "Delivery Challan"}
 # not midnight-to-now) - simplest, deterministic, avoids timezone-boundary
 # ambiguity between server UTC and the user's local day/week/month/year.
 RANGE_DAYS = {"today": 1, "week": 7, "month": 30, "year": 365}
+CORRECTABLE_NUMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./_-]{0,39}$")
+MAX_PAGE_SIZE = 100
+REPROCESS_STUCK_AFTER = timedelta(minutes=10)
+MAX_PAGE_NUMBER = 100_000
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_BULK_FILES = 10
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/jpg", "image/png", "application/pdf"}
@@ -92,6 +97,17 @@ def _sanitize_content_disposition_filename(filename: str) -> str:
     working while making header injection structurally impossible here."""
     cleaned = _UNSAFE_HEADER_CHARS_RE.sub("", filename)
     return cleaned or "document"
+
+
+def _content_disposition(filename: str) -> str:
+    """Attachment header safe for ANY uploaded name. A non-latin-1 character
+    (e.g. a Hindi/Chinese filename) in the plain filename="..." value made
+    Starlette fail to encode the header, so the file uploaded fine but its
+    download returned 500. Send an ASCII fallback plus the RFC 5987
+    filename* form carrying the real UTF-8 name."""
+    safe = _sanitize_content_disposition_filename(filename)
+    ascii_name = safe.encode("ascii", "replace").decode("ascii").replace("?", "_")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(safe, safe='')}"
 
 
 _UNSAFE_ZIP_ENTRY_CHARS_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
@@ -340,6 +356,8 @@ async def list_documents(
 
     if document_type in DOCUMENT_TYPES:
         filter_query["documentType"] = document_type
+    if number and "\x00" in number:
+        raise HTTPException(status_code=400, detail="Invalid search text.")
     if number and number.strip():
         regex = {"$regex": _escape_regex(number.strip()), "$options": "i"}
         filter_query["$or"] = [
@@ -354,8 +372,10 @@ async def list_documents(
         filter_query["createdAt"] = {"$gte": cutoff}
 
     if page:
-        lim = max(1, limit or 30)
-        pg = max(1, page)
+        # Capped: page=10**18 used to overflow Mongo's skip (500) and
+        # limit=10**9 returned everything in one response.
+        lim = min(MAX_PAGE_SIZE, max(1, limit or 30))
+        pg = min(MAX_PAGE_NUMBER, max(1, page))
         skip = (pg - 1) * lim
         total_documents = await db.documents.count_documents(filter_query)
         cursor = db.documents.find(filter_query).sort("createdAt", -1).skip(skip).limit(lim)
@@ -510,11 +530,10 @@ async def download_document(
             detail=("Original file removed to save space - extracted data below remains accurate."),
         )
     buffer = await download_buffer(doc["gridFsFileId"])
-    safe_filename = _sanitize_content_disposition_filename(doc["originalFilename"])
     return Response(
         content=buffer,
         media_type=doc["mimeType"],
-        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'},
+        headers={"Content-Disposition": _content_disposition(doc["originalFilename"])},
     )
 
 
@@ -538,7 +557,9 @@ async def download_all_documents(
     skipped = 0
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for doc_id in body.document_ids:
+        # dict.fromkeys keeps order and drops repeats - the same id sent 200
+        # times used to re-read the same GridFS file 200 times.
+        for doc_id in dict.fromkeys(body.document_ids):
             doc = await db.documents.find_one(
                 {"_id": doc_id, "userId": current_user.id, "isDeleted": {"$ne": True}}
             )
@@ -585,6 +606,20 @@ async def reprocess_document(
                 "can no longer be reprocessed."
             ),
         )
+    # Already queued/processing (and not stuck): a second reprocess used to
+    # queue a duplicate OCR job whose late result then overwrote the user's
+    # manual correction. A document stuck for > REPROCESS_STUCK_AFTER (crash)
+    # can still be reprocessed.
+    updated_at = doc.get("updatedAt")
+    if (
+        doc.get("uploadStatus") == "uploaded"
+        and updated_at is not None
+        and datetime.now(UTC) - updated_at.replace(tzinfo=updated_at.tzinfo or UTC)
+        < REPROCESS_STUCK_AFTER
+    ):
+        raise HTTPException(
+            status_code=409, detail="This document is already being processed. Please wait."
+        )
     buffer = await download_buffer(doc["gridFsFileId"])
 
     db = get_database()
@@ -594,6 +629,10 @@ async def reprocess_document(
             "$set": {
                 "uploadStatus": "uploaded",
                 "processingError": None,
+                "taxInvoiceNoConfidence": None,
+                "referenceNoConfidence": None,
+                "numberConfidence": None,
+                "dateConfidence": None,
                 "taxInvoiceNo": None,
                 "referenceNo": None,
                 "number": None,
@@ -749,8 +788,21 @@ async def correct_document(
     if body.field == "date":
         normalized = normalize_date_to_ddmmyyyy(value)
         if not normalized:
-            raise HTTPException(status_code=400, detail="Date must be in DD/MM/YYYY format.")
+            raise HTTPException(
+                status_code=400, detail="Enter a real date in DD/MM/YYYY format (year 2000-2100)."
+            )
         value = normalized
+    elif not CORRECTABLE_NUMBER_RE.match(value):
+        # Numbers are letters/digits (plus - / . _ and spaces), 1-40 chars.
+        # Previously anything was accepted: a 10 MB string, <script>, control
+        # characters (500 on Excel save) and "=HYPERLINK(...)" formulas.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Number can only contain letters, digits, spaces and - / . _ "
+                "(max 40 characters)."
+            ),
+        )
 
     old_value = doc.get(body.field)
     db = get_database()

@@ -453,8 +453,9 @@ export default function UploadPage() {
           }
         : f)))
       setReviewEditingField(null)
-    } catch {
+    } catch (err) {
       // CorrectionModal stays open on failure so the user can retry.
+      toast.error(err.userMessage || 'Could not save your correction. Please try again.')
     }
   }
 

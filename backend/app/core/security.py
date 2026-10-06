@@ -17,7 +17,18 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    # bcrypt 5 raises ValueError for input over 72 bytes, which surfaced as a
+    # 500 on login/change-password/admin-confirm for an existing user (login
+    # bodies have no length cap). Signup caps passwords at 32 chars, so a
+    # longer value can never match a stored hash - answer "no" instead of
+    # crashing, and never hand an attacker-sized buffer to bcrypt.
+    raw = password.encode("utf-8")
+    if len(raw) > 72:
+        return False
+    try:
+        return bcrypt.checkpw(raw, password_hash.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def sign_token(user_id: str, token_version: int, role: str) -> str:

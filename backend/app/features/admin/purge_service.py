@@ -128,8 +128,22 @@ async def remove_exported_rows_from_workbooks(
         wb = await db.workbooks.find_one({"_id": workbook_id})
         if not wb:
             continue
-        physical_filename = f"{wb['userId']}_{wb['filename']}"
-        removed, fully_empty = await excel_service.remove_rows(physical_filename, rows)
+        physical_filename = excel_service.physical_workbook_filename(wb["userId"], wb["filename"])
+        try:
+            removed, fully_empty = await excel_service.remove_rows(physical_filename, rows)
+        except Exception as exc:  # noqa: BLE001
+            # A corrupt, missing-sheet or Excel-locked workbook must not abort
+            # the purge halfway: by this point every matched document's GridFS
+            # file is already gone, so bailing out here used to leave document
+            # records pointing at deleted files (and every retry failed the
+            # same way). The documents/rows are still purged; the stale
+            # spreadsheet rows are flagged in the audit log for manual cleanup.
+            await log_action(
+                wb["userId"],
+                "purge_workbook_cleanup_failed",
+                {"workbook": wb["filename"], "error": type(exc).__name__},
+            )
+            continue
         total_removed += removed
         if fully_empty:
             fully_deleted_filenames.append(wb["filename"])

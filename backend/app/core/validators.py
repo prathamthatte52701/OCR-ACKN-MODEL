@@ -25,7 +25,10 @@ def validate_username(username: str) -> str | None:
 
 
 def validate_email(email: str) -> str | None:
-    if not EMAIL_RE.match(normalize_email(email)):
+    normalized = normalize_email(email)
+    # 254 is the RFC 5321 maximum; without a cap a 5000-char "email" was
+    # accepted and then stored/rendered in logs and admin tables.
+    if len(normalized) > 254 or not EMAIL_RE.match(normalized):
         return "Enter a valid email address."
     return None
 

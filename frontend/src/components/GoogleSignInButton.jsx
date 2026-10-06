@@ -18,6 +18,17 @@ export default function GoogleSignInButton() {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
     if (!clientId) return
 
+    // Loaded here, not in index.html, so a deployment without Google sign-in
+    // makes no third-party request on every page.
+    if (!document.querySelector('script[data-gsi]')) {
+      const s = document.createElement('script')
+      s.src = 'https://accounts.google.com/gsi/client'
+      s.async = true
+      s.defer = true
+      s.dataset.gsi = '1'
+      document.head.appendChild(s)
+    }
+
     let cancelled = false
     async function handleCredential({ credential }) {
       try {

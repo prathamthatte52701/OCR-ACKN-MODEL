@@ -44,6 +44,18 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     # existing record instead of creating a duplicate.
     await db.orphanedfiles.create_index([("gridFsFileId", 1)], unique=True)
     await db.orphanedfiles.create_index([("createdAt", -1)])
+    # Email uniqueness was only a check-then-insert in the routers. The old
+    # database carried a unique index from an earlier version, but a fresh
+    # cluster has none, so two concurrent signups/profile updates could
+    # create duplicate accounts. Enforce it in the database; if legacy
+    # duplicates already exist the index can't build - warn, don't crash
+    # startup (the router-level checks still apply).
+    try:
+        await db.users.create_index([("email", 1)], unique=True)
+    except Exception as exc:  # noqa: BLE001
+        from loguru import logger
+
+        logger.warning(f"Could not create unique users.email index (duplicates present?): {exc}")
 
 
 async def close_mongo_connection() -> None:

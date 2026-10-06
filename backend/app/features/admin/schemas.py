@@ -42,5 +42,7 @@ class AdminMonthsRequest(AdminConfirmedDeleteRequest):
     both for the per-user admin mode (target user comes from the URL path)
     and the global/all-users admin mode - same body shape either way."""
 
-    year: int
+    # Bounded so year=0 / -5 / 99999 fail validation (422) instead of
+    # reaching datetime(year, ...) and 500ing mid-request.
+    year: int = Field(ge=2000, le=2100)
     months: list[Literal[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]] = Field(min_length=1)

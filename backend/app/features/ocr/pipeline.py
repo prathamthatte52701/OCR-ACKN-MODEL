@@ -47,6 +47,11 @@ def ocr_lock_status() -> dict:
     return {"held": True, "wedged": held_seconds > _LOCK_WEDGED_THRESHOLD_SECONDS}
 
 
+# One normalization at a time: each decodes and warps a full-size photo, and
+# a bulk upload/reprocess used to run dozens concurrently (memory spike).
+_normalize_slot = asyncio.Semaphore(1)
+
+
 async def _normalize_photo_page(buffer: bytes) -> bytes:
     """normalize_photo needs the orientation classifier only for photos that
     look sideways or have background around the paper - it calls it lazily,
@@ -58,10 +63,14 @@ async def _normalize_photo_page(buffer: bytes) -> bytes:
         # Runs in a worker thread (see to_thread below); take the SAME
         # process-wide OCR slot via the loop so it can never overlap run_ocr.
         fut = asyncio.run_coroutine_threadsafe(_classify_under_lock(png), loop)
-        return fut.result(timeout=120)
+        # The OCR slot can be busy with a long queue of other jobs ahead of
+        # this one; a short timeout here silently skipped the rotation fix
+        # for any document that waited. Match the OCR budget instead.
+        return fut.result(timeout=OCR_TIMEOUT_SECONDS_IMAGE + 60)
 
     try:
-        page_bytes, steps = await asyncio.to_thread(normalize_photo, buffer, classify)
+        async with _normalize_slot:
+            page_bytes, steps = await asyncio.to_thread(normalize_photo, buffer, classify)
         if steps:
             logger.info(f"Photo page normalization: {steps}")
         return page_bytes

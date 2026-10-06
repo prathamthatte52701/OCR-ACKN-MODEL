@@ -47,7 +47,7 @@ FIELDS_BY_DOCUMENT_TYPE = {
 
 
 def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
-    return f"{user_id}_{filename}"
+    return excel_service.physical_workbook_filename(user_id, filename)
 
 
 def _pagination(
@@ -153,6 +153,13 @@ async def update_user(
             updates["email"] = email
 
     if body.role is not None:
+        if body.role != "admin" and user.get("role") == "admin":
+            # Demoting an admin: never yourself, and never the last admin -
+            # otherwise the system can end up with nobody able to administer.
+            if user_id == current_user.id:
+                raise HTTPException(status_code=400, detail="You cannot demote your own account.")
+            if await db.users.count_documents({"role": "admin"}) <= 1:
+                raise HTTPException(status_code=400, detail="You cannot demote the last admin.")
         updates["role"] = body.role
 
     if updates:
@@ -185,6 +192,8 @@ async def delete_user(
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    if user.get("role") == "admin" and await db.users.count_documents({"role": "admin"}) <= 1:
+        raise HTTPException(status_code=400, detail="You cannot delete the last admin.")
 
     docs_cursor = db.documents.find({"userId": user_id}, {"_id": 1, "gridFsFileId": 1})
     docs = await docs_cursor.to_list(length=None)

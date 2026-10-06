@@ -87,7 +87,20 @@ async def validation_exception_handler(
         is_path_error = error.get("loc") and error["loc"][0] == "path"
         if is_path_error and "Invalid ObjectId" in str(error.get("msg", "")):
             return JSONResponse(status_code=400, content={"detail": "Invalid id."})
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    # errors() carries the raw exception from custom validators under "ctx"
+    # (e.g. ValueError('Workbook name cannot...')), which JSONResponse can't
+    # serialize - every such validation failure used to crash into a 500.
+    # Keep the useful fields, drop ctx, and strip pydantic's "Value error, "
+    # prefix so the message reads cleanly in the UI.
+    detail = [
+        {
+            "type": e.get("type"),
+            "loc": list(e.get("loc", ())),
+            "msg": str(e.get("msg", "")).removeprefix("Value error, "),
+        }
+        for e in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 app.add_middleware(SlowAPIMiddleware)

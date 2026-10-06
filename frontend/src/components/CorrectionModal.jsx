@@ -9,9 +9,13 @@ export default function CorrectionModal({ field, onSave, onClose }) {
 
   async function handleSave() {
     if (!value.trim()) return
+    if (saving) return
     setSaving(true)
-    await onSave(field, value.trim())
-    setSaving(false)
+    try {
+      await onSave(field, value.trim())
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -34,6 +38,7 @@ export default function CorrectionModal({ field, onSave, onClose }) {
             <label className="mb-1 block text-xs text-gray-500">New Value</label>
             <input
               type="text"
+              maxLength={40}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-sm text-white outline-none transition-colors focus:border-blue-500"
