@@ -29,6 +29,9 @@ async def extract_header(
     system_prompt = _env.get_template(_TEMPLATE_BY_TYPE[document_type]).render()
     user_prompt = f"Extract from this {document_type} header OCR text:\n\n{header_text}"
 
-    raw_response = await provider.extract(system_prompt, user_prompt)
-    parsed = parse_extraction_json(raw_response)
+    # The model occasionally returns an empty/truncated reply; one retry fixes it.
+    try:
+        parsed = parse_extraction_json(await provider.extract(system_prompt, user_prompt))
+    except ValueError:
+        parsed = parse_extraction_json(await provider.extract(system_prompt, user_prompt))
     return build_extraction_result(document_type, parsed, header_text, min_rec_score=min_rec_score)

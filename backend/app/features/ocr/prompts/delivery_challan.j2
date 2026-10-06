@@ -11,6 +11,8 @@ Match the label by meaning/similarity, not exact spelling - a garbled label
 next to a plausible number+date pair is still that row, don't return null
 just because the label text isn't a perfect match.
 
+WHICH NUMBER: the Delivery Challan number is the FIRST number on the "Delivery Challan" row. Never use the Order number, Customer PO, External Delivery, Account, Customer no. or any phone number (e.g. +91 2714 668000), even if the Delivery Challan number itself is missing - return null instead.
+
 CRITICAL - PRINTED TEXT ONLY:
 - This OCR text may contain handwritten notes, rubber-stamp text, signatures, or pen marks mixed in with the machine-printed form.
 - Extract ONLY values that belong to the machine-printed form fields.

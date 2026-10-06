@@ -28,6 +28,10 @@ from app.features.ocr.row_assembly import assemble_rows
 # page height, so anything past that starts eating into the item
 # table/stamps/signatures region this ratio exists to keep out.
 HEADER_CROP_RATIO = 0.30
+# Camera photos whose paper was cut out of a background (page_normalize) keep a
+# little background/margin above the sheet, which pushes the number row below a
+# 30% cut. 42% reliably includes it (15/15 on the hard Delivery Challan photos).
+PHOTO_HEADER_CROP_RATIO = 0.42
 
 # Wraps in-process PDF parsing (PyMuPDF) in a timeout - a malformed/hostile
 # PDF must never be able to hang the whole server, mirrors the old app's
@@ -41,10 +45,10 @@ PDF_PARSE_TIMEOUT_SECONDS = 60
 PDF_RENDER_SCALE = 2.5
 
 
-def crop_header(image_bytes: bytes) -> bytes:
+def crop_header(image_bytes: bytes, ratio: float = HEADER_CROP_RATIO) -> bytes:
     with Image.open(io.BytesIO(image_bytes)) as img:
         width, height = img.size
-        crop_height = max(1, round(height * HEADER_CROP_RATIO))
+        crop_height = max(1, round(height * ratio))
         cropped = img.crop((0, 0, width, crop_height))
         buf = io.BytesIO()
         cropped.convert("RGB").save(buf, format="PNG")

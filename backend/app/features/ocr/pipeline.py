@@ -16,9 +16,11 @@ from app.features.ocr.paddle_runner import (
 )
 from app.features.ocr.page_normalize import normalize_photo
 from app.features.ocr.preprocessing import (
+    HEADER_CROP_RATIO,
     LARGE_TEXT_DET_LIMIT,
     LARGE_TEXT_DET_LIMIT_STEP,
     ORIENTATION_CHECK_STEP,
+    PHOTO_HEADER_CROP_RATIO,
     assess_and_preprocess,
     crop_header,
     get_pdf_header_text_or_image,
@@ -89,6 +91,7 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
     (None, None) on failure - mirrors the old app's extractHeaderText().
     min_rec_score is only ever populated by the run_ocr (image) path below -
     a PDF's own embedded text layer has no OCR confidence to report."""
+    cut_from_background = False
     try:
         if mime_type == "application/pdf":
             text, header_png = await get_pdf_header_text_or_image(buffer)
@@ -105,13 +108,21 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
             # under the same lock as OCR; the lock is released before the
             # OCR block below re-acquires it.
             page_bytes = await _normalize_photo_page(buffer)
-            image_bytes = crop_header(page_bytes)
+            cut_from_background = page_bytes != buffer
+            image_bytes = crop_header(
+                page_bytes, PHOTO_HEADER_CROP_RATIO if cut_from_background else HEADER_CROP_RATIO
+            )
 
         # Feature 6: quality-gated preprocessing on the header crop itself -
         # skips straight through (unmodified bytes) when the crop is already
         # good quality. See preprocessing.py's module-level docstring for the
         # scope boundaries (header-only, not full-page rotation recovery).
-        image_bytes, preprocess_steps = assess_and_preprocess(image_bytes)
+        # Photos cut out of a background are small and soft; the binarizing steps
+        # turned digits into noise (8<->0, 3<->6, 2026 -> 2028), so raw is better.
+        if mime_type != "application/pdf" and cut_from_background:
+            preprocess_steps: list[str] = []
+        else:
+            image_bytes, preprocess_steps = assess_and_preprocess(image_bytes)
         if preprocess_steps:
             logger.info(f"OCR preprocessing steps triggered: {preprocess_steps}")
         use_doc_orientation_classify = ORIENTATION_CHECK_STEP in preprocess_steps
