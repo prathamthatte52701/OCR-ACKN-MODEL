@@ -11,8 +11,10 @@ from app.features.ocr.ai_extraction import extract_header
 from app.features.ocr.paddle_runner import (
     OCR_TIMEOUT_SECONDS_IMAGE,
     OCR_TIMEOUT_SECONDS_PDF,
+    classify_page_orientation,
     run_ocr,
 )
+from app.features.ocr.page_normalize import normalize_photo
 from app.features.ocr.preprocessing import (
     LARGE_TEXT_DET_LIMIT,
     LARGE_TEXT_DET_LIMIT_STEP,
@@ -45,6 +47,34 @@ def ocr_lock_status() -> dict:
     return {"held": True, "wedged": held_seconds > _LOCK_WEDGED_THRESHOLD_SECONDS}
 
 
+async def _normalize_photo_page(buffer: bytes) -> bytes:
+    """normalize_photo needs the orientation classifier only for photos that
+    look sideways or have background around the paper - it calls it lazily,
+    so the lock is held (via the sync callback below) only in those cases.
+    Fails open: any problem returns the original bytes."""
+    loop = asyncio.get_running_loop()
+
+    def classify(png: bytes) -> tuple[int, float]:
+        # Runs in a worker thread (see to_thread below); take the SAME
+        # process-wide OCR slot via the loop so it can never overlap run_ocr.
+        fut = asyncio.run_coroutine_threadsafe(_classify_under_lock(png), loop)
+        return fut.result(timeout=120)
+
+    try:
+        page_bytes, steps = await asyncio.to_thread(normalize_photo, buffer, classify)
+        if steps:
+            logger.info(f"Photo page normalization: {steps}")
+        return page_bytes
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Photo page normalization failed, using original: {exc}")
+        return buffer
+
+
+async def _classify_under_lock(png: bytes) -> tuple[int, float]:
+    async with _ocr_lock:
+        return await asyncio.to_thread(classify_page_orientation, png)
+
+
 async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | None, float | None]:
     """Returns (header-region OCR/text-layer text, min_rec_score), or
     (None, None) on failure - mirrors the old app's extractHeaderText().
@@ -59,7 +89,14 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
                 return None, None
             image_bytes = header_png
         else:
-            image_bytes = crop_header(buffer)
+            # Photos only: find the paper and fix sideways/upside-down shots
+            # so the fixed top-30% crop below lands on the header. A scan or
+            # tight upright photo comes back as the original bytes, untouched.
+            # The orientation classifier is a Paddle predictor, so it runs
+            # under the same lock as OCR; the lock is released before the
+            # OCR block below re-acquires it.
+            page_bytes = await _normalize_photo_page(buffer)
+            image_bytes = crop_header(page_bytes)
 
         # Feature 6: quality-gated preprocessing on the header crop itself -
         # skips straight through (unmodified bytes) when the crop is already

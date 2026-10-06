@@ -146,3 +146,35 @@ def run_ocr(
         return text, min_score
     except Exception:  # noqa: BLE001
         return None, None
+
+
+_orientation_model: Any = None
+_orientation_init_lock = threading.Lock()
+
+
+def classify_page_orientation(png_bytes: bytes) -> tuple[int, float]:
+    """Blocking - call via asyncio.to_thread, under pipeline.py's OCR lock
+    (it is a Paddle predictor like run_ocr, so it must not overlap one).
+
+    Returns (clockwise degrees to rotate the page so it reads upright, score).
+    PP-LCNet_x1_0_doc_ori reports how far the page is already rotated clockwise
+    (label "90" = page was turned 90 degrees clockwise), so the correction is
+    the complement. Any failure returns (0, 0.0): never rotate on a guess."""
+    global _orientation_model
+    try:
+        import cv2
+        import numpy as np
+
+        if _orientation_model is None:
+            with _orientation_init_lock:
+                if _orientation_model is None:
+                    from paddlex import create_model
+
+                    _orientation_model = create_model("PP-LCNet_x1_0_doc_ori")
+        img = cv2.imdecode(np.frombuffer(png_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        res = list(_orientation_model.predict(img, batch_size=1))[0].json["res"]
+        label = int(res["label_names"][0])
+        score = float(res["scores"][0])
+        return (360 - label) % 360, score
+    except Exception:  # noqa: BLE001
+        return 0, 0.0

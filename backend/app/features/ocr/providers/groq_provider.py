@@ -62,7 +62,13 @@ class GroqProvider(AIProvider):
     @staticmethod
     def _call(client: Groq, system_prompt: str, user_prompt: str) -> str:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            # llama-3.3-70b-versatile is no longer available on these Groq
+            # keys (404 model_not_found) - every extraction was failing.
+            # gpt-oss-120b is the closest drop-in; "low" reasoning effort
+            # keeps latency down and leaves the 300-token budget for the
+            # JSON answer itself (verified: ~90 completion tokens).
+            model="openai/gpt-oss-120b",
+            reasoning_effort="low",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
