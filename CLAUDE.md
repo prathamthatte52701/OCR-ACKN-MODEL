@@ -15,7 +15,7 @@ Mongoose→Pydantic, Tesseract→PaddleOCR, exceljs→openpyxl, etc.).
 
 - **Backend**: FastAPI, Motor (async MongoDB), PaddleOCR (CPU-only), Groq
   (field extraction via Jinja2 prompts), PyMuPDF (PDF), openpyxl (Excel),
-  python-jose (JWT), bcrypt, slowapi (rate limiting)
+  PyJWT (JWT), bcrypt, slowapi (rate limiting)
 - **Frontend**: React + Vite + Tailwind + TanStack Query + Zustand
 - **Admin**: separate React + Vite app, same backend, role-gated
 - **Database**: MongoDB Atlas, file storage via GridFS (same cluster)
@@ -35,7 +35,7 @@ admin/      Admin panel React app (port 5175)
 ```bash
 cd backend
 ../venv/Scripts/activate                                    # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime pins + ruff/black/isort/mypy/pytest
 cp .env.example .env                                         # fill MONGO_URI, JWT_SECRET, etc.
 
 ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --reload
@@ -52,10 +52,13 @@ cd backend
 ../venv/Scripts/python.exe -m mypy app
 ```
 
-Tests: `pytest`/`pytest-asyncio` are dependencies but there's no
-`pytest.ini`/`conftest.py`. `app/features/ocr/test_extraction.py` is the one
-existing suite — plain `test_*` functions with `assert`, runnable via
-`pytest app/features/ocr/test_extraction.py` or directly with
+Tests: run `pytest app` from `backend/`. `backend/conftest.py` forces
+`MONGO_DB_NAME=ackn_AI_model_test` and a test-only `JWT_SECRET` before settings
+load, and aborts if the DB name does not end in `_test` — tests never touch
+real data. It provides `db`, `client` (ASGI, no server), and `make_user`
+(creates approved/pending/rejected users + tokens) fixtures; DB fixtures wipe
+the test DB on teardown. `app/features/ocr/test_extraction.py` is plain
+`test_*` functions and still runs standalone via
 `python -m app.features.ocr.test_extraction`.
 
 ### Frontend / Admin
@@ -90,14 +93,28 @@ step. New feature tests should follow this exact shape.
 `MONGO_URI` and `JWT_SECRET` (≥32 chars) are required — the app calls
 `sys.exit` with a clear error at import time (`app/core/config.py`) rather
 than silently booting broken. Optional: `MONGO_DB_NAME`, `GROQ_API_KEYS`
-(comma-separated, round-robined), `PORT`, `NODE_ENV` (`production` disables
-`/docs`/`/redoc`/`/openapi.json`), `FRONTEND_ORIGIN`, `ADMIN_ORIGIN`,
-`ADMIN_1_PASSWORD`/`ADMIN_2_PASSWORD` (seed-only, plaintext used once then
-discarded — only the bcrypt hash persists).
+(comma-separated, round-robined), `PORT`, `NODE_ENV`, `ENABLE_DOCS`
+(`/docs`/`/redoc`/`/openapi.json` are OFF unless this is `true`, in every
+environment), `FRONTEND_ORIGIN`, `ADMIN_ORIGIN`, and the seed-only admin
+identity vars `ADMIN_1_NAME`/`ADMIN_1_EMAIL`/`ADMIN_1_PASSWORD` and
+`ADMIN_2_NAME`/`ADMIN_2_EMAIL`/`ADMIN_2_PASSWORD` (no names/emails live in
+source; password plaintext is used once then discarded — only the bcrypt hash
+persists). The dev server binds to localhost by default (`uvicorn` with no
+`--host`); only the deployed start command in `render.yaml` binds `0.0.0.0`.
 
 ## Architecture
 
 ### Request lifecycle & shared primitives
+
+- **Admin approval gate.** `users.status` is `pending | approved | rejected`
+  (missing = approved, for pre-gate accounts; run
+  `python -m app.scripts.migrate_user_status --dry-run` once on an old DB).
+  Password signups start `pending`; new Google users and seeded admins are
+  `approved`. `get_current_user` is the single enforcement point (403 with the
+  pending/rejected message), and login checks the password first. Admins
+  approve/reject via `/admin/users/{id}/approve|reject` (reject also bumps
+  `tokenVersion`); admins can never be rejected. Email is changed only by an
+  admin (`PUT /admin/users/{id}/email`).
 
 - `app/main.py` wires everything: CORS (explicit allow-list, never `*`),
   `SecurityHeadersMiddleware`, `SlowAPIMiddleware`, a `RequestValidationError`
@@ -121,12 +138,12 @@ discarded — only the bcrypt hash persists).
 - **Per-user data isolation is enforced by convention, not middleware**:
   every documents/workbooks query in `router.py` files explicitly filters
   `{"userId": current_user.id}`, and ownership lookups 404 (never 403) on
-  cross-user access so existence isn't leaked. `GET /export-history` and its
-  workbook-download route are the *one deliberate* exception — intentionally
-  global across all users (confirmed product decision, see the comment
-  block above that route in `excel/router.py`). When adding a new
-  documents/workbooks endpoint, default to scoping by `userId` unless you
-  have equally explicit confirmation it should be global.
+  cross-user access so existence isn't leaked. There is no cross-user
+  exception any more: `GET /export-history` and its workbook-download route
+  are private per user too (other users' names/emails never appear). The only
+  cross-user views are the admin router's (`/admin/exports`, `/admin/workbooks`,
+  `/admin/documents`), gated by `require_admin` and audit-logged. When adding
+  a documents/workbooks endpoint, scope by `userId` — no exceptions for users.
 - Most DB writes in `router.py` files use **raw camelCase dicts directly**
   against Motor collections, not the Pydantic models in each feature's
   `models.py` — those model classes describe the read-shape/schema but

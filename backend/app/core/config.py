@@ -26,7 +26,23 @@ class Settings(BaseSettings):
     admin_origin: str = Field(default="http://localhost:5175", alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
     admin_2_password: str = Field(default="", alias="ADMIN_2_PASSWORD")
+    # Seed-only identities (see app/scripts/seed_admin.py) - kept out of source so
+    # no real person's name/email is committed to the repo.
+    admin_1_name: str = Field(default="", alias="ADMIN_1_NAME")
+    admin_1_email: str = Field(default="", alias="ADMIN_1_EMAIL")
+    admin_2_name: str = Field(default="", alias="ADMIN_2_NAME")
+    admin_2_email: str = Field(default="", alias="ADMIN_2_EMAIL")
+    # Swagger/ReDoc/openapi.json hand over a full map of the API, so they are OFF
+    # unless explicitly enabled (ENABLE_DOCS=true), in every environment.
+    enable_docs: bool = Field(default=False, alias="ENABLE_DOCS")
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+
+    @field_validator("enable_docs", mode="before")
+    @classmethod
+    def _blank_means_off(cls, value: object) -> object:
+        # .env.example ships `ENABLE_DOCS=` blank; that must mean "off", not a
+        # boot-time bool-parsing crash.
+        return False if isinstance(value, str) and not value.strip() else value
 
     @field_validator("jwt_secret")
     @classmethod
@@ -37,6 +53,10 @@ class Settings(BaseSettings):
                 'generate one with `python -c "import secrets; print(secrets.token_hex(48))"`.'
             )
         return value
+
+    @property
+    def docs_enabled(self) -> bool:
+        return self.enable_docs
 
     @property
     def is_production(self) -> bool:

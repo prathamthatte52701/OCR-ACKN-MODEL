@@ -9,7 +9,12 @@ from app.core.audit_log import log_action
 from app.core.config import settings
 from app.core.database import get_database
 from app.core.rate_limit import enforce_login_email_limit, limiter
-from app.core.security import hash_password, sign_token, verify_password
+from app.core.security import (
+    DUMMY_PASSWORD_HASH,
+    hash_password,
+    sign_token,
+    verify_password,
+)
 from app.core.validators import (
     normalize_email,
     normalize_username,
@@ -17,7 +22,13 @@ from app.core.validators import (
     validate_password,
     validate_username,
 )
-from app.features.auth.dependencies import CurrentUser, get_current_user
+from app.features.auth.dependencies import (
+    STATUS_APPROVED,
+    STATUS_PENDING,
+    CurrentUser,
+    get_current_user,
+    raise_if_not_approved,
+)
 from app.features.auth.schemas import (
     ChangePasswordRequest,
     ForgotPasswordResetRequest,
@@ -69,7 +80,7 @@ async def signup(request: Request, body: SignupRequest) -> MessageResponse:
         raise HTTPException(status_code=400, detail=err)
     if err := validate_email(email):
         raise HTTPException(status_code=400, detail=err)
-    if err := validate_password(body.password):
+    if err := validate_password(body.password, username, email):
         raise HTTPException(status_code=400, detail=err)
 
     # Hash before the uniqueness check so a taken-email response costs
@@ -89,6 +100,7 @@ async def signup(request: Request, body: SignupRequest) -> MessageResponse:
                 "email": email,
                 "passwordHash": password_hash,
                 "role": "user",
+                "status": STATUS_PENDING,
                 "tokenVersion": 0,
                 "createdAt": now,
                 "updatedAt": now,
@@ -102,7 +114,7 @@ async def signup(request: Request, body: SignupRequest) -> MessageResponse:
     created = await db.users.find_one({"email": email})
     assert created is not None
     await log_action(created["_id"], "signup", {"email": email})
-    return MessageResponse(message="Account created. Please log in.")
+    return MessageResponse(message="Account created. Waiting for admin approval.")
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -115,8 +127,16 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     await enforce_login_email_limit(request, email)
 
     user = await db.users.find_one({"email": email})
-    if not user or not verify_password(body.password, user["passwordHash"]):
+    # Always run exactly one bcrypt check (against a dummy hash when there is no
+    # usable password) so unknown email / Google-only account / wrong password
+    # are indistinguishable in both response and timing.
+    stored_hash = user.get("passwordHash") if user else None
+    password_ok = verify_password(body.password, stored_hash or DUMMY_PASSWORD_HASH)
+    if not user or not stored_hash or not password_ok:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+    # Password is checked FIRST so the pending/rejected message is only ever
+    # shown to someone who proved they own the account (no status oracle).
+    raise_if_not_approved(user.get("status", STATUS_APPROVED))
 
     token = sign_token(str(user["_id"]), user["tokenVersion"], user["role"])
     await log_action(user["_id"], "login", {"email": email})
@@ -169,6 +189,7 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
                 "username": username,
                 "email": email,
                 "role": "user",
+                "status": STATUS_APPROVED,
                 "tokenVersion": 0,
                 "authProvider": "google",
                 "googleId": google_id,
@@ -222,15 +243,12 @@ async def update_me(
             raise HTTPException(status_code=400, detail=err)
         updates["username"] = username
 
-    if body.email is not None:
-        email = normalize_email(body.email)
-        if err := validate_email(email):
-            raise HTTPException(status_code=400, detail=err)
-        if email != user["email"]:
-            existing = await db.users.find_one({"email": email})
-            if existing:
-                raise HTTPException(status_code=400, detail="That email is already in use.")
-            updates["email"] = email
+    # Email is an identity/approval anchor, so only an admin can change it. Sending
+    # the unchanged address (the profile form does) is harmless and allowed.
+    if body.email is not None and normalize_email(body.email) != user["email"]:
+        raise HTTPException(
+            status_code=403, detail="Only an admin can change your email. Contact the admin."
+        )
 
     if updates:
         updates["updatedAt"] = datetime.now(UTC)
@@ -265,7 +283,7 @@ async def change_password(
     if not verify_password(body.current_password, user["passwordHash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
 
-    if err := validate_password(body.new_password):
+    if err := validate_password(body.new_password, user.get("username"), user.get("email")):
         raise HTTPException(status_code=400, detail=err)
 
     new_hash = hash_password(body.new_password)
@@ -322,7 +340,7 @@ async def forgot_password_reset(
     if _is_google_only(user):
         raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
 
-    if err := validate_password(body.new_password):
+    if err := validate_password(body.new_password, user.get("username"), user.get("email")):
         raise HTTPException(status_code=400, detail=err)
 
     new_hash = hash_password(body.new_password)

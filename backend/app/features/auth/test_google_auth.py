@@ -152,6 +152,8 @@ async def test_existing_local_account_links_via_google(
     assert signup_resp.status_code == 201, signup_resp.text
 
     db = get_database()
+    # signup now creates a pending account; approve it so the password login below is allowed
+    await db.users.update_one({"email": email}, {"$set": {"status": "approved"}})
     original = await db.users.find_one({"email": email})
     assert original is not None
     original_id = original["_id"]
@@ -229,6 +231,7 @@ async def test_password_change_revokes_prior_token(
         json={"username": username, "email": email, "password": LOCAL_PASSWORD},
     )
     assert signup_resp.status_code == 201, signup_resp.text
+    await get_database().users.update_one({"email": email}, {"$set": {"status": "approved"}})
 
     _mock_google_payload(
         monkeypatch, {"email": email, "email_verified": True, "sub": "google-sub-revoke"}

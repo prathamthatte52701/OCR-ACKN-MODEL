@@ -12,12 +12,16 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  // 403 = pending/rejected account (not a typo in the password) - shown as an
+  // amber notice with the server's own wording instead of a red error.
+  const [notice, setNotice] = useState(searchParams.get('notice') || '')
   const [success, setSuccess] = useState(location.state?.success || '')
   const [submitting, setSubmitting] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    setNotice('')
     setSuccess('')
     setSubmitting(true)
     try {
@@ -25,7 +29,8 @@ export default function LoginPage() {
       const next = searchParams.get('next')
       navigate(next && next.startsWith('/') ? next : '/', { replace: true })
     } catch (err) {
-      setError(err.userMessage || 'Could not log in. Please try again.')
+      if (err.response?.status === 403) setNotice(err.userMessage)
+      else setError(err.userMessage || 'Could not log in. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -68,6 +73,12 @@ export default function LoginPage() {
           {success && (
             <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3.5 py-2.5 text-[13.6px] text-emerald-200">
               {success}
+            </div>
+          )}
+
+          {notice && (
+            <div role="status" className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-2.5 text-[13.6px] text-amber-200">
+              {notice}
             </div>
           )}
 

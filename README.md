@@ -40,7 +40,7 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 
 - **Backend**: FastAPI, Motor (async MongoDB), PaddleOCR (CPU), Groq (field
   extraction via Jinja2-templated prompts), PyMuPDF (PDF handling), openpyxl
-  (Excel export), python-jose (JWT), bcrypt, slowapi (rate limiting)
+  (Excel export), PyJWT (JWT), bcrypt, slowapi (rate limiting)
 - **Frontend**: React + Vite + Tailwind + TanStack Query + Zustand
 - **Admin**: separate React + Vite app, same backend, role-gated
 - **Database**: MongoDB Atlas

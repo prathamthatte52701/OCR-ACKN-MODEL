@@ -12,9 +12,13 @@ class AdminUpdateUserRequest(CamelModel):
     crashed with an unhandled 500 instead of a clean validation error. This
     guarantees every field is the right type before it's ever touched."""
 
-    username: str | None = None
-    email: str | None = None
+    username: str | None = Field(default=None, max_length=64)
+    email: str | None = Field(default=None, max_length=254)
     role: Literal["user", "admin"] | None = None
+
+
+class AdminChangeEmailRequest(CamelModel):
+    email: str = Field(max_length=254)
 
 
 class AdminConfirmedDeleteRequest(CamelModel):
@@ -24,9 +28,9 @@ class AdminConfirmedDeleteRequest(CamelModel):
     email/OTP channel anywhere in this app (see CLAUDE.md), so this is the
     whole gate - no separate token/one-time-key mechanism."""
 
-    password: str
-    confirm_password: str
-    confirmation_phrase: str
+    password: str = Field(max_length=128)
+    confirm_password: str = Field(max_length=128)
+    confirmation_phrase: str = Field(max_length=200)
 
 
 class AdminAgeRangeRequest(AdminConfirmedDeleteRequest):

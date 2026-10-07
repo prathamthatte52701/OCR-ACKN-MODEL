@@ -16,9 +16,10 @@ from app.core.database import close_mongo_connection, connect_to_mongo
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.features.admin.router import router as admin_router
 from app.features.auth.router import router as auth_router
-from app.features.documents.router import recover_interrupted_uploads
+from app.features.documents.router import MAX_BULK_FILES, MAX_FILE_SIZE, recover_interrupted_uploads
 from app.features.documents.router import router as documents_router
 from app.features.excel.router import router as excel_router
 from app.features.ocr.pipeline import ocr_lock_status
@@ -56,17 +57,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 # Swagger/ReDoc/openapi.json hand an attacker a free, fully-enumerated map of
-# every endpoint + request/response shape - no functional need for it once
-# this is deployed (it's a fixed frontend/admin talking to a fixed API, not a
-# public developer-facing API contract that needs discoverability). Left on
-# in dev for convenience, disabled entirely in production so there's nothing
-# to scan/enumerate at those paths at all.
+# every endpoint + request/response shape - no functional need for it (it's a
+# fixed frontend/admin talking to a fixed API, not a public developer-facing
+# contract). OFF by default everywhere; a developer who wants them sets
+# ENABLE_DOCS=true locally.
 app = FastAPI(
     title="AckIntel AI - Acknowledgement Intelligence Server",
     lifespan=lifespan,
-    docs_url=None if settings.is_production else "/docs",
-    redoc_url=None if settings.is_production else "/redoc",
-    openapi_url=None if settings.is_production else "/openapi.json",
+    docs_url="/docs" if settings.docs_enabled else None,
+    redoc_url="/redoc" if settings.docs_enabled else None,
+    openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
 
 app.state.limiter = limiter
@@ -103,6 +103,16 @@ async def validation_exception_handler(
     return JSONResponse(status_code=422, content={"detail": detail})
 
 
+# Whole-request ceilings for the upload routes (files + multipart framing). Runs before
+# FastAPI parses the multipart body, which is the point (a route-level check is too late).
+_MULTIPART_OVERHEAD = 1024 * 1024
+app.add_middleware(
+    UploadSizeLimitMiddleware,
+    limits={
+        "/api/documents/upload": MAX_FILE_SIZE + _MULTIPART_OVERHEAD,
+        "/api/documents/bulk-upload": MAX_BULK_FILES * MAX_FILE_SIZE + _MULTIPART_OVERHEAD,
+    },
+)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(

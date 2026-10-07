@@ -1,8 +1,9 @@
 """One-off admin account seed. Run with:
     python -m app.scripts.seed_admin
 Idempotent - does nothing if an account with a given email already exists.
-Passwords come from env vars (ADMIN_1_PASSWORD / ADMIN_2_PASSWORD in .env) -
-never hardcode real credentials in source, this file is committed to git.
+Names, emails and passwords all come from env vars (ADMIN_1_NAME / _EMAIL /
+_PASSWORD and ADMIN_2_...) - never hardcode real identities or credentials in
+source, this file is committed to git.
 """
 
 import asyncio
@@ -15,25 +16,27 @@ from app.core.security import hash_password
 
 ADMINS = [
     {
-        "name": "Arjav Jain",
-        "email": "arjav99jain@gmail.com",
+        "name": settings.admin_1_name,
+        "email": settings.admin_1_email.strip().lower(),
         "password": settings.admin_1_password,
+        "vars": "ADMIN_1_NAME / ADMIN_1_EMAIL / ADMIN_1_PASSWORD",
     },
     {
-        "name": "Pratham Thatte",
-        "email": "prathamthatte527@gmail.com",
+        "name": settings.admin_2_name,
+        "email": settings.admin_2_email.strip().lower(),
         "password": settings.admin_2_password,
+        "vars": "ADMIN_2_NAME / ADMIN_2_EMAIL / ADMIN_2_PASSWORD",
     },
 ]
 
 
 async def main() -> None:
-    missing = [a["email"] for a in ADMINS if not a["password"]]
-    if missing:
+    incomplete = [a["vars"] for a in ADMINS if not (a["name"] and a["email"] and a["password"])]
+    if incomplete:
         sys.exit(
-            "Missing password env var(s) for: "
-            + ", ".join(missing)
-            + ". Set ADMIN_1_PASSWORD / ADMIN_2_PASSWORD in .env before seeding."
+            "Missing admin env var(s): "
+            + "; ".join(incomplete)
+            + ". Set them in .env before seeding."
         )
     await connect_to_mongo()
     db = get_database()
@@ -54,6 +57,7 @@ async def main() -> None:
                 "email": admin["email"],
                 "passwordHash": hash_password(admin["password"]),
                 "role": "admin",
+                "status": "approved",
                 "tokenVersion": 0,
                 "createdAt": now,
                 "updatedAt": now,

@@ -10,6 +10,11 @@ import ConfirmModal from '../components/ConfirmModal'
 import { formatISTDate } from '../utils/formatDate'
 
 const PAGE_SIZE = 30
+const TABS = [
+  { key: 'approved', label: 'Approved' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'rejected', label: 'Rejected' },
+]
 
 function EditUserModal({ user, onClose, onSaved }) {
   const [username, setUsername] = useState(user.username)
@@ -43,7 +48,7 @@ function EditUserModal({ user, onClose, onSaved }) {
           <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)} minLength={3} maxLength={8} className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60" />
         </div>
         <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Email</label>
+          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Email <span className="font-normal text-slate-500">(changing it signs the user out)</span></label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60" />
         </div>
         <Banner error={error} />
@@ -71,13 +76,16 @@ export default function AdminUsersPage() {
   const [editingUser, setEditingUser] = useState(null)
   const [deletingUser, setDeletingUser] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [tab, setTab] = useState('approved')
+  const [pendingCount, setPendingCount] = useState(0)
 
   async function load(pageToLoad = page) {
     setLoading(true)
     setError('')
     try {
-      const res = await api.get('/admin/users', { params: { page: pageToLoad, limit: PAGE_SIZE } })
+      const res = await api.get('/admin/users', { params: { page: pageToLoad, limit: PAGE_SIZE, status: tab } })
       setUsers(res.data.users || [])
+      setPendingCount(res.data.pendingCount || 0)
       setTotalPages(res.data.totalPages || 1)
       setTotalUsers(res.data.totalUsers || 0)
     } catch (err) {
@@ -88,7 +96,7 @@ export default function AdminUsersPage() {
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { load(page) }, [page])
+  useEffect(() => { load(page) }, [page, tab])
 
   async function toggleRole(user) {
     const nextRole = user.role === 'admin' ? 'user' : 'admin'
@@ -104,6 +112,27 @@ export default function AdminUsersPage() {
     } finally {
       setBusyId(null)
     }
+  }
+
+  async function setStatus(user, action) {
+    setBusyId(user.id)
+    setError('')
+    setSuccess('')
+    try {
+      await api.post(`/admin/users/${user.id}/${action}`)
+      setSuccess(`${user.username} ${action === 'approve' ? 'approved' : 'rejected'}.`)
+      load(page)
+    } catch (err) {
+      setError(err.userMessage || `Could not ${action} user.`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  function switchTab(key) {
+    setTab(key)
+    setPage(1)
+    setSuccess('')
   }
 
   async function deleteUser(user) {
@@ -127,6 +156,23 @@ export default function AdminUsersPage() {
     <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-6 lg:px-10">
       <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Users</h1>
       <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${totalUsers} user${totalUsers !== 1 ? 's' : ''}`}</p>
+
+      <div className="mb-4 flex gap-2" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => switchTab(t.key)}
+            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13.6px] font-bold ${tab === t.key ? 'border-emerald-300/40 bg-emerald-500/15 text-emerald-200' : 'border-white/10 bg-white/[0.035] text-slate-400 hover:border-white/20'}`}
+          >
+            {t.label}
+            {t.key === 'pending' && pendingCount > 0 && (
+              <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[11px] font-black text-slate-950">{pendingCount}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
       <Banner error={error} success={success} />
 
@@ -161,6 +207,26 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-slate-500">{formatISTDate(u.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
+                      {u.status === 'pending' && (
+                        <>
+                          <button disabled={busyId === u.id} onClick={() => setStatus(u, 'approve')} className="rounded-full border border-emerald-300/30 bg-emerald-500/15 px-3 py-1.5 text-[11.6px] font-bold text-emerald-200 hover:border-emerald-300/50 disabled:opacity-50">
+                            Approve
+                          </button>
+                          <button disabled={busyId === u.id} onClick={() => setStatus(u, 'reject')} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      {u.status === 'rejected' && (
+                        <button disabled={busyId === u.id} onClick={() => setStatus(u, 'approve')} className="rounded-full border border-emerald-300/30 bg-emerald-500/15 px-3 py-1.5 text-[11.6px] font-bold text-emerald-200 hover:border-emerald-300/50 disabled:opacity-50">
+                          Re-approve
+                        </button>
+                      )}
+                      {u.status === 'approved' && u.role !== 'admin' && (
+                        <button disabled={busyId === u.id} onClick={() => setStatus(u, 'reject')} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-amber-300 hover:border-amber-300/30 hover:bg-amber-500/10 disabled:opacity-50">
+                          Revoke
+                        </button>
+                      )}
                       <Link to={`/users/${u.id}`} className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-3 py-1.5 text-[11.6px] font-bold text-emerald-200 hover:border-emerald-300/45">
                         View Activity
                       </Link>

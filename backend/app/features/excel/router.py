@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -21,6 +22,21 @@ def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
     though their Workbook/Settings records are isolated. Namespacing the
     on-disk filename with the owning userId keeps the files isolated too."""
     return excel_service.physical_workbook_filename(user_id, filename)
+
+
+def _owned_workbook_file(owner_id: ObjectId, filename: str) -> Path:
+    """Resolves the physical .xlsx for a workbook the CALLER owns, or 404s.
+    Last line of defence for downloads: whatever the DB record said, the file
+    that gets served must live directly in the exports dir and carry the
+    caller's own userId prefix - a record or name that somehow resolves to
+    another user's file (or outside the dir) is treated as not found."""
+    target = excel_service.file_path(_physical_workbook_filename(owner_id, filename))
+    inside_exports = target.parent == excel_service.EXPORT_DIR
+    if not inside_exports or not target.name.startswith(f"{owner_id}_"):
+        raise HTTPException(status_code=404, detail="Workbook not found.")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Workbook file not found on the server.")
+    return target
 
 
 async def _get_settings(user_id: ObjectId) -> dict | None:
@@ -87,9 +103,7 @@ async def download_workbook(
             )
         filename = settings["activeWorkbookName"]
 
-    target = excel_service.file_path(_physical_workbook_filename(owner_user_id, filename))
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Workbook file not found on the server.")
+    target = _owned_workbook_file(owner_user_id, filename)
 
     download_name = filename if filename.endswith(".xlsx") else f"{filename}.xlsx"
     return FileResponse(
@@ -99,36 +113,30 @@ async def download_workbook(
     )
 
 
-# Intentionally unscoped - Export History is a shared cross-user view by
-# explicit product decision (confirmed directly by the user across multiple
-# verification passes), NOT the old app's actual per-user-filtered behavior.
-# This deliberately deviates from routes/documents.js, which does filter by
-# userId - that mismatch was flagged back to the user in Phase 4, and this is
-# the resolution: build the requested global view, not the old app's real one.
-# This is the ONLY place in the app where cross-user access is intentional -
-# every other document/workbook route stays isolated (see get_current_user
-# checks and 404-not-403 behavior everywhere else in this file/module).
+# Export History is PRIVATE per user: a user sees only the rows they exported,
+# and no other user's name/email ever appears in the response. (It used to be
+# a deliberate cross-user view; that was reversed - the admin's full cross-user
+# view lives in the admin router instead: GET /admin/exports and /admin/workbooks.)
+# Like every other documents/workbooks route, scope by userId by default.
 @router.get("/export-history")
 async def export_history(current_user: CurrentUser = Depends(get_current_user)) -> dict:
     db = get_database()
-    cursor = db.exportedrows.find({}).sort("exportedAt", -1)
+    cursor = db.exportedrows.find({"userId": current_user.id}).sort("exportedAt", -1)
     rows = []
     async for row in cursor:
         workbook = None
         if row.get("workbookId"):
-            wb = await db.workbooks.find_one({"_id": row["workbookId"]}, {"filename": 1, "year": 1})
+            wb = await db.workbooks.find_one(
+                {"_id": row["workbookId"], "userId": current_user.id}, {"filename": 1, "year": 1}
+            )
             if wb:
                 workbook = {"filename": wb["filename"], "year": wb["year"]}
-        owner = await db.users.find_one({"_id": row["userId"]}, {"username": 1, "email": 1})
         rows.append(
             {
                 "id": str(row["_id"]),
                 "documentId": str(row["documentId"]),
                 "workbookId": str(row["workbookId"]) if row.get("workbookId") else None,
                 "workbook": workbook,
-                "owner": (
-                    {"username": owner["username"], "email": owner["email"]} if owner else None
-                ),
                 "documentType": row["documentType"],
                 "taxInvoiceNo": row.get("taxInvoiceNo"),
                 "referenceNo": row.get("referenceNo"),
@@ -140,23 +148,18 @@ async def export_history(current_user: CurrentUser = Depends(get_current_user)) 
     return {"exports": rows}
 
 
-# Intentionally unscoped, same reasoning as GET /export-history above - lets
-# any user download any workbook listed on the Export History page,
-# regardless of who owns it. This is a SEPARATE route from GET
-# /workbook/download specifically so that route's normal per-user isolation
-# is never touched - the exception is confined to this one endpoint only.
+# Download of a workbook listed on the caller's own Export History page. Scoped
+# to the caller like everything else: someone else's workbook id is a 404.
 @router.get("/export-history/workbook/{workbook_id}/download")
 async def download_workbook_from_export_history(
     workbook_id: PyObjectId, current_user: CurrentUser = Depends(get_current_user)
 ) -> FileResponse:
     db = get_database()
-    wb = await db.workbooks.find_one({"_id": workbook_id})
+    wb = await db.workbooks.find_one({"_id": workbook_id, "userId": current_user.id})
     if not wb:
         raise HTTPException(status_code=404, detail="Workbook not found.")
 
-    target = excel_service.file_path(_physical_workbook_filename(wb["userId"], wb["filename"]))
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Workbook file not found on the server.")
+    target = _owned_workbook_file(current_user.id, wb["filename"])
 
     download_name = wb["filename"] if wb["filename"].endswith(".xlsx") else f"{wb['filename']}.xlsx"
     return FileResponse(

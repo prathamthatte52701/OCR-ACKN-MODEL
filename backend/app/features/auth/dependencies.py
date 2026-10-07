@@ -8,6 +8,19 @@ from app.core.security import decode_token
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
+STATUS_PENDING = "pending"
+STATUS_APPROVED = "approved"
+STATUS_REJECTED = "rejected"
+PENDING_MESSAGE = "Waiting for admin approval."
+REJECTED_MESSAGE = "Your request was not approved. Contact the admin."
+
+
+def raise_if_not_approved(user_status: str) -> None:
+    if user_status == STATUS_PENDING:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PENDING_MESSAGE)
+    if user_status != STATUS_APPROVED:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=REJECTED_MESSAGE)
+
 
 class CurrentUser:
     def __init__(self, id: ObjectId, role: str):
@@ -42,9 +55,15 @@ async def get_current_user(
         raise unauthorized from None
 
     db = get_database()
-    user = await db.users.find_one({"_id": user_id}, {"tokenVersion": 1, "role": 1})
+    user = await db.users.find_one({"_id": user_id}, {"tokenVersion": 1, "role": 1, "status": 1})
     if user is None or user.get("tokenVersion") != payload.get("tokenVersion"):
         raise unauthorized
+
+    # Single enforcement point for the admin-approval gate: every protected
+    # route depends on this function, so a pending/rejected account is locked
+    # out everywhere, including with an old token. A missing status field
+    # means a pre-approval-era account, which stays approved.
+    raise_if_not_approved(user.get("status", STATUS_APPROVED))
 
     return CurrentUser(id=user_id, role=user["role"])
 

@@ -4,7 +4,7 @@
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export const USERNAME_RE = /^.{3,8}$/
-export const PASSWORD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,32}$/
+export const PASSWORD_RE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,64}$/
 
 export function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : email
@@ -26,7 +26,7 @@ export function validateEmail(email) {
 
 export function validatePassword(password) {
   if (typeof password !== 'string' || !PASSWORD_RE.test(password)) {
-    return 'Password must be 8-32 characters and include an uppercase letter, a lowercase letter, a number, and a special character.'
+    return 'Password must be 8-64 characters and include an uppercase letter, a lowercase letter, a number, and a special character.'
   }
   if (/\s/.test(password)) {
     return 'Password cannot contain spaces or whitespace.'

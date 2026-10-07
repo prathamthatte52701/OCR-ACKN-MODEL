@@ -27,3 +27,11 @@ services:
         sync: false
       - key: ADMIN_2_PASSWORD
         sync: false
+      - key: ADMIN_1_NAME
+        sync: false
+      - key: ADMIN_1_EMAIL
+        sync: false
+      - key: ADMIN_2_NAME
+        sync: false
+      - key: ADMIN_2_EMAIL
+        sync: false

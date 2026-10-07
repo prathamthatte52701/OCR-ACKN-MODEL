@@ -78,8 +78,8 @@ function ChangePasswordPanel({ changePassword }) {
         </div>
         <div>
           <label className={labelClass}>New password</label>
-          <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={32} autoComplete="new-password" required />
-          <p className="mt-1 text-[11.6px] text-slate-600">8-32 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
+          <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={64} autoComplete="new-password" required />
+          <p className="mt-1 text-[11.6px] text-slate-600">8-64 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
         </div>
         <div>
           <label className={labelClass}>Confirm new password</label>

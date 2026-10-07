@@ -144,6 +144,24 @@ def _zip_entry_name(doc: dict, seen: dict[str, int]) -> str:
     return f"{safe_base}{suffix}{ext}"
 
 
+FILE_TOO_BIG_MESSAGE = "File size must be 5 MB or less."
+READ_CHUNK = 64 * 1024
+
+
+async def read_limited(upload: UploadFile, limit: int = MAX_FILE_SIZE) -> bytes | None:
+    """Reads an upload in chunks and stops as soon as it exceeds `limit`,
+    returning None (caller reports "too big") instead of buffering an
+    arbitrarily large body in memory first."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(READ_CHUNK):
+        total += len(chunk)
+        if total > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _validate_and_store(
     buffer: bytes, mime_type: str, original_name: str, document_type: str, user_id: ObjectId
 ) -> dict:
@@ -238,7 +256,9 @@ async def upload_document(
     single-document use while making scripted spam impractical."""
     if not document:
         raise HTTPException(status_code=400, detail="No file uploaded.")
-    buffer = await document.read()
+    buffer = await read_limited(document)
+    if buffer is None:
+        raise HTTPException(status_code=400, detail=FILE_TOO_BIG_MESSAGE)
     doc = await _validate_and_store(
         buffer,
         document.content_type or "",
@@ -273,7 +293,12 @@ async def bulk_upload_documents(
     results: list[dict[str, object]] = []
     created: list[tuple[ObjectId, bytes, str, str]] = []
     for upload_file, doc_type in zip(documents, document_types, strict=True):
-        buffer = await upload_file.read()
+        buffer = await read_limited(upload_file)
+        if buffer is None:
+            results.append(
+                {"originalFilename": upload_file.filename, "error": FILE_TOO_BIG_MESSAGE}
+            )
+            continue
         try:
             doc = await _validate_and_store(
                 buffer,
@@ -488,7 +513,10 @@ async def my_activity(
         # persists independently of whether the document it references
         # still exists.
         async for d in db.documents.find(
-            {"_id": {"$in": doc_ids}},
+            # userId filter: defence in depth - these ids come from the caller's own
+            # audit entries, but a lookup by bare _id must never be able to surface
+            # another user's document fields.
+            {"_id": {"$in": doc_ids}, "userId": current_user.id},
             {"documentType": 1, "taxInvoiceNo": 1, "number": 1, "date": 1},
         ):
             doc_lookup[str(d["_id"])] = d

@@ -59,3 +59,6 @@ coverage/
 .coverage
 *.tsbuildinfo
 *.tmp
+
+# Local loop progress log
+LOOP_LOG.md

@@ -1,10 +1,12 @@
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.audit_log import log_action
+from app.core.audit_log import log_action, log_admin_access
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
@@ -18,6 +20,7 @@ from app.core.validators import (
 from app.features.admin import purge_service
 from app.features.admin.schemas import (
     AdminAgeRangeRequest,
+    AdminChangeEmailRequest,
     AdminMonthsRequest,
     AdminUpdateUserRequest,
 )
@@ -64,6 +67,7 @@ def _serialize_user(user: dict) -> dict:
         "username": user["username"],
         "email": user["email"],
         "role": user["role"],
+        "status": user.get("status", "approved"),
         "tokenVersion": user["tokenVersion"],
         "authProvider": user.get("authProvider", "local"),
         "createdAt": user.get("createdAt"),
@@ -100,19 +104,77 @@ async def ping(current_user: CurrentUser = Depends(require_admin)) -> dict:
 async def list_users(
     page: int | None = Query(default=None),
     limit: int | None = Query(default=None),
+    status: Literal["pending", "approved", "rejected"] | None = Query(default=None),
     current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     db = get_database()
     lim, pg, skip = _pagination(page, limit)
-    total_users = await db.users.count_documents({})
-    cursor = db.users.find({}, {"passwordHash": 0}).sort("createdAt", -1).skip(skip).limit(lim)
+    query = _status_query(status) if status else {}
+    total_users = await db.users.count_documents(query)
+    cursor = db.users.find(query, {"passwordHash": 0}).sort("createdAt", -1).skip(skip).limit(lim)
     users = [_serialize_user(u) async for u in cursor]
     return {
         "users": users,
         "totalUsers": total_users,
         "totalPages": max(1, -(-total_users // lim)),
         "currentPage": pg,
+        # Drives the badge on the admin panel's Pending tab.
+        "pendingCount": await db.users.count_documents(_status_query("pending")),
     }
+
+
+def _status_query(status: str) -> dict:
+    # A user document with no status field is a pre-approval-era account and
+    # counts as approved everywhere.
+    if status == "approved":
+        return {"$or": [{"status": "approved"}, {"status": {"$exists": False}}]}
+    return {"status": status}
+
+
+async def _set_user_status(user_id: ObjectId, new_status: str, admin: CurrentUser) -> dict:
+    db = get_database()
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    update: dict = {"$set": {"status": new_status, "updatedAt": datetime.now(UTC)}}
+    if new_status == "rejected":
+        # Admins (including yourself) can never be locked out this way.
+        if user.get("role") == "admin":
+            raise HTTPException(status_code=400, detail="Admin accounts cannot be rejected.")
+        if user_id == admin.id:
+            raise HTTPException(status_code=400, detail="You cannot reject your own account.")
+        # Bumping tokenVersion kills every token already issued to this user.
+        update["$inc"] = {"tokenVersion": 1}
+    await db.users.update_one({"_id": user_id}, update)
+    await log_action(
+        admin.id,
+        "user_approved" if new_status == "approved" else "user_rejected",
+        {
+            "targetUserId": str(user_id),
+            "targetEmail": user["email"],
+            "previous": user.get("status", "approved"),
+        },
+    )
+    refreshed = await db.users.find_one({"_id": user_id}, {"passwordHash": 0})
+    assert refreshed is not None
+    return {"user": _serialize_user(refreshed)}
+
+
+@router.post("/users/{user_id}/approve")
+async def approve_user(
+    user_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+) -> dict:
+    return await _set_user_status(user_id, "approved", current_user)
+
+
+@router.post("/users/{user_id}/reject")
+async def reject_user(
+    user_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+) -> dict:
+    """Reject a pending request OR revoke an approved user - same action, the
+    account is locked out and every issued token dies (tokenVersion bump)."""
+    return await _set_user_status(user_id, "rejected", current_user)
 
 
 @router.get("/users/{user_id}")
@@ -122,6 +184,57 @@ async def get_user(user_id: PyObjectId, current_user: CurrentUser = Depends(requ
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
     return {"user": _serialize_user(user)}
+
+
+async def _validated_new_email(db: AsyncIOMotorDatabase, user: dict, raw: str) -> str | None:
+    """Normalizes + validates a new email for `user`. Returns None when it equals
+    the current one (nothing to change); raises 400 when invalid or taken."""
+    email = normalize_email(raw)
+    if err := validate_email(email):
+        raise HTTPException(status_code=400, detail=err)
+    if email == user["email"]:
+        return None
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="That email is already in use.")
+    return email
+
+
+@router.put("/users/{user_id}/email")
+async def change_user_email(
+    user_id: PyObjectId,
+    body: AdminChangeEmailRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """The only way an email changes (users cannot do it themselves). Bumps
+    tokenVersion so the user's existing sessions end, and is audit-logged."""
+    db = get_database()
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    email = await _validated_new_email(db, user, body.email)
+    if email is not None:
+        try:
+            await db.users.update_one(
+                {"_id": user_id},
+                {
+                    "$set": {"email": email, "updatedAt": datetime.now(UTC)},
+                    "$inc": {"tokenVersion": 1},
+                },
+            )
+        except Exception as exc:  # unique index race
+            if "E11000" in str(exc):
+                raise HTTPException(
+                    status_code=400, detail="That email is already in use."
+                ) from exc
+            raise
+        await log_action(
+            current_user.id,
+            "user_email_changed",
+            {"targetUserId": str(user_id), "oldEmail": user["email"], "newEmail": email},
+        )
+    refreshed = await db.users.find_one({"_id": user_id}, {"passwordHash": 0})
+    assert refreshed is not None
+    return {"user": _serialize_user(refreshed)}
 
 
 @router.patch("/users/{user_id}")
@@ -142,15 +255,13 @@ async def update_user(
             raise HTTPException(status_code=400, detail=err)
         updates["username"] = username
 
+    email_changed = False
     if body.email is not None:
-        email = normalize_email(body.email)
-        if err := validate_email(email):
-            raise HTTPException(status_code=400, detail=err)
-        if email != user["email"]:
-            existing = await db.users.find_one({"email": email})
-            if existing:
-                raise HTTPException(status_code=400, detail="That email is already in use.")
+        email = await _validated_new_email(db, user, body.email)
+        if email is not None:
             updates["email"] = email
+            updates["tokenVersion"] = user["tokenVersion"] + 1
+            email_changed = True
 
     if body.role is not None:
         if body.role != "admin" and user.get("role") == "admin":
@@ -170,6 +281,16 @@ async def update_user(
             "user_updated",
             {"targetUserId": str(user_id), "fields": list(updates.keys())},
         )
+        if email_changed:
+            await log_action(
+                current_user.id,
+                "user_email_changed",
+                {
+                    "targetUserId": str(user_id),
+                    "oldEmail": user["email"],
+                    "newEmail": updates["email"],
+                },
+            )
         refreshed = await db.users.find_one({"_id": user_id})
         assert refreshed is not None
         user = refreshed
@@ -503,6 +624,7 @@ async def list_documents(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid userId.") from None
 
+    await log_admin_access(current_user.id, filt.get("userId"), "documents", "list")
     total_documents = await db.documents.count_documents(filt)
     cursor = db.documents.find(filt).sort("createdAt", -1).skip(skip).limit(lim)
     docs = await cursor.to_list(length=None)
@@ -775,6 +897,7 @@ async def dismiss_orphaned_file(
 @router.get("/workbooks")
 async def list_workbooks_admin(current_user: CurrentUser = Depends(require_admin)) -> dict:
     db = get_database()
+    await log_admin_access(current_user.id, None, "workbooks", "list")
     cursor = db.workbooks.find({}).sort([("year", -1), ("createdAt", -1)])
     workbooks = await cursor.to_list(length=None)
     owner_ids = {wb["userId"] for wb in workbooks}
@@ -819,6 +942,7 @@ async def download_workbook_admin(
     target = excel_service.file_path(_physical_workbook_filename(wb["userId"], wb["filename"]))
     if not target.exists():
         raise HTTPException(status_code=404, detail="Workbook file not found on the server.")
+    await log_admin_access(current_user.id, wb["userId"], "workbook", "download", workbook_id)
 
     download_name = wb["filename"] if wb["filename"].endswith(".xlsx") else f"{wb['filename']}.xlsx"
     return FileResponse(
@@ -849,6 +973,7 @@ async def list_exports_admin(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid userId.") from None
 
+    await log_admin_access(current_user.id, filt.get("userId"), "export_rows", "list")
     total_exports = await db.exportedrows.count_documents(filt)
     cursor = db.exportedrows.find(filt).sort("exportedAt", -1).skip(skip).limit(lim)
     rows = await cursor.to_list(length=None)

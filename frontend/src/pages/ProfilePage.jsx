@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
-import { validateUsername, validateEmail, validatePassword } from '../utils/validators'
+import { validateUsername, validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-blue-300/60'
@@ -19,14 +19,12 @@ function Message({ error, success }) {
 function ProfileDetailsPanel({ user, updateProfile }) {
   const [editing, setEditing] = useState(false)
   const [username, setUsername] = useState(user.username)
-  const [email, setEmail] = useState(user.email)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   function startEdit() {
     setUsername(user.username)
-    setEmail(user.email)
     setError('')
     setSuccess('')
     setEditing(true)
@@ -37,12 +35,12 @@ function ProfileDetailsPanel({ user, updateProfile }) {
     setError('')
     setSuccess('')
 
-    const err = validateUsername(username) || validateEmail(email)
+    const err = validateUsername(username)
     if (err) { setError(err); return }
 
     setSubmitting(true)
     try {
-      await updateProfile({ username, email: email.trim().toLowerCase() })
+      await updateProfile({ username })
       setSuccess('Profile updated.')
       setEditing(false)
     } catch (err) {
@@ -75,7 +73,8 @@ function ProfileDetailsPanel({ user, updateProfile }) {
           </div>
           <div>
             <label className={labelClass}>Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
+            <input type="email" value={user.email} readOnly disabled className={`${inputClass} cursor-not-allowed opacity-60`} />
+            <p className="mt-1 text-[12px] text-slate-500">Email can only be changed by an admin.</p>
           </div>
 
           <Message error={error} success={success} />
@@ -155,8 +154,8 @@ function ChangePasswordPanel({ changePassword }) {
         </div>
         <div>
           <label className={labelClass}>New password</label>
-          <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={32} autoComplete="new-password" required />
-          <p className="mt-1 text-[11.6px] text-slate-600">8-32 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
+          <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={64} autoComplete="new-password" required />
+          <p className="mt-1 text-[11.6px] text-slate-600">8-64 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
         </div>
         <div>
           <label className={labelClass}>Confirm new password</label>

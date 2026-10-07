@@ -1,0 +1,10 @@
+{
+  "secret_note": "signed with the test-only secret set in conftest.py",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2NGI3ZjBmMGYwZjBmMGYwZjBmMGYwZjAiLCJ0b2tlblZlcnNpb24iOjMsInJvbGUiOiJ1c2VyIiwiZXhwIjo0MTAyNDQ0ODAwfQ.cfPiF5PqUGirv3kf0nouo1nrZnAM29Vvvfq-ELtigDU",
+  "claims": {
+    "userId": "64b7f0f0f0f0f0f0f0f0f0f0",
+    "tokenVersion": 3,
+    "role": "user",
+    "exp": 4102444800
+  }
+}

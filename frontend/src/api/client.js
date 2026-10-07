@@ -6,6 +6,9 @@ import { useAuthStore } from '../store/authStore'
 // old Node/Express API used. Decision: keep the frontend camelCase end-to-end,
 // zero request/response transform layer.
 
+const APPROVAL_PENDING_MSG = 'Waiting for admin approval.'
+const APPROVAL_REJECTED_MSG = 'Your request was not approved. Contact the admin.'
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000, // 2 min for OCR processing
@@ -89,6 +92,21 @@ api.interceptors.response.use(
       const next = encodeURIComponent(window.location.pathname + window.location.search)
       if (!window.location.pathname.startsWith('/login')) {
         window.location.href = `/login?next=${next}`
+      }
+    }
+
+    // Account not (or no longer) approved: the token is useless, so drop it and
+    // show the server's message on the login page. 403s on /auth/ routes are the
+    // login form's own job (it renders them), and other 403s are ordinary denials.
+    const detail = err.response?.data?.detail
+    if (
+      err.response?.status === 403 &&
+      !isAuthRoute &&
+      (detail === APPROVAL_PENDING_MSG || detail === APPROVAL_REJECTED_MSG)
+    ) {
+      useAuthStore.getState().clear()
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = `/login?notice=${encodeURIComponent(detail)}`
       }
     }
 

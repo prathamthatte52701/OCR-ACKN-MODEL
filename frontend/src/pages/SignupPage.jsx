@@ -25,7 +25,7 @@ export default function SignupPage() {
     setSubmitting(true)
     try {
       await signup(username, email.trim().toLowerCase(), password)
-      navigate('/login', { replace: true, state: { success: 'Account created — please log in.' } })
+      navigate('/login', { replace: true, state: { success: 'Account created. Waiting for admin approval.' } })
     } catch (err) {
       setError(err.userMessage || 'Could not create your account. Please try again.')
     } finally {
@@ -74,11 +74,11 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}
-              maxLength={32}
+              maxLength={64}
               autoComplete="new-password"
               required
             />
-            <p className="mt-1 text-[11.6px] text-slate-600">8-32 characters, with uppercase, lowercase, a number, and a special character</p>
+            <p className="mt-1 text-[11.6px] text-slate-600">8-64 characters, with uppercase, lowercase, a number, and a special character</p>
           </div>
 
           {error && (
