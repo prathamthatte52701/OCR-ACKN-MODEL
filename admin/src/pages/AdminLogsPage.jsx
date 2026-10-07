@@ -15,6 +15,10 @@ const ACTIONS = [
   'document_file_purged',
   'user_updated',
   'user_deleted',
+  'user_approved',
+  'user_rejected',
+  'user_email_changed',
+  'admin_access',
 ]
 
 export default function AdminLogsPage() {

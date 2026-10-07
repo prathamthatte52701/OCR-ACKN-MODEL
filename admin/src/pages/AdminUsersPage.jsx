@@ -81,12 +81,18 @@ export default function AdminUsersPage() {
   // Until the admin picks a tab themselves, land on Pending as soon as the first
   // load shows requests waiting - otherwise new signups hide behind the default tab.
   const pickedTab = useRef(false)
+  // Only the newest request may update the table: tab switches / React dev double-mount
+  // fire overlapping loads, and an older response landing last used to overwrite the
+  // list (e.g. Approved rows under the Pending tab).
+  const latestRequest = useRef(0)
 
   async function load(pageToLoad = page) {
+    const requestId = ++latestRequest.current
     setLoading(true)
     setError('')
     try {
       const res = await api.get('/admin/users', { params: { page: pageToLoad, limit: PAGE_SIZE, status: tab } })
+      if (requestId !== latestRequest.current) return
       setUsers(res.data.users || [])
       setPendingCount(res.data.pendingCount || 0)
       if (!pickedTab.current && (res.data.pendingCount || 0) > 0 && tab !== 'pending') {
@@ -97,9 +103,10 @@ export default function AdminUsersPage() {
       setTotalPages(res.data.totalPages || 1)
       setTotalUsers(res.data.totalUsers || 0)
     } catch (err) {
+      if (requestId !== latestRequest.current) return
       setError(err.userMessage || 'Could not load users.')
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }
 
