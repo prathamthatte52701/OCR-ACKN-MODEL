@@ -10,6 +10,26 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 
 ## Recent features
 
+- **Admin approval for new accounts** — password signups start as `pending`
+  and cannot log in (or use any route, even with an old token) until an admin
+  approves them. Admins can reject, revoke or re-approve from the admin
+  panel's Pending / Rejected tabs. Google sign-ups and seeded admins are
+  approved automatically. Old databases: run
+  `python -m app.scripts.migrate_user_status --dry-run` once, then without
+  the flag, so existing users stay approved.
+- **Private Export History** — a user only sees their own exports and can only
+  download their own workbooks. Admins see everything through the admin
+  panel, and every time an admin opens or downloads another user's data an
+  audit entry is written.
+- **Email is admin-only** — users can edit their name but not their email;
+  an admin changes it (this signs that user out).
+- **Page detection for photos** — phone photos are cropped to the paper,
+  straightened and rotated upright before OCR; small camera photos are OCR'd
+  without the binarizing cleanup that used to corrupt digits.
+- **Stronger passwords and limits** — 8-64 characters (safe for bcrypt's
+  72-byte limit), a common-password blocklist, no username/email inside the
+  password, max lengths on every auth field, and a request-size ceiling on
+  uploads (413 before the body is read).
 - **Google Sign-In** — alongside the existing email/password login, on both
   the login and signup pages. Same JWT/session contract as normal login, so
   nothing else in the app needed to change. Existing accounts with a
@@ -62,7 +82,8 @@ admin/      Admin panel React app
 cd backend
 python -m venv ../venv          # or use the existing venv/ at repo root
 ../venv/Scripts/activate         # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # exact runtime pins + ruff/black/isort/mypy/pytest
+                                       # (production installs requirements.txt only)
 cp .env.example .env             # fill in real values, see below
 ```
 
@@ -77,7 +98,7 @@ Required env vars (`backend/.env`):
 | `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |
-| `ADMIN_1_PASSWORD` / `ADMIN_2_PASSWORD` | only for seeding | plaintext used once by the seed script, then only the bcrypt hash is stored |
+| `ADMIN_1_NAME` / `ADMIN_1_EMAIL` / `ADMIN_1_PASSWORD` and the same three for `ADMIN_2_` | only for seeding | the seed script reads the admin identities from here (none are in source); the password plaintext is used once, then only the bcrypt hash is stored |
 | `GOOGLE_CLIENT_ID` | only for Google Sign-In | verifies Google ID tokens server-side; frontend needs the matching `VITE_GOOGLE_CLIENT_ID` in its own `.env`. Without it, Google Sign-In simply doesn't render — email/password login is unaffected |
 
 Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
@@ -91,7 +112,7 @@ cd backend
 ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --reload
 ```
 
-Seed the two admin accounts (idempotent, safe to re-run):
+Seed the two admin accounts from the `ADMIN_*` env vars (idempotent, safe to re-run):
 
 ```bash
 cd backend
@@ -119,6 +140,22 @@ cd backend
 
 All four are kept clean on every change.
 
+## Tests
+
+```bash
+cd backend
+../venv/Scripts/python.exe -m pytest app
+```
+
+`backend/conftest.py` forces the database name to `<name>_test` and a
+test-only JWT secret before the app loads, and aborts if the DB name does not
+end in `_test` — the suite never touches real data. About 190 tests cover
+the approval gate, isolation (two-user IDOR checks on every documents/excel
+route), admin audit logging, passwords, field/upload limits, JWT and the
+pinned requirements. Frontend and admin have no unit-test runner (`npm run
+lint` and `npm run build` only); `frontend/e2e/*.cjs` are manual Playwright
+scripts.
+
 ## Known limitations
 
 - **OCR speed**: PaddleOCR on CPU takes roughly 40-90 seconds per document.
@@ -133,28 +170,33 @@ All four are kept clean on every change.
   5× one file's time, not 1×.
 - **Forgot password**: username+email match, not an emailed reset link —
   no possession-of-inbox proof. Inherited from the original app's design.
-- **No deployment config yet**: no Dockerfile/Procfile in this repo —
-  `NODE_ENV=production` disables debug-relevant behavior (Swagger docs,
-  etc.) but the actual "how to run this on a server" step is still open.
-- **Export History** is intentionally global (every user sees every
-  export, any user can download any workbook from that one page) — this
-  is a deliberate exception to the per-user isolation used everywhere
-  else in the app, confirmed as a product decision.
+- **Minimal deployment config**: `render.yaml` starts uvicorn on `0.0.0.0`;
+  there is no Dockerfile/Procfile. Swagger/ReDoc/openapi.json are off
+  everywhere unless `ENABLE_DOCS=true`.
+- **Google linking**: an existing password account that signs in with Google
+  is linked automatically (Google verified the email).
+- **Admin forgot-password** has the same username+email reset as users.
+- **7-day tokens**: JWTs last 7 days and are revoked only by a `tokenVersion`
+  bump (password change, reject).
+- **My Activity** only shows delete / file-purge / export events — uploads,
+  OCR results and corrections are not written to the audit log.
 
 ## Security posture
 
-JWT auth with `tokenVersion`-based session revocation, bcrypt password
+Admin-approval gate on every authenticated route, JWT (PyJWT, HS256 pinned)
+auth with `tokenVersion`-based session revocation, bcrypt password
 hashing, NoSQL-injection-safe input validation (Pydantic-typed throughout,
 no raw dict pass-through), rate limiting on auth + upload + workbook-creation
 endpoints, per-user data isolation (documents/workbooks) with 404-not-403 on
 cross-user access, security headers (CSP, HSTS, nosniff, frame-ancestors),
 CORS restricted to explicit configured origins, admin routes gated by a
 server-side role check that re-reads the DB (never trusts the JWT's role
-claim). Audited across multiple passes this session — see git history for
-specifics.
+claim) with audit logging of admin access to other users' data. See
+`CLAUDE.md` for the architecture notes and git history for specifics.
 
 ## Admin accounts
 
-Two seeded admin accounts (Arjav Jain, Pratham Thatte) — passwords are never
-hardcoded in source; the seed script reads them from `ADMIN_1_PASSWORD` /
-`ADMIN_2_PASSWORD` env vars and only ever persists the bcrypt hash.
+Two admin accounts are seeded from env vars (`ADMIN_1_*`, `ADMIN_2_*` — name,
+email and password). Nothing about them is hardcoded in source and only the
+bcrypt hash of the password is ever persisted. Admins cannot be rejected
+from the panel.
