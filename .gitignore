@@ -62,3 +62,6 @@ coverage/
 
 # Local loop progress log
 LOOP_LOG.md
+
+# Local tool config (preview/dev-server launcher), not part of the app
+.claude/
