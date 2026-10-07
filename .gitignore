@@ -39,3 +39,23 @@ Thumbs.db
 
 # PaddleOCR model cache (large, machine-local, re-downloaded automatically)
 .paddlex/
+
+# Local test reports (contain real document numbers) - keep on disk, never push
+*_TEST_REPORT.md
+
+# Local export workbooks, their locks and temp swap files
+backend/exports/
+
+# Stray virtualenv / empty Node lockfile inside the Python backend
+backend/evnv/
+backend/package-lock.json
+
+# Test runner output and local tool state
+test-results/
+playwright-report/
+.playwright-mcp/
+.claude/settings.local.json
+coverage/
+.coverage
+*.tsbuildinfo
+*.tmp
