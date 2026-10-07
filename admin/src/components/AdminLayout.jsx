@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import api from '../utils/api'
 
 const navLinks = [
   { to: '/', label: 'Dashboard', exact: true },
@@ -14,6 +15,19 @@ const navLinks = [
 
 export default function AdminLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
+  // Number of signups waiting for approval, shown as a badge on "Users" so a new
+  // request is visible from any page (refreshed every 30s).
+  const [pendingCount, setPendingCount] = useState(0)
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      api.get('/admin/users', { params: { limit: 1, status: 'pending' } })
+        .then((res) => { if (alive) setPendingCount(res.data.pendingCount || 0) })
+        .catch(() => {})
+    load()
+    const timer = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [])
   const { user, logout } = useAdminAuth()
   const navigate = useNavigate()
   const initials = (user?.username || '??').slice(0, 2).toUpperCase()
@@ -52,6 +66,9 @@ export default function AdminLayout() {
                 }
               >
                 {link.label}
+                {link.to === '/users' && pendingCount > 0 && (
+                  <span className="ml-2 rounded-full bg-amber-400 px-2 py-0.5 text-[11px] font-black text-slate-950">{pendingCount}</span>
+                )}
               </NavLink>
             ))}
           </nav>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
@@ -78,6 +78,9 @@ export default function AdminUsersPage() {
   const [busyId, setBusyId] = useState(null)
   const [tab, setTab] = useState('approved')
   const [pendingCount, setPendingCount] = useState(0)
+  // Until the admin picks a tab themselves, land on Pending as soon as the first
+  // load shows requests waiting - otherwise new signups hide behind the default tab.
+  const pickedTab = useRef(false)
 
   async function load(pageToLoad = page) {
     setLoading(true)
@@ -86,6 +89,11 @@ export default function AdminUsersPage() {
       const res = await api.get('/admin/users', { params: { page: pageToLoad, limit: PAGE_SIZE, status: tab } })
       setUsers(res.data.users || [])
       setPendingCount(res.data.pendingCount || 0)
+      if (!pickedTab.current && (res.data.pendingCount || 0) > 0 && tab !== 'pending') {
+        pickedTab.current = true
+        setTab('pending')
+        setPage(1)
+      }
       setTotalPages(res.data.totalPages || 1)
       setTotalUsers(res.data.totalUsers || 0)
     } catch (err) {
@@ -130,6 +138,7 @@ export default function AdminUsersPage() {
   }
 
   function switchTab(key) {
+    pickedTab.current = true
     setTab(key)
     setPage(1)
     setSuccess('')
@@ -173,6 +182,16 @@ export default function AdminUsersPage() {
           </button>
         ))}
       </div>
+
+      {pendingCount > 0 && tab !== 'pending' && (
+        <button
+          onClick={() => switchTab('pending')}
+          className="mb-4 flex w-full items-center justify-between rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-left text-[13.6px] font-bold text-amber-200 hover:border-amber-300/50"
+        >
+          <span>{pendingCount} user{pendingCount !== 1 ? 's are' : ' is'} waiting for your approval</span>
+          <span className="rounded-full bg-amber-400 px-3 py-1 text-[11.6px] font-black text-slate-950">Review</span>
+        </button>
+      )}
 
       <Banner error={error} success={success} />
 
