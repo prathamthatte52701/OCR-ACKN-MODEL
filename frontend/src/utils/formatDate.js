@@ -16,10 +16,6 @@ export function formatIST(dateStr, opts = {}) {
   }).format(date)
 }
 
-export function formatISTDate(dateStr) {
-  return formatIST(dateStr, { hour: undefined, minute: undefined, hour12: undefined })
-}
-
 // "Today" boundary computed in IST, not server-local time - e.g. a doc
 // processed at 11:30pm UTC is already "tomorrow" in IST.
 export function isTodayIST(dateStr) {

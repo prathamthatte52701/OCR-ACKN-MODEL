@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from app.core.object_id import PyObjectId
 
@@ -22,9 +20,3 @@ class CamelModel(BaseModel):
         arbitrary_types_allowed=True,
         json_encoders={PyObjectId: str},
     )
-
-
-class MongoBaseModel(CamelModel):
-    id: PyObjectId | None = Field(default=None, alias="_id")
-    created_at: datetime | None = None
-    updated_at: datetime | None = None

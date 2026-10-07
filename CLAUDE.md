@@ -93,7 +93,7 @@ step. New feature tests should follow this exact shape.
 `MONGO_URI` and `JWT_SECRET` (≥32 chars) are required — the app calls
 `sys.exit` with a clear error at import time (`app/core/config.py`) rather
 than silently booting broken. Optional: `MONGO_DB_NAME`, `GROQ_API_KEYS`
-(comma-separated, round-robined), `PORT`, `NODE_ENV`, `ENABLE_DOCS`
+(comma-separated, round-robined), `ENABLE_DOCS`
 (`/docs`/`/redoc`/`/openapi.json` are OFF unless this is `true`, in every
 environment), `FRONTEND_ORIGIN`, `ADMIN_ORIGIN`, and the seed-only admin
 identity vars `ADMIN_1_NAME`/`ADMIN_1_EMAIL`/`ADMIN_1_PASSWORD` and
@@ -122,11 +122,10 @@ persists). The dev server binds to localhost by default (`uvicorn` with no
   stays FastAPI's normal 422), and `lifespan()` (Mongo connect + index
   creation, background-task recovery of interrupted uploads — see Known
   Gotchas).
-- Every Mongo-backed Pydantic model extends `CamelModel`
-  (`app/core/base_model.py`): snake_case Python fields, camelCase on the
-  wire via `alias_generator=to_camel` + `populate_by_name=True` — this is
-  why the frontend never needed renaming during the Node→Python pivot.
-  `MongoBaseModel` adds `id`/`created_at`/`updated_at`.
+- Every request/response Pydantic model (the `schemas.py` files) extends
+  `CamelModel` (`app/core/base_model.py`): snake_case Python fields, camelCase
+  on the wire via `alias_generator=to_camel` + `populate_by_name=True` — this
+  is why the frontend never needed renaming during the Node→Python pivot.
 - **Auth/session model is JWT + `tokenVersion` revocation, not stored
   sessions.** `sign_token(user_id, token_version, role)` embeds
   `{userId, tokenVersion, role, exp}` (`app/core/security.py`, HS256,
@@ -144,12 +143,10 @@ persists). The dev server binds to localhost by default (`uvicorn` with no
   cross-user views are the admin router's (`/admin/exports`, `/admin/workbooks`,
   `/admin/documents`), gated by `require_admin` and audit-logged. When adding
   a documents/workbooks endpoint, scope by `userId` — no exceptions for users.
-- Most DB writes in `router.py` files use **raw camelCase dicts directly**
-  against Motor collections, not the Pydantic models in each feature's
-  `models.py` — those model classes describe the read-shape/schema but
-  are not enforced on every write. Don't assume adding a field to a
-  `models.py` class changes what's actually persisted; the raw-dict insert
-  sites are the real contract.
+- All DB writes in `router.py` files use **raw camelCase dicts directly**
+  against Motor collections — there are no Mongo document models (the old
+  unused `models.py` files were removed). The raw-dict insert sites are the
+  real contract for what is persisted.
 - Indexes are created idempotently on every startup in
   `app/core/database.py::_ensure_indexes` — add new indexes there, not in
   a migration script (none exists).

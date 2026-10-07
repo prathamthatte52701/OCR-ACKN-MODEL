@@ -64,7 +64,7 @@ Source read directly: `E:\OCR ACKN MODEL\OCR main codebase\OCR project AJ` (back
 | Old | New |
 |---|---|
 | Express routes | FastAPI routers, one per feature folder |
-| Mongoose schemas | Pydantic models (`app/features/*/models.py`) |
+| Mongoose schemas | raw camelCase dicts written by the routers; Pydantic only for request/response (`schemas.py`) |
 | `middleware/auth.js` (`requireAuth`) | FastAPI dependency `get_current_user` |
 | `middleware/isAdmin.js` | FastAPI dependency `require_admin` (depends on `get_current_user`) |
 | `utils/validators.js` | `app/core/validators.py` (same regexes, ported 1:1) |

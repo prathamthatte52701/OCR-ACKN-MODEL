@@ -10,7 +10,6 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
-STATUS_REJECTED = "rejected"
 PENDING_MESSAGE = "Waiting for admin approval."
 REJECTED_MESSAGE = "Your request was not approved. Contact the admin."
 

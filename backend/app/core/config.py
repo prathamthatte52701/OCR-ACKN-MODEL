@@ -19,9 +19,6 @@ class Settings(BaseSettings):
     mongo_db_name: str = Field(default="docintel_transport", alias="MONGO_DB_NAME")
     jwt_secret: str = Field(alias="JWT_SECRET")
     groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
-    port: int = Field(default=8000, alias="PORT")
-    environment: str = Field(default="development", alias="NODE_ENV")
-    model_type: str = Field(default="consignor_consignee", alias="MODEL_TYPE")
     frontend_origin: str = Field(default="http://localhost:5174", alias="FRONTEND_ORIGIN")
     admin_origin: str = Field(default="http://localhost:5175", alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
@@ -57,10 +54,6 @@ class Settings(BaseSettings):
     @property
     def docs_enabled(self) -> bool:
         return self.enable_docs
-
-    @property
-    def is_production(self) -> bool:
-        return self.environment == "production"
 
     @property
     def cors_origins(self) -> list[str]:

@@ -74,8 +74,7 @@ Required env vars (`backend/.env`):
 | `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
 | `MONGO_DB_NAME` | no (default `docintel_transport`) | |
 | `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
-| `PORT` | no (default `8000`) | |
-| `NODE_ENV` | no (default `development`) | set `production` to disable `/docs`/`/redoc` |
+| `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |
 | `ADMIN_1_PASSWORD` / `ADMIN_2_PASSWORD` | only for seeding | plaintext used once by the seed script, then only the bcrypt hash is stored |

@@ -17,8 +17,6 @@ services:
         sync: false
       - key: MONGO_DB_NAME
         value: docintel_transport
-      - key: NODE_ENV
-        value: production
       - key: FRONTEND_ORIGIN
         sync: false
       - key: ADMIN_ORIGIN

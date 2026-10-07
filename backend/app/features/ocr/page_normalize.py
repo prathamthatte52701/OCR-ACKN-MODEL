@@ -16,12 +16,10 @@ original bytes, untouched, so documents that work today keep working.
 PDFs never go through here (their pages render flat and upright).
 """
 
-import io
 from collections.abc import Callable
 
 import cv2
 import numpy as np
-from PIL import Image
 
 # Analysis runs on a downscaled copy - paper detection doesn't need full
 # resolution and this keeps the stage cheap.
@@ -220,8 +218,3 @@ def normalize_photo(
         return _encode_png(page), steps
     except Exception:  # noqa: BLE001
         return image_bytes, []
-
-
-def png_size(png_bytes: bytes) -> tuple[int, int]:
-    with Image.open(io.BytesIO(png_bytes)) as im:
-        return im.size

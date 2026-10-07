@@ -2,10 +2,6 @@ import api from './client'
 import { downloadBlob } from './download'
 import { promptText } from '../store/dialogStore'
 
-export function listWorkbooks() {
-  return api.get('/documents/workbooks').then((res) => res.data)
-}
-
 export function downloadWorkbook({ year, workbookId } = {}) {
   return downloadBlob('/documents/workbook/download', {
     params: workbookId ? { workbookId } : year ? { year } : {},
