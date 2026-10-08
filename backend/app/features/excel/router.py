@@ -14,6 +14,10 @@ from app.features.excel.schemas import BulkSaveRequest, NewExcelFileRequest
 
 router = APIRouter()
 
+DEFAULT_EXPORT_PAGE_SIZE = 30
+MAX_EXPORT_PAGE_SIZE = 100
+MAX_EXPORT_PAGE_NUMBER = 100_000
+
 
 def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
     """Workbooks/Settings are per-user, but excel_service resolves a filename
@@ -119,18 +123,35 @@ async def download_workbook(
 # view lives in the admin router instead: GET /admin/exports and /admin/workbooks.)
 # Like every other documents/workbooks route, scope by userId by default.
 @router.get("/export-history")
-async def export_history(current_user: CurrentUser = Depends(get_current_user)) -> dict:
+async def export_history(
+    page: int | None = Query(default=None),
+    limit: int | None = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Paginated (30 per page by default, 100 max) so the page stays fast however many
+    documents a user has exported. Same capped page/limit convention as GET /documents."""
     db = get_database()
-    cursor = db.exportedrows.find({"userId": current_user.id}).sort("exportedAt", -1)
+    lim = min(MAX_EXPORT_PAGE_SIZE, max(1, limit or DEFAULT_EXPORT_PAGE_SIZE))
+    scope = {"userId": current_user.id}
+    total = await db.exportedrows.count_documents(scope)
+    total_pages = max(1, -(-total // lim))
+    # a page past the end (rows were removed meanwhile) answers with the last real page
+    pg = min(total_pages, MAX_EXPORT_PAGE_NUMBER, max(1, page or 1))
+    cursor = db.exportedrows.find(scope).sort("exportedAt", -1).skip((pg - 1) * lim).limit(lim)
+    page_rows = await cursor.to_list(length=None)
+    # one lookup for every workbook on this page instead of one query per row
+    workbook_ids = {r["workbookId"] for r in page_rows if r.get("workbookId")}
+    workbooks = {
+        w["_id"]: w
+        async for w in db.workbooks.find(
+            {"_id": {"$in": list(workbook_ids)}, "userId": current_user.id},
+            {"filename": 1, "year": 1},
+        )
+    }
     rows = []
-    async for row in cursor:
-        workbook = None
-        if row.get("workbookId"):
-            wb = await db.workbooks.find_one(
-                {"_id": row["workbookId"], "userId": current_user.id}, {"filename": 1, "year": 1}
-            )
-            if wb:
-                workbook = {"filename": wb["filename"], "year": wb["year"]}
+    for row in page_rows:
+        wb = workbooks.get(row.get("workbookId"))
+        workbook = {"filename": wb["filename"], "year": wb["year"]} if wb else None
         rows.append(
             {
                 "id": str(row["_id"]),
@@ -145,7 +166,12 @@ async def export_history(current_user: CurrentUser = Depends(get_current_user)) 
                 "exportedAt": row["exportedAt"],
             }
         )
-    return {"exports": rows}
+    return {
+        "exports": rows,
+        "totalExports": total,
+        "totalPages": total_pages,
+        "currentPage": pg,
+    }
 
 
 # Download of a workbook listed on the caller's own Export History page. Scoped

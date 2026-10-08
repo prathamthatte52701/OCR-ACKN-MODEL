@@ -37,8 +37,16 @@ function EmptyHistory() {
   )
 }
 
+const PAGE_SIZE = 30
+
 export default function ExportHistoryPage() {
-  const { data: exports = [], isLoading, isError, error, refetch } = useExportHistory()
+  const [page, setPage] = useState(1)
+  const { data, isLoading, isError, error, refetch } = useExportHistory({ page, limit: PAGE_SIZE })
+  const exports = data?.exports || []
+  const totalExports = data?.totalExports ?? exports.length
+  const totalPages = data?.totalPages || 1
+  // the server clamps a page past the end to the last real page and says which one it returned
+  const currentPage = data?.currentPage || page
   const [downloadingId, setDownloadingId] = useState(null)
 
   async function handleDownload(row) {
@@ -62,7 +70,7 @@ export default function ExportHistoryPage() {
           <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">Export History</h1>
           <p className="mt-2 flex items-center gap-2 text-[14.7px] font-medium text-slate-500">
             <span className="h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.85)]" />
-            {isLoading ? 'Loading export history...' : `${exports.length} export${exports.length !== 1 ? 's' : ''}`}
+            {isLoading ? 'Loading export history...' : `${totalExports} export${totalExports !== 1 ? 's' : ''}`}
           </p>
         </div>
 
@@ -112,6 +120,28 @@ export default function ExportHistoryPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="mt-8 flex items-center justify-center gap-4">
+            <button
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
+              disabled={currentPage <= 1}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
+            >
+              Previous
+            </button>
+            <span className="text-[14.7px] font-bold text-slate-400">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage >= totalPages}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-blue-300/30 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/[0.045]"
+            >
+              Next
+            </button>
           </div>
         )}
       </main>

@@ -9,8 +9,9 @@ export function downloadWorkbook({ year, workbookId } = {}) {
   })
 }
 
-export function exportHistory() {
-  return api.get('/documents/export-history').then((res) => res.data.exports)
+// { exports, totalExports, totalPages, currentPage } - 30 rows per page
+export function exportHistory(params = {}) {
+  return api.get('/documents/export-history', { params }).then((res) => res.data)
 }
 
 export function newExcelFile(filename) {

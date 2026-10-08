@@ -133,3 +133,75 @@ async def test_admin_still_sees_all_exports(
     await _export_row(db, b, await _workbook(db, exports_dir, b, "B1"), "820000012")
     r = await client.get("/api/admin/exports", headers=admin.headers)
     assert r.status_code == 200 and r.json()["totalExports"] == 2
+
+
+async def _many_exports(db: Any, user: Any, workbook_id: ObjectId, count: int) -> None:
+    from datetime import timedelta
+
+    base = datetime.now(UTC)
+    await db.exportedrows.insert_many(
+        [
+            {
+                "userId": user.id,
+                "documentId": ObjectId(),
+                "workbookId": workbook_id,
+                "documentType": "Delivery Challan",
+                "number": f"8200{i:05d}",
+                "date": "01/01/2026",
+                "exportedAt": base + timedelta(seconds=i),
+                "createdAt": base,
+                "updatedAt": base,
+            }
+            for i in range(count)
+        ]
+    )
+
+
+async def test_export_history_is_paginated_30_per_page_newest_first(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a, b = await make_user(), await make_user()
+    wa = await _workbook(db, exports_dir, a, "BooksA")
+    await _many_exports(db, a, wa, 65)
+    await _many_exports(db, b, await _workbook(db, exports_dir, b, "BooksB"), 40)
+
+    p1 = (await client.get("/api/documents/export-history", headers=a.headers)).json()
+    assert p1["totalExports"] == 65 and p1["totalPages"] == 3 and p1["currentPage"] == 1
+    assert len(p1["exports"]) == 30
+    assert p1["exports"][0]["number"] == "820000064"  # newest first
+    p2 = (await client.get("/api/documents/export-history?page=2", headers=a.headers)).json()
+    p3 = (await client.get("/api/documents/export-history?page=3", headers=a.headers)).json()
+    assert (len(p2["exports"]), len(p3["exports"])) == (30, 5)
+    numbers = [r["number"] for r in p1["exports"] + p2["exports"] + p3["exports"]]
+    assert len(set(numbers)) == 65  # no row repeated or skipped across pages
+    assert p1["exports"][0]["workbook"] == {"filename": "BooksA", "year": 2026}
+
+
+async def test_export_history_page_bounds_and_limit_cap(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    await _many_exports(db, a, await _workbook(db, exports_dir, a, "BooksA"), 35)
+    past = (await client.get("/api/documents/export-history?page=99", headers=a.headers)).json()
+    assert past["currentPage"] == 2 and len(past["exports"]) == 5  # clamped to the last page
+    for query in ("page=0", "page=-3", "limit=0", "limit=-5"):
+        r = await client.get(f"/api/documents/export-history?{query}", headers=a.headers)
+        assert r.status_code == 200 and len(r.json()["exports"]) >= 1, query
+    big = (
+        await client.get("/api/documents/export-history?limit=1000000", headers=a.headers)
+    ).json()
+    assert len(big["exports"]) == 35  # capped at 100, all 35 fit
+    junk = await client.get("/api/documents/export-history?page=abc", headers=a.headers)
+    assert junk.status_code == 422
+
+
+async def test_export_history_pagination_never_mixes_users(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a, b = await make_user(), await make_user()
+    await _many_exports(db, a, await _workbook(db, exports_dir, a, "BooksA"), 31)
+    await _many_exports(db, b, await _workbook(db, exports_dir, b, "BooksB"), 31)
+    for page in (1, 2):
+        r = await client.get(f"/api/documents/export-history?page={page}", headers=a.headers)
+        assert r.json()["totalExports"] == 31
+        assert b.email not in r.text and str(b.id) not in r.text
