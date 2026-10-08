@@ -75,15 +75,15 @@ async function userLogin(page, email, password) {
     await userLogin(user, 'carol@looptest.local', 'Wr0ng!pass9')
     log('T2 login', 'wrong password shows generic error', (await user.locator('body').innerText()).includes('Invalid email or password.'))
 
-    // ---------------- T11 + T12 (signup UI): weak password, length attrs
+    // ---------------- T11 + T12 (signup UI): weak-format password, length attrs
     await user.goto(`${FRONT}/signup`)
     await setVal(user, 'input:not([type=email]):not([type=password])', 'dave')
     await setVal(user, 'input[type=email]', 'dave@looptest.local')
-    await setVal(user, 'input[type=password]', 'Password1!')
+    await setVal(user, 'input[type=password]', 'password1')
     await user.click('button[type=submit]')
     await user.waitForTimeout(1800)
-    log('T11 passwords', 'common password rejected with a clear message', (await user.locator('body').innerText()).includes('too common'))
-    await shot(user, 'T11_common_password')
+    log('T11 passwords', 'password without capital/special character is rejected with the rule text', (await user.locator('body').innerText()).includes('special character'))
+    await shot(user, 'T11_weak_format_password')
     const maxLen = await user.locator('input[type=password]').first().getAttribute('maxlength')
     log('T12/T11 limits', 'password input maxlength is 64', maxLen === '64', `maxlength=${maxLen}`)
 

@@ -1,8 +1,10 @@
-"""T11: password length (bytes-safe), blocklist, identity checks."""
+"""T11: password length (bytes-safe), character classes, identity checks.
+
+There is deliberately NO common-password blocklist (removed on the client's request):
+Password1!-style passwords are allowed as long as they meet the format rules."""
 
 import pytest
 
-from app.core.common_passwords import COMMON_BASE_WORDS
 from app.core.validators import validate_password
 
 GOOD = "Xq7!mZv#4Lp2"
@@ -35,30 +37,18 @@ def test_multibyte_password_cannot_exceed_bcrypt_72_bytes() -> None:
 
 @pytest.mark.parametrize(
     "pw",
-    [
-        "Password1!",
-        "PAsSWORD123#",
-        "pAssword@2026",
-        "Welcome@123",
-        "Admin@12345",
-        "Qwerty!2345",
-        "Iloveyou#99",
-        "Letmein!!11",
-        "Passw0rd!",
-        "Secret#2026",
-    ],
+    ["Password1!", "Welcome@123", "Admin@12345", "Qwerty!2345", "Passw0rd!", "Secret#2026"],
 )
-def test_blocklist_variants_rejected(pw: str) -> None:
-    err = validate_password(pw)
-    assert err is not None and "too common" in err, pw
+def test_commonly_used_passwords_are_allowed_when_format_is_valid(pw: str) -> None:
+    assert validate_password(pw) is None, pw
 
 
-def test_blocklist_does_not_reject_strong_passwords_containing_a_word() -> None:
-    assert validate_password("Xq7!welcomeZv#4") is None  # not equal to a base word
+def test_no_common_password_module_or_message_left() -> None:
+    from pathlib import Path
 
-
-def test_blocklist_has_about_200_plus_entries() -> None:
-    assert 200 <= len(COMMON_BASE_WORDS) <= 400
+    core = Path(__file__).parent
+    assert not (core / "common_passwords.py").exists()
+    assert "too common" not in (core / "validators.py").read_text(encoding="utf-8")
 
 
 def test_password_containing_username_or_email_name_rejected() -> None:

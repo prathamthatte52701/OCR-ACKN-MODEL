@@ -35,7 +35,7 @@ from app.main import app  # noqa: E402
 
 limiter.enabled = False
 
-# Strong enough to pass every password rule (blocklist, length, classes).
+# Strong enough to pass every password rule (length, classes, identity).
 TEST_PASSWORD = "Xq7!mZv#4Lp2"
 
 

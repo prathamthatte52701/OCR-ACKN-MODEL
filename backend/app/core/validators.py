@@ -1,7 +1,5 @@
 import re
 
-from app.core.common_passwords import COMMON_BASE_WORDS
-
 # Ported 1:1 from the old utils/validators.js - source of truth stays here,
 # frontend re-implements the same rules for instant feedback only.
 
@@ -15,7 +13,6 @@ PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 64
 BCRYPT_MAX_BYTES = 72
 PASSWORD_CLASSES_RE = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$")
-_TRAILING_NON_LETTERS_RE = re.compile(r"[^a-z]+$")
 _MIN_IDENTITY_LEN = 3
 
 
@@ -61,9 +58,6 @@ def validate_password(
         return "Password cannot contain spaces or whitespace."
 
     lowered = password.lower()
-    base = _TRAILING_NON_LETTERS_RE.sub("", lowered)
-    if lowered in COMMON_BASE_WORDS or base in COMMON_BASE_WORDS:
-        return "That password is too common. Choose something harder to guess."
     identity_parts = {username or "", (email or "").split("@")[0]}
     for part in identity_parts:
         part = part.strip().lower()

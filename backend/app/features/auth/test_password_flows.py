@@ -3,11 +3,13 @@
 from typing import Any
 
 
-async def test_signup_rejects_common_and_identity_passwords(client: Any) -> None:
+async def test_signup_rejects_identity_and_bad_format_but_allows_common_words(client: Any) -> None:
     base = {"username": "tester", "email": "tester@looptest.local"}
-    for pw in ("Password1!", "Welcome@123", "Zq9!tester!Xk77"):
+    for pw in ("Zq9!tester!Xk77", "alllowercase1!", "NoSpecial1234"):
         r = await client.post("/api/auth/signup", json={**base, "password": pw})
         assert r.status_code == 400, pw
+    ok = await client.post("/api/auth/signup", json={**base, "password": "Password1!"})
+    assert ok.status_code == 201  # no common-password rule any more
 
 
 async def test_signup_accepts_64_char_password_and_login_works(client: Any, db: Any) -> None:
@@ -43,8 +45,8 @@ async def test_change_password_applies_rules_and_keeps_old_password_valid_for_lo
         headers=u.headers,
         json={
             "currentPassword": u.password,
-            "newPassword": "Password1!",
-            "confirmNewPassword": "Password1!",
+            "newPassword": "nospecial1234",
+            "confirmNewPassword": "nospecial1234",
         },
     )
     assert bad.status_code == 400
@@ -68,7 +70,7 @@ async def test_forgot_password_reset_applies_rules(client: Any, make_user: Any) 
     payload = {"username": u.username, "email": u.email}
     weak = await client.post(
         "/api/auth/forgot-password/reset",
-        json={**payload, "newPassword": "Qwerty!2345", "confirmNewPassword": "Qwerty!2345"},
+        json={**payload, "newPassword": "qwerty12345", "confirmNewPassword": "qwerty12345"},
     )
     assert weak.status_code == 400
     ident = await client.post(

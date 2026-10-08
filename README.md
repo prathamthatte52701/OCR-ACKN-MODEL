@@ -27,7 +27,7 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
   straightened and rotated upright before OCR; small camera photos are OCR'd
   without the binarizing cleanup that used to corrupt digits.
 - **Stronger passwords and limits** — 8-64 characters (safe for bcrypt's
-  72-byte limit), a common-password blocklist, no username/email inside the
+  72-byte limit), no username/email inside the
   password, max lengths on every auth field, and a request-size ceiling on
   uploads (413 before the body is read).
 - **Google Sign-In** — alongside the existing email/password login, on both
