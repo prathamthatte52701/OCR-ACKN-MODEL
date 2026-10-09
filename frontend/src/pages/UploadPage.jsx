@@ -182,6 +182,9 @@ export default function UploadPage() {
   const [mode, setMode] = useState('single') // 'single' | 'bulk'
   const [bulkFiles, setBulkFiles] = useState([]) // [{ file, documentType, status, error, docId }]
   const [bulkError, setBulkError] = useState('')
+  // Type given to files added from now on: the last "Set all as" choice (default Tax Invoice).
+  // Kept across "Start New Batch" on purpose.
+  const [bulkDefaultType, setBulkDefaultType] = useState(DOCUMENT_TYPES[0])
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
   const [reviewEditingField, setReviewEditingField] = useState(null) // { docId, key, label, value }
@@ -282,7 +285,7 @@ export default function UploadPage() {
         setBulkError(`${f.name}: ${err}`)
         return
       }
-      additions.push({ file: f, documentType: DOCUMENT_TYPES[0], status: 'waiting', error: '', docId: null })
+      additions.push({ file: f, documentType: bulkDefaultType, status: 'waiting', error: '', docId: null })
     }
     setBulkError('')
     setBulkFiles((prev) => [...prev, ...additions])
@@ -295,6 +298,19 @@ export default function UploadPage() {
   function setBulkFileType(index, type) {
     setBulkFiles((prev) => prev.map((f, i) => (i === index ? { ...f, documentType: type } : f)))
   }
+
+  // "Set all as": one click labels every file in the list. Only touches local state - it
+  // never submits and the upload request format is unchanged.
+  function setAllBulkTypes(type) {
+    setBulkDefaultType(type)
+    setBulkFiles((prev) => prev.map((f) => ({ ...f, documentType: type })))
+  }
+
+  // Which highlight to show: the shared type when every row agrees, otherwise 'mixed'.
+  const bulkTypeState =
+    bulkFiles.length > 0 && bulkFiles.every((f) => f.documentType === bulkFiles[0].documentType)
+      ? bulkFiles[0].documentType
+      : 'mixed'
 
   function startBulkPolling() {
     if (bulkPollRef.current) clearInterval(bulkPollRef.current)
@@ -657,6 +673,30 @@ export default function UploadPage() {
                   <p className="text-[14.7px] font-bold text-white">Click to select up to {MAX_BULK_FILES} files</p>
                   <p className="mt-1 text-[12.6px] text-slate-500">JPG, JPEG, PNG, PDF - max 5MB each</p>
                 </label>
+
+                {bulkFiles.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Set all as">
+                    <span className="text-[12.6px] font-bold uppercase tracking-wide text-slate-500">Set all as</span>
+                    {DOCUMENT_TYPES.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        aria-pressed={bulkTypeState === t}
+                        onClick={() => setAllBulkTypes(t)}
+                        className={`rounded-full border px-3.5 py-1.5 text-[12.6px] font-bold transition-colors ${
+                          bulkTypeState === t
+                            ? 'border-blue-300/60 bg-blue-500/20 text-blue-100'
+                            : 'border-white/10 bg-white/[0.035] text-slate-300 hover:border-blue-300/30 hover:bg-blue-500/10'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                    {bulkTypeState === 'mixed' && (
+                      <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-[11.6px] font-bold text-amber-200">Mixed</span>
+                    )}
+                  </div>
+                )}
 
                 {bulkFiles.length > 0 && (
                   <div className="space-y-2">
