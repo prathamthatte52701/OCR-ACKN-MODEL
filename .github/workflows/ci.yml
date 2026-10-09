@@ -30,7 +30,15 @@ jobs:
       - run: black app --check
       - run: isort app --check-only
       - run: mypy app
-      - run: pytest app -q
+      - name: pytest
+        run: |
+          set +e
+          pytest app -q --tb=short > pytest.out 2>&1
+          rc=$?
+          grep -E "^(FAILED|ERROR)" pytest.out | head -30 | while read -r l; do echo "::error::$l"; done
+          grep -E "^E " pytest.out | head -20 | while read -r l; do echo "::warning::$l"; done
+          tail -5 pytest.out
+          exit $rc
 
   frontend:
     runs-on: ubuntu-latest
