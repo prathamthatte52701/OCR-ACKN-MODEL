@@ -119,33 +119,59 @@ function UploadProcessingState({ message }) {
   )
 }
 
-// Single-upload only, by design - shows the actual selected file before
-// submit (image thumbnail, or the browser's native inline PDF viewer for a
-// PDF) so the user can confirm it's the right document. Bulk upload
-// deliberately has no equivalent - flagged as out of scope for that flow.
-function FilePreview({ file }) {
+// Shows the actual selected file (image thumbnail, or the browser's native inline PDF
+// viewer for a PDF). Used before submit in the single-upload flow, and beside the
+// extracted data in the bulk "Review Results" screen - both read the File object that is
+// already in state, so nothing is fetched from the server.
+//
+// Memory: exactly one object URL lives per mounted preview. It is created after mount and
+// revoked on unmount. The bulk review gives each item its own `key`, so moving to the next
+// item unmounts this component (revoking its URL) and mounts a fresh one - which is also what
+// makes the <embed> really reload, changing `src` on an <embed> does not reliably do that.
+// The URL is created inside a microtask that is skipped if the effect was already cleaned up,
+// so React StrictMode's mount/unmount/mount in dev never leaks or reuses a revoked URL.
+function FilePreview({ file, index, showOpenLink = false, tall = false }) {
   const [previewUrl, setPreviewUrl] = useState('')
 
   useEffect(() => {
-    const url = URL.createObjectURL(file)
-    setPreviewUrl(url)
-    return () => URL.revokeObjectURL(url)
+    let cancelled = false
+    let url = ''
+    Promise.resolve().then(() => {
+      if (cancelled) return
+      url = URL.createObjectURL(file)
+      setPreviewUrl(url)
+    })
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
   }, [file])
 
   if (!previewUrl) return null
 
-  const isPdf = file.type === 'application/pdf'
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  const testProps =
+    index === undefined
+      ? {}
+      : { 'data-testid': 'review-preview', 'data-filename': file.name, 'data-index': index }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
-        <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300">{file.name}</span>
-        <span className="shrink-0 text-[12.6px] text-slate-500">{(file.size / 1024).toFixed(1)} KB</span>
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40" {...testProps}>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-4 py-2.5">
+        <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={file.name}>{file.name}</span>
+        <span className="flex shrink-0 items-center gap-3 text-[12.6px] text-slate-500">
+          {(file.size / 1024).toFixed(1)} KB
+          {showOpenLink && (
+            <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-300 no-underline hover:underline">
+              Open in new tab
+            </a>
+          )}
+        </span>
       </div>
       {isPdf ? (
-        <embed src={previewUrl} type="application/pdf" className="h-[420px] w-full bg-slate-900" />
+        <embed src={previewUrl} type="application/pdf" className={`${tall ? 'h-[560px]' : 'h-[420px]'} w-full bg-slate-900`} />
       ) : (
-        <img src={previewUrl} alt={`Preview of ${file.name}`} className="max-h-[420px] w-full object-contain bg-slate-900" />
+        <img src={previewUrl} alt={`Preview of ${file.name}`} className={`${tall ? 'max-h-[560px]' : 'max-h-[420px]'} w-full object-contain bg-slate-900`} />
       )}
     </div>
   )
@@ -482,14 +508,17 @@ export default function UploadPage() {
 
   const reviewTotal = bulkFiles.length
   const reviewItem = bulkFiles[reviewIndex] || null
+  // The Review Results screen needs the whole width (data card + file preview side by side),
+  // so while it is showing the page drops the two-column hero layout. Idle/uploading are unchanged.
+  const reviewActive = mode === 'bulk' && bulkAllSettled
 
   return (
     <div className="relative min-h-full overflow-hidden bg-[#020817]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_14%,rgba(37,99,235,0.2),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(6,182,212,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.16),rgba(2,6,23,0.98))]" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.035)_1px,transparent_1px)] bg-[size:56px_56px] opacity-55" />
 
-      <main className="relative mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-6 lg:min-h-[calc(100vh-94px)] lg:grid-cols-[0.75fr_1.25fr] lg:items-center lg:px-10 lg:py-12">
-        <section className="max-w-xl">
+      <main className={`relative mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-6 lg:min-h-[calc(100vh-94px)] lg:items-center lg:px-10 lg:py-12 ${reviewActive ? 'lg:grid-cols-1' : 'lg:grid-cols-[0.75fr_1.25fr]'}`}>
+        <section className={`max-w-xl ${reviewActive ? 'hidden' : ''}`}>
           <p className="mb-6 text-[14.7px] font-bold text-blue-400">Upload Document</p>
           <h1 className="text-4xl font-black leading-[1.16] tracking-[-0.035em] text-white sm:text-5xl xl:text-[56px]">
             Extract. Verify.
@@ -553,7 +582,8 @@ export default function UploadPage() {
                 </div>
 
                 {reviewItem && (
-                  <div className="w-full space-y-4 text-left">
+                  <div className="grid w-full gap-6 text-left lg:grid-cols-2 lg:items-start">
+                  <div className="min-w-0 space-y-4">
                     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
                       <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={reviewItem.file.name}>{reviewItem.file.name}</span>
                       <span className="shrink-0 text-[12.6px] text-slate-500">{reviewItem.documentType}</span>
@@ -625,6 +655,9 @@ export default function UploadPage() {
                         </button>
                       </div>
                     )}
+                  </div>
+                  {/* original file of the item being reviewed - shown for failed items too */}
+                  <FilePreview key={reviewItem.docId ?? reviewIndex} file={reviewItem.file} index={reviewIndex} showOpenLink tall />
                   </div>
                 )}
 
