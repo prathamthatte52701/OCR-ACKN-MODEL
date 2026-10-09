@@ -23,13 +23,19 @@ from app.features.ocr.preprocessing import (
     assess_and_preprocess,
 )
 
-_FONT_REGULAR = "C:/Windows/Fonts/arial.ttf"
-_FONT_BOLD = "C:/Windows/Fonts/arialbd.ttf"
+# Arial on Windows; PIL resolves the DejaVu / Liberation names from the system font dirs on Linux (CI).
+_FONT_REGULAR = ("C:/Windows/Fonts/arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf")
+_FONT_BOLD = ("C:/Windows/Fonts/arialbd.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf")
 _CANVAS_SIZE = (1600, 450)  # wide-short strip, mimics a real header crop's aspect
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(_FONT_BOLD if bold else _FONT_REGULAR, size)
+    for name in _FONT_BOLD if bold else _FONT_REGULAR:
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    raise OSError("no usable TrueType font found for test_preprocessing")
 
 
 def _to_png_bytes(img: Image.Image) -> bytes:
