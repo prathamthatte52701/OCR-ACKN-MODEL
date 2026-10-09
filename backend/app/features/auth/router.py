@@ -138,9 +138,17 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     # shown to someone who proved they own the account (no status oracle).
     raise_if_not_approved(user.get("status", STATUS_APPROVED))
 
+    # Consume the one-time "you're approved" notice. Reached only after the password check
+    # AND the approval gate above, so a wrong password or a pending/rejected account can never
+    # use it up. find_one_and_update is atomic: of two concurrent logins only one matches.
+    consumed = await db.users.find_one_and_update(
+        {"_id": user["_id"], "approvalNoticePending": True},
+        {"$set": {"approvalNoticePending": False}},
+    )
+
     token = sign_token(str(user["_id"]), user["tokenVersion"], user["role"])
     await log_action(user["_id"], "login", {"email": email})
-    return TokenResponse(token=token, user=_user_out(user))
+    return TokenResponse(token=token, user=_user_out(user), just_approved=consumed is not None)
 
 
 async def _derive_google_username(db: AsyncIOMotorDatabase, email: str) -> str:

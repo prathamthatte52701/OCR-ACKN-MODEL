@@ -13,13 +13,13 @@ export function useAuth() {
 
   async function login(email, password) {
     const data = await authApi.login(email, password)
-    setSession(data.token, data.user)
+    setSession(data.token, data.user, Boolean(data.justApproved))
     return data.user
   }
 
   async function loginWithGoogle(idToken) {
     const data = await authApi.loginWithGoogle(idToken)
-    setSession(data.token, data.user)
+    setSession(data.token, data.user, false) // Google sign-in never shows the approval notice
     return data.user
   }
 

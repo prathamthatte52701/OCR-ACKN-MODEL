@@ -76,7 +76,7 @@ def _serialize_user(user: dict) -> dict:
 
 
 def _serialize_document(doc: dict, owner: dict | None = None) -> dict:
-    out = {k: v for k, v in doc.items() if k != "ocrTextHidden"}
+    out = {k: v for k, v in doc.items() if k != "ocrTextHidden" and not k.endswith("Confidence")}
     out["_id"] = str(out["_id"])
     out["userId"] = str(out["userId"])
     if out.get("gridFsFileId"):
@@ -138,7 +138,14 @@ async def _set_user_status(user_id: ObjectId, new_status: str, admin: CurrentUse
         raise HTTPException(status_code=404, detail="User not found.")
 
     update: dict = {"$set": {"status": new_status, "updatedAt": datetime.now(UTC)}}
+    if new_status == "approved":
+        # One-time "you're approved" notice for the user's next login - but only when this
+        # really is a change to approved (pending/rejected -> approved). Re-approving someone
+        # who is already approved, or a legacy account with no status (= approved), sets nothing.
+        if user.get("status", "approved") != "approved":
+            update["$set"]["approvalNoticePending"] = True
     if new_status == "rejected":
+        update["$set"]["approvalNoticePending"] = False
         # Admins (including yourself) can never be locked out this way.
         if user.get("role") == "admin":
             raise HTTPException(status_code=400, detail="Admin accounts cannot be rejected.")
@@ -675,7 +682,7 @@ async def correct_document_as_admin(
     now = datetime.now(UTC)
     await db.documents.update_one(
         {"_id": doc_id},
-        {"$set": {field: value, "edited": True, f"{field}Confidence": 100, "updatedAt": now}},
+        {"$set": {field: value, "edited": True, "updatedAt": now}},
     )
     await db.corrections.insert_one(
         {

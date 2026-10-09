@@ -104,6 +104,14 @@ def month_from_date(date_str: str | None, fallback_now: datetime | None = None) 
     return current_period(fallback_now)[1]
 
 
+def date_has_month(date_str: str | None) -> bool:
+    """True when month_from_date can read a real month out of `date_str`; False means the
+    row would be filed under the CURRENT month's sheet only because the date is missing or
+    unreadable (callers use this to tell the user, not to change where the row goes)."""
+    match = _DATE_RE.match(date_str) if date_str else None
+    return match is not None and 1 <= int(match.group(2)) <= 12
+
+
 def _add_header_row(sheet: Worksheet) -> None:
     sheet.append(HEADERS)
     for cell in sheet[1]:

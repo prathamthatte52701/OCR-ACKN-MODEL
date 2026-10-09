@@ -36,8 +36,8 @@ async function testUpload(page, { label, docType, filePath }) {
   const hasProcessedFields = /TAX INVOICE No\.|Delivery Challan No\./.test(bodyText);
   log(`${label}: extracted field labels visible`, hasProcessedFields);
 
-  const confidenceIcons = await page.locator('[aria-label="High confidence"], [aria-label="Low confidence — please verify"]').count();
-  log(`${label}: confidence indicators shown per field`, confidenceIcons > 0, `count=${confidenceIcons}`);
+  const confidenceIcons = await page.locator('[aria-label*="onfidence"]').count();
+  log(`${label}: zero confidence indicators`, confidenceIcons === 0, `count=${confidenceIcons}`);
 
   await page.screenshot({ path: __dirname + `/shot_${label.replace(/\s+/g, '_')}_detail.png`, fullPage: true });
 

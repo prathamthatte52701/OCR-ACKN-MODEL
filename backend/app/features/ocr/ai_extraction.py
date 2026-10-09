@@ -20,7 +20,6 @@ async def extract_header(
     document_type: str,
     header_text: str | None,
     provider: AIProvider | None = None,
-    min_rec_score: float | None = None,
 ) -> dict:
     if not header_text or not header_text.strip():
         return empty_extraction_result(document_type)
@@ -34,4 +33,4 @@ async def extract_header(
         parsed = parse_extraction_json(await provider.extract(system_prompt, user_prompt))
     except ValueError:
         parsed = parse_extraction_json(await provider.extract(system_prompt, user_prompt))
-    return build_extraction_result(document_type, parsed, header_text, min_rec_score=min_rec_score)
+    return build_extraction_result(document_type, parsed)

@@ -28,7 +28,7 @@ const TOPICS = [
     q: 'The extracted Number or Date is wrong, or empty (looks like a dash "-")',
     a: [
       'This happens when the scan or photo was blurry, dark, or the number was partly covered by a stamp.',
-      'Open the document and look for a red circle icon next to the field - that means the app itself is not confident about that value and wants you to double-check it.',
+      'Open the document and compare each extracted value with the original file (you can view/download it from the same page).',
       'Click "Edit" on that field and type in the correct value by looking at the original document (you can view/download the original file from the same page).',
       'If many fields look wrong, try "Reprocess" first - it re-reads the file from scratch and sometimes gets a better result.',
       'For best results next time: use good lighting, hold the camera steady, and make sure the top of the page (where the number and date are) is not covered by anything.',

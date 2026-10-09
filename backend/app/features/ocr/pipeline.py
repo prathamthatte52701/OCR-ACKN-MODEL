@@ -86,19 +86,17 @@ async def _classify_under_lock(png: bytes) -> tuple[int, float]:
         return await asyncio.to_thread(classify_page_orientation, png)
 
 
-async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | None, float | None]:
-    """Returns (header-region OCR/text-layer text, min_rec_score), or
-    (None, None) on failure - mirrors the old app's extractHeaderText().
-    min_rec_score is only ever populated by the run_ocr (image) path below -
-    a PDF's own embedded text layer has no OCR confidence to report."""
+async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
+    """Returns the header-region OCR/text-layer text, or None on failure -
+    mirrors the old app's extractHeaderText()."""
     cut_from_background = False
     try:
         if mime_type == "application/pdf":
             text, header_png = await get_pdf_header_text_or_image(buffer)
             if text:
-                return text, None
+                return text
             if header_png is None:
-                return None, None
+                return None
             image_bytes = header_png
         else:
             # Photos only: find the paper and fix sideways/upside-down shots
@@ -146,7 +144,7 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
             async with _ocr_lock:
                 _lock_held_since = datetime.now(UTC)
                 try:
-                    text, min_rec_score = await asyncio.wait_for(
+                    text = await asyncio.wait_for(
                         asyncio.to_thread(
                             run_ocr,
                             tmp_path,
@@ -156,10 +154,10 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
                         timeout=timeout,
                     )
                 except TimeoutError:
-                    text, min_rec_score = None, None
+                    text = None
                 finally:
                     _lock_held_since = None
-            return text, min_rec_score
+            return text
         finally:
             try:
                 os.unlink(tmp_path)
@@ -167,7 +165,7 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> tuple[str | Non
                 pass
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Header OCR error: {exc}")
-        return None, None
+        return None
 
 
 async def _update_active_document(doc_id: ObjectId, update: dict) -> None:
@@ -182,7 +180,7 @@ async def process_document(
     """Full OCR -> AI extraction -> validation pipeline for one document -
     mirrors the old app's processDocument()."""
     try:
-        header_text, min_rec_score = await _extract_header_text(buffer, mime_type)
+        header_text = await _extract_header_text(buffer, mime_type)
         if not header_text or not header_text.strip():
             await _update_active_document(
                 doc_id,
@@ -197,7 +195,7 @@ async def process_document(
             return
 
         try:
-            result = await extract_header(document_type, header_text, min_rec_score=min_rec_score)
+            result = await extract_header(document_type, header_text)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"AI extraction error: {exc}")
             await _update_active_document(
@@ -224,10 +222,6 @@ async def process_document(
             "referenceNo",
             "number",
             "date",
-            "taxInvoiceNoConfidence",
-            "referenceNoConfidence",
-            "numberConfidence",
-            "dateConfidence",
             "taxInvoiceNoAutoCorrected",
             "numberAutoCorrected",
             "dateAutoCorrected",

@@ -219,10 +219,6 @@ async def _validate_and_store(
             "referenceNo": None,
             "number": None,
             "date": None,
-            "taxInvoiceNoConfidence": None,
-            "referenceNoConfidence": None,
-            "numberConfidence": None,
-            "dateConfidence": None,
             "taxInvoiceNoAutoCorrected": None,
             "numberAutoCorrected": None,
             "dateAutoCorrected": None,
@@ -350,7 +346,8 @@ async def bulk_upload_documents(
 
 
 def _serialize_document(doc: dict) -> dict:
-    out = {k: v for k, v in doc.items() if k != "ocrTextHidden"}
+    # *Confidence keys: legacy rows may still carry the removed AI-confidence fields.
+    out = {k: v for k, v in doc.items() if k != "ocrTextHidden" and not k.endswith("Confidence")}
     out["_id"] = str(out["_id"])
     out["userId"] = str(out["userId"])
     if out.get("gridFsFileId"):
@@ -657,10 +654,6 @@ async def reprocess_document(
             "$set": {
                 "uploadStatus": "uploaded",
                 "processingError": None,
-                "taxInvoiceNoConfidence": None,
-                "referenceNoConfidence": None,
-                "numberConfidence": None,
-                "dateConfidence": None,
                 "taxInvoiceNo": None,
                 "referenceNo": None,
                 "number": None,
@@ -726,7 +719,7 @@ async def purge_document_file(
 ) -> PurgeFileResponse:
     """ "File Delete" in the UI - space-saving, irreversible action: permanently
     removes the stored original file from GridFS while leaving the Document
-    record's extracted metadata (number, date, type, status, confidence,
+    record's extracted metadata (number, date, type, status,
     timestamps) untouched. Distinct from DELETE /{doc_id} ("Delete" in the
     UI - a full permanent delete of the whole record) - this only purges the
     heavy file data. A GridFS failure here does NOT block
@@ -841,8 +834,6 @@ async def correct_document(
         # A correction changes what would be written to Excel - the previous
         # export (if any) no longer reflects this document's current values.
         "exported": False,
-        # Manually verified by the user - no longer a "please verify" case.
-        f"{body.field}Confidence": 100,
         "updatedAt": now,
     }
     if body.field in ("taxInvoiceNo", "number", "date"):

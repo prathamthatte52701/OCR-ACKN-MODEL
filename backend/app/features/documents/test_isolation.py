@@ -55,8 +55,6 @@ async def _doc(db: Any, owner: Any, number: str = "820000001") -> ObjectId:
             "documentType": "Delivery Challan",
             "number": number,
             "date": "01/01/2026",
-            "numberConfidence": 100,
-            "dateConfidence": 100,
             "gridFsFileId": file_id,
             "edited": False,
             "exported": False,

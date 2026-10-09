@@ -50,13 +50,39 @@ export async function saveDocument(docId) {
   }
 }
 
-// "Save All" on a documents page - saves every document id currently
-// rendered on that page (already-exported ones included, same as an
-// individual "Save Again"). No NEED_NEW_WORKBOOK/NO_ACTIVE_WORKBOOK
-// auto-retry like saveDocument() above - if there's no active workbook yet,
-// every entry in the batch just comes back failed with that reason; the
-// user resolves it once via a single Save or "Start New Excel File", same
-// as today, then Save All works.
+// Raw bulk-save call. The server answers with { succeeded, failed, blocked, notAttempted,
+// dateFallback }: `blocked` is set (and the loop stopped) when there is no active workbook yet
+// or the year rolled over - everything not saved is then listed in `notAttempted`.
 export function bulkSaveDocuments(documentIds) {
   return api.post('/documents/bulk-save', { documentIds }).then((res) => res.data)
+}
+
+function mergeBulk(first, retry) {
+  return {
+    succeeded: [...(first.succeeded || []), ...(retry?.succeeded || [])],
+    failed: [...(first.failed || []), ...(retry?.failed || [])],
+    dateFallback: [...(first.dateFallback || []), ...(retry?.dateFallback || [])],
+    blocked: retry ? retry.blocked : first.blocked,
+  }
+}
+
+// "Save All" on a documents page. When the server stops with `blocked` (first export ever, or a
+// new year) this asks for a workbook name once - same prompt as saveDocument() above - creates
+// it and retries ONCE with only the ids that were not saved yet, so a retry can never write a
+// row twice. Resolves to { succeeded, failed, dateFallback, blocked, cancelled }.
+export async function saveAllDocuments(documentIds) {
+  const first = await bulkSaveDocuments(documentIds)
+  if (!first.blocked) return { ...mergeBulk(first), cancelled: false }
+
+  const { error, year, message } = first.blocked
+  const filename = await promptText({
+    title: error === 'NO_ACTIVE_WORKBOOK' ? `Name your first workbook for ${year}` : `New workbook needed for ${year}`,
+    message,
+    defaultValue: `Bills_${year}`,
+  })
+  if (!filename) return { ...mergeBulk(first), cancelled: true }
+
+  await newExcelFile(filename)
+  const retry = await bulkSaveDocuments(first.notAttempted || [])
+  return { ...mergeBulk(first, retry), cancelled: false }
 }

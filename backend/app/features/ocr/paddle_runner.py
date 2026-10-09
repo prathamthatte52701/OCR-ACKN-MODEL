@@ -110,7 +110,7 @@ def run_ocr(
     *,
     use_doc_orientation_classify: bool = False,
     text_det_limit_side_len: int | None = None,
-) -> tuple[str | None, float | None]:
+) -> str | None:
     """Blocking call - invoke via asyncio.to_thread from async code. Reuses
     the cached PaddleOCR singleton instead of loading the model fresh.
 
@@ -119,12 +119,8 @@ def run_ocr(
     defaults reproduce the original fast path exactly (classifier off,
     detector limit falls back to the singleton's init-time 960).
 
-    Returns (assembled_text, min_rec_score): assembled_text is row-grouped
-    (see row_assembly.assemble_rows) rather than one raw text box per line,
-    and min_rec_score is the lowest per-box OCR recognition confidence
-    (`rec_scores`) across the whole result, or None if unavailable/empty -
-    both feed extraction.py's confidence scoring so a wrong-row grab or a
-    shaky character read is no longer invisible behind a 100% score."""
+    Returns the assembled text, row-grouped (see row_assembly.assemble_rows)
+    rather than one raw text box per line, or None on failure/empty."""
     try:
         ocr = _get_ocr()
         results = ocr.predict(
@@ -133,19 +129,15 @@ def run_ocr(
             text_det_limit_side_len=text_det_limit_side_len,
         )
         row_lines: list[str] = []
-        scores: list[float] = []
         for r in results:
             res = r.json.get("res", {})
             texts = res.get("rec_texts", [])
             boxes = res.get("rec_boxes", [])
-            r_scores = res.get("rec_scores", [])
             row_lines.extend(assemble_rows(texts, boxes))
-            scores.extend(s for s in r_scores if s is not None)
         text = "\n".join(row_lines) or None
-        min_score = min(scores) if scores else None
-        return text, min_score
+        return text
     except Exception:  # noqa: BLE001
-        return None, None
+        return None
 
 
 _orientation_model: Any = None

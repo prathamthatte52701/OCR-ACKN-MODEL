@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, Check, AlertTriangle, FileX } from 'lucide-react'
+import { ArrowLeft, FileX } from 'lucide-react'
 import { downloadDocument } from '../api/documents'
 import { useDocument } from '../hooks/useDocumentsQueries'
 import {
@@ -29,35 +29,15 @@ function formatSize(bytes) {
 function fieldsFor(doc) {
   if (doc.documentType === 'Tax Invoice') {
     return [
-      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: doc.taxInvoiceNo, confidence: doc.taxInvoiceNoConfidence },
-      { key: 'referenceNo', label: 'Reference No.', value: doc.referenceNo, confidence: doc.referenceNoConfidence },
-      { key: 'date', label: 'Date', value: doc.date, confidence: doc.dateConfidence },
+      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: doc.taxInvoiceNo },
+      { key: 'referenceNo', label: 'Reference No.', value: doc.referenceNo },
+      { key: 'date', label: 'Date', value: doc.date },
     ]
   }
   return [
-    { key: 'number', label: 'Delivery Challan No.', value: doc.number, confidence: doc.numberConfidence },
-    { key: 'date', label: 'Date', value: doc.date, confidence: doc.dateConfidence },
+    { key: 'number', label: 'Delivery Challan No.', value: doc.number },
+    { key: 'date', label: 'Date', value: doc.date },
   ]
-}
-
-// Threshold matches the spec: anything below ~80, or no score at all
-// (extraction failed/null), is flagged for manual verification.
-const LOW_CONFIDENCE_THRESHOLD = 80
-
-function ConfidenceBadge({ confidence }) {
-  const isLow = confidence == null || confidence < LOW_CONFIDENCE_THRESHOLD
-  if (!isLow) {
-    return (
-      <span title="High confidence" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-green-900/30 text-green-400" aria-label="High confidence">
-        <Check className="h-3 w-3" strokeWidth={3} />
-      </span>
-    )
-  }
-  return (
-    <span title="Low confidence — please verify" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-900/30 text-red-400" aria-label="Low confidence — please verify">
-      <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />
-    </span>
-  )
 }
 
 export default function DocumentDetailPage() {
@@ -276,15 +256,13 @@ export default function DocumentDetailPage() {
         <div className="space-y-3">
           <h3 className="mb-2 font-semibold text-gray-300">Extracted Fields</h3>
           {fieldsFor(doc).map((f) => {
-            const isLow = f.confidence == null || f.confidence < LOW_CONFIDENCE_THRESHOLD
             return (
-              <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-gray-900 px-4 py-3 ${isLow ? 'border-red-800/60' : 'border-gray-800'}`}>
+              <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-gray-900 px-4 py-3 border-gray-800`}>
                 <div className="flex min-w-0 items-center gap-2">
                   <div className="min-w-0">
                     <p className="text-[12.6px] text-gray-500">{f.label}</p>
                     <p className="truncate text-[14.7px] font-semibold text-gray-100">{f.value || 'Not available'}</p>
                   </div>
-                  <ConfidenceBadge confidence={f.confidence} />
                 </div>
                 <button
                   onClick={() => setEditingField(f)}

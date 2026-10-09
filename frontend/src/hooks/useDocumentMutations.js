@@ -6,7 +6,7 @@ import {
   purgeDocumentFile,
   reprocessDocument,
 } from '../api/documents'
-import { bulkSaveDocuments, newExcelFile, saveDocument } from '../api/excel'
+import { saveAllDocuments, newExcelFile, saveDocument } from '../api/excel'
 import { documentKeys } from './useDocumentsQueries'
 
 export function useCorrectDocument(id) {
@@ -70,8 +70,10 @@ export function useSaveDocumentMutation() {
 export function useBulkSaveDocumentsMutation() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (documentIds) => bulkSaveDocuments(documentIds),
-    onSuccess: () => {
+    mutationFn: (documentIds) => saveAllDocuments(documentIds),
+    // onSettled, not onSuccess: after a timeout the server may still have saved some rows, so
+    // the list (and export history) must be refetched on failure too.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['exports', 'history'] })
       queryClient.invalidateQueries({ queryKey: ['documents', 'list'] })
     },

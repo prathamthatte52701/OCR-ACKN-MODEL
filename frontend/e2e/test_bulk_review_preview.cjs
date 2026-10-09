@@ -137,7 +137,7 @@ const urlStats = (page) => page.evaluate(() => ({ ...window.__urlStats }))
     const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     const docFor = (k) => k === FAILED_ITEM
       ? { _id: `doc-${k}`, uploadStatus: 'failed', processingError: 'Mock OCR failure for this file' }
-      : { _id: `doc-${k}`, uploadStatus: 'processed', taxInvoiceNo: `G00000000${k}`, referenceNo: `98000000${k}`, date: '01/01/2026', taxInvoiceNoConfidence: 100, referenceNoConfidence: 100, dateConfidence: 100, exported: false }
+      : { _id: `doc-${k}`, uploadStatus: 'processed', taxInvoiceNo: `G00000000${k}`, referenceNo: `98000000${k}`, date: '01/01/2026', exported: false }
     // only the backend API - NOT Vite's own /src/api/*.js modules, which also contain "/api/"
     await page.route((u) => new URL(u).pathname.startsWith('/api/'), async (route) => {
       const req = route.request()

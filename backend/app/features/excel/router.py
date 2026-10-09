@@ -4,6 +4,7 @@ from pathlib import Path
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from loguru import logger
 
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
@@ -13,6 +14,12 @@ from app.features.excel import service as excel_service
 from app.features.excel.schemas import BulkSaveRequest, NewExcelFileRequest
 
 router = APIRouter()
+
+# Largest "Save All" batch (a My Documents page is 30, the page-size cap is 100).
+MAX_BULK_SAVE = 100
+# Errors that would hit EVERY remaining document identically - the bulk loop stops on them.
+BLOCKING_ERRORS = {"NO_ACTIVE_WORKBOOK", "NEED_NEW_WORKBOOK"}
+FILE_BUSY_MESSAGE = "The Excel file is busy or open. Close it in Excel and try again."
 
 DEFAULT_EXPORT_PAGE_SIZE = 30
 MAX_EXPORT_PAGE_SIZE = 100
@@ -334,7 +341,7 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
             _physical_workbook_filename(current_user.id, active_filename), sheet_month, row
         )
     except excel_service.FileLockedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=FILE_BUSY_MESSAGE) from exc
 
     workbook_doc = await db.workbooks.find_one(
         {"userId": current_user.id, "filename": active_filename, "isActive": True}
@@ -372,6 +379,8 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
         "message": "Excel file appended successfully.",
         "worksheet": sheet_month,
         "workbook": active_filename,
+        # True when the date was missing/unreadable and the row went to the current month's sheet
+        "dateFallback": not excel_service.date_has_month(doc.get("date")),
     }
 
 
@@ -398,22 +407,47 @@ async def bulk_save_documents_to_excel(
     _save_document_to_excel's own userId-scoped lookup 404s (not 403s) on
     any id that doesn't belong to this user, so a manipulated id list can
     only ever fail that one entry, never touch another user's document."""
+    # Same id twice in one request used to write the row twice - keep first occurrence, in order.
+    ids = list(dict.fromkeys(body.document_ids))
+    if len(ids) > MAX_BULK_SAVE:
+        raise HTTPException(
+            status_code=400, detail=f"You can save at most {MAX_BULK_SAVE} documents at once."
+        )
+
     succeeded: list[str] = []
     failed: list[dict] = []
-    for doc_id in body.document_ids:
+    date_fallback: list[str] = []
+    blocked: dict | None = None
+    not_attempted: list[str] = []
+    for index, doc_id in enumerate(ids):
         try:
-            await _save_document_to_excel(doc_id, current_user)
+            result = await _save_document_to_excel(doc_id, current_user)
             succeeded.append(str(doc_id))
+            if result.get("dateFallback"):
+                date_fallback.append(str(doc_id))
         except HTTPException as exc:
-            reason = (
-                exc.detail
-                if isinstance(exc.detail, str)
-                else exc.detail.get("message", "Could not save.")
-            )
+            detail = exc.detail
+            if isinstance(detail, dict) and detail.get("error") in BLOCKING_ERRORS:
+                # No workbook yet / year rolled over: every remaining document would fail the
+                # same way, so stop here and hand the decision (name a workbook) to the caller.
+                blocked = {
+                    "error": detail["error"],
+                    "year": detail.get("year"),
+                    "message": detail.get("message", "Create an Excel workbook to continue."),
+                }
+                not_attempted = [str(i) for i in ids[index:]]
+                break
+            reason = detail if isinstance(detail, str) else detail.get("message", "Could not save.")
             failed.append({"documentId": str(doc_id), "reason": reason})
+        except Exception as exc:  # noqa: BLE001 - one bad document must not abort the batch
+            logger.error(f"Bulk save of document {doc_id} failed: {exc}")
+            failed.append({"documentId": str(doc_id), "reason": "Could not save this document."})
 
     return {
-        "message": f"{len(succeeded)}/{len(body.document_ids)} saved successfully.",
+        "message": f"{len(succeeded)}/{len(ids)} saved successfully.",
         "succeeded": succeeded,
         "failed": failed,
+        "blocked": blocked,
+        "notAttempted": not_attempted,
+        "dateFallback": date_fallback,
     }

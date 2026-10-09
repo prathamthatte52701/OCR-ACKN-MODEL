@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertCircle, Check, AlertTriangle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import { uploadDocument, getDocument, bulkUploadDocuments, correctDocument } from '../api/documents'
 import { saveDocument } from '../api/excel'
 import { validateDocumentFile } from '../utils/documentValidation'
@@ -11,8 +11,6 @@ import CorrectionModal from '../components/CorrectionModal'
 import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
-const LOW_CONFIDENCE_THRESHOLD = 80
-
 // Per-documentType editable field list for the bulk review view - mirrors
 // DocumentDetailPage's fieldsFor(), but reads from a bulk result item
 // (f.taxInvoiceNo/f.number/etc, populated by the poll loop) instead of a
@@ -20,31 +18,15 @@ const LOW_CONFIDENCE_THRESHOLD = 80
 function reviewFieldsFor(f) {
   if (f.documentType === 'Tax Invoice') {
     return [
-      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo, confidence: f.taxInvoiceNoConfidence },
-      { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo, confidence: f.referenceNoConfidence },
-      { key: 'date', label: 'Date', value: f.date, confidence: f.dateConfidence },
+      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo },
+      { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo },
+      { key: 'date', label: 'Date', value: f.date },
     ]
   }
   return [
-    { key: 'number', label: 'Delivery Challan No.', value: f.number, confidence: f.numberConfidence },
-    { key: 'date', label: 'Date', value: f.date, confidence: f.dateConfidence },
+    { key: 'number', label: 'Delivery Challan No.', value: f.number },
+    { key: 'date', label: 'Date', value: f.date },
   ]
-}
-
-function ConfidenceBadge({ confidence }) {
-  const isLow = confidence == null || confidence < LOW_CONFIDENCE_THRESHOLD
-  if (!isLow) {
-    return (
-      <span title="High confidence" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-green-900/30 text-green-400" aria-label="High confidence">
-        <Check className="h-3 w-3" strokeWidth={3} />
-      </span>
-    )
-  }
-  return (
-    <span title="Low confidence — please verify" className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-900/30 text-red-400" aria-label="Low confidence — please verify">
-      <AlertTriangle className="h-3 w-3" strokeWidth={2.5} />
-    </span>
-  )
 }
 
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
@@ -369,10 +351,6 @@ export default function UploadPage() {
               referenceNo: polled.referenceNo,
               number: polled.number,
               date: polled.date,
-              taxInvoiceNoConfidence: polled.taxInvoiceNoConfidence,
-              referenceNoConfidence: polled.referenceNoConfidence,
-              numberConfidence: polled.numberConfidence,
-              dateConfidence: polled.dateConfidence,
               exported: polled.exported,
             }
           }
@@ -398,10 +376,6 @@ export default function UploadPage() {
             referenceNo: u.referenceNo,
             number: u.number,
             date: u.date,
-            taxInvoiceNoConfidence: u.taxInvoiceNoConfidence,
-            referenceNoConfidence: u.referenceNoConfidence,
-            numberConfidence: u.numberConfidence,
-            dateConfidence: u.dateConfidence,
             exported: u.exported,
           }
         }))
@@ -487,10 +461,6 @@ export default function UploadPage() {
             referenceNo: updated.referenceNo,
             number: updated.number,
             date: updated.date,
-            taxInvoiceNoConfidence: updated.taxInvoiceNoConfidence,
-            referenceNoConfidence: updated.referenceNoConfidence,
-            numberConfidence: updated.numberConfidence,
-            dateConfidence: updated.dateConfidence,
             exported: updated.exported,
           }
         : f)))
@@ -605,15 +575,13 @@ export default function UploadPage() {
                           </button>
                         </div>
                         {reviewFieldsFor(reviewItem).map((f) => {
-                          const isLow = f.confidence == null || f.confidence < LOW_CONFIDENCE_THRESHOLD
                           return (
-                            <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-white/[0.03] px-4 py-3 ${isLow ? 'border-rose-400/40' : 'border-white/10'}`}>
+                            <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-white/[0.03] px-4 py-3 border-white/10`}>
                               <div className="flex min-w-0 items-center gap-2">
                                 <div className="min-w-0">
                                   <p className="text-[12.6px] text-slate-500">{f.label}</p>
                                   <p className="truncate text-[14.7px] font-semibold text-slate-200">{f.value || 'Not available'}</p>
                                 </div>
-                                <ConfidenceBadge confidence={f.confidence} />
                               </div>
                               <button
                                 onClick={() => setReviewEditingField({ docId: reviewItem.docId, key: f.key, label: f.label, value: f.value })}

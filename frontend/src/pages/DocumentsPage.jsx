@@ -11,7 +11,6 @@ import {
 import DocumentList from '../components/DocumentList'
 import PageBackground from '../components/PageBackground'
 import { confirmAction, promptText } from '../store/dialogStore'
-import { displayNumber } from '../utils/documentDisplay'
 
 function DocumentsSkeleton() {
   return (
@@ -124,30 +123,67 @@ export default function DocumentsPage() {
   // doc gets re-saved regardless of `exported`, same as an individual Save
   // Again) but still gates behind one page-level confirmation so a whole
   // page of duplicate rows is never a surprise.
+  //
+  // Only documents whose OCR finished (uploadStatus === 'processed') are sent: the server
+  // rejects the rest anyway ("not processed yet"), which used to show up as a couple of
+  // failures on a perfectly normal page.
+  const saveAllBusyRef = useRef(false)
   async function handleSaveAll() {
-    if (documents.length === 0) return
-    const ok = await confirmAction({
-      title: 'Save all documents on this page?',
-      message: `This will save all ${documents.length} document${documents.length !== 1 ? 's' : ''} on this page to Excel, including any already saved before. Continue?`,
-      confirmLabel: 'Yes, Save All',
-    })
-    if (!ok) return
-
-    try {
-      const result = await bulkSaveMutation.mutateAsync(documents.map((d) => d._id))
-      const failed = result.failed || []
-      if (failed.length === 0) {
-        toast.success(result.message)
-      } else {
-        const byId = new Map(documents.map((d) => [d._id, d]))
-        const failedNames = failed
-          .map((f) => (byId.has(f.documentId) ? displayNumber(byId.get(f.documentId)) : f.documentId))
-          .join(', ')
-        toast.error(`${result.message} Failed: ${failedNames}.`)
-      }
-    } catch (err) {
-      toast.error(err.userMessage || 'Could not save documents. Please try again.')
+    if (saveAllBusyRef.current || bulkSaveMutation.isPending) return // ignore re-entry / double clicks
+    const processed = documents.filter((d) => d.uploadStatus === 'processed')
+    const skipped = documents.length - processed.length
+    if (processed.length === 0) {
+      toast.info('Nothing to save - none of the documents on this page are processed yet.')
+      return
     }
+    saveAllBusyRef.current = true
+    try {
+      const ok = await confirmAction({
+        title: 'Save all documents on this page?',
+        message: `${processed.length} will be saved${skipped > 0 ? `, ${skipped} skipped (not processed yet)` : ''}. Documents already saved before are saved again. Continue?`,
+        confirmLabel: 'Yes, Save All',
+      })
+      if (!ok) return
+      reportSaveAll(await bulkSaveMutation.mutateAsync(processed.map((d) => d._id)))
+    } catch (err) {
+      if (!err.response) {
+        // timeout / network drop: the server may have saved some or all rows already, so do not
+        // retry on its own and warn instead of claiming failure (the list refetches by itself)
+        toast.warning('Save may have partly completed. Check Export History before saving again.')
+      } else {
+        toast.error(err.userMessage || 'Could not save documents. Please try again.')
+      }
+    } finally {
+      saveAllBusyRef.current = false
+    }
+  }
+
+  function reportSaveAll(result) {
+    const saved = result.succeeded.length
+    if (result.cancelled) {
+      toast.info(`No workbook name given - ${saved} saved, the rest were not saved.`)
+      return
+    }
+    if (result.blocked) {
+      toast.error(result.blocked.message || 'Could not create an Excel workbook. Please try again.')
+      return
+    }
+    const failed = result.failed
+    const dateFallback = result.dateFallback.length
+    if (failed.length === 0 && dateFallback === 0) {
+      toast.success(`${saved} saved successfully.`)
+      return
+    }
+    const reasons = new Map()
+    failed.forEach((f) => reasons.set(f.reason, (reasons.get(f.reason) || 0) + 1))
+    const parts = [`${saved} saved`]
+    if (failed.length > 0) {
+      parts.push(`${failed.length} failed - ${[...reasons].map(([reason, n]) => `${reason} (${n})`).join('; ')}`)
+    }
+    if (dateFallback > 0) {
+      parts.push(`${dateFallback} had no readable date and went to the current month's sheet`)
+    }
+    ;(failed.length > 0 ? toast.error : toast.warning)(`${parts.join('. ')}.`)
   }
 
   // Scoped strictly to `documents` - same page-scoping contract as Save

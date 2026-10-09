@@ -65,6 +65,8 @@ class UserOut(CamelModel):
 class TokenResponse(CamelModel):
     token: str
     user: UserOut
+    # True exactly once: on the first password login after an admin approved the account.
+    just_approved: bool = False
 
 
 class MessageResponse(CamelModel):
