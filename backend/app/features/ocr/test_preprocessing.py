@@ -23,7 +23,7 @@ from app.features.ocr.preprocessing import (
     assess_and_preprocess,
 )
 
-# Arial on Windows; PIL resolves the DejaVu / Liberation names from the system font dirs on Linux (CI).
+# Arial on Windows; PIL finds the Liberation / DejaVu names in the system font dirs on Linux.
 _FONT_REGULAR = ("C:/Windows/Fonts/arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf")
 _FONT_BOLD = ("C:/Windows/Fonts/arialbd.ttf", "LiberationSans-Bold.ttf", "DejaVuSans-Bold.ttf")
 _CANVAS_SIZE = (1600, 450)  # wide-short strip, mimics a real header crop's aspect
