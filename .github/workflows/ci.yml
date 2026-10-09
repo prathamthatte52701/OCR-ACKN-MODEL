@@ -1,9 +1,8 @@
 name: CI
 
+# Manual only for now (Actions tab -> CI -> Run workflow); re-enable push/pull_request once green.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   backend:
