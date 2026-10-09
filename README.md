@@ -155,6 +155,22 @@ route), admin audit logging, passwords, field/upload limits, JWT and the
 pinned requirements. Frontend and admin have no unit-test runner (`npm run
 lint` and `npm run build` only).
 
+## Docker
+
+```bash
+cp backend/.env.example backend/.env   # fill JWT_SECRET, GROQ_API_KEYS, admin vars
+docker compose up --build              # MongoDB + backend on http://localhost:8000
+```
+
+The frontend and admin apps run separately (`npm run dev`) and proxy `/api` to
+the backend. First start takes a minute while PaddleOCR loads its models.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request: backend
+`ruff`, `black`, `isort`, `mypy` and `pytest` (against a throwaway MongoDB),
+and `lint` + `build` for both React apps.
+
 ## Known limitations
 
 - **OCR speed**: PaddleOCR on CPU takes roughly 40-90 seconds per document.

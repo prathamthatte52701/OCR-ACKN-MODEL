@@ -1,0 +1,22 @@
+# Local/demo stack: MongoDB + backend. Copy backend/.env.example to backend/.env first
+# (JWT_SECRET, GROQ_API_KEYS, admin vars); MONGO_URI is overridden below to the bundled DB.
+# The frontend and admin apps run separately (`npm run dev`) and proxy /api to :8000.
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+    ports:
+      - "8000:8000"
+    volumes:
+      - exports:/app/exports
+    depends_on:
+      - mongo
+volumes:
+  mongo-data:
+  exports:
