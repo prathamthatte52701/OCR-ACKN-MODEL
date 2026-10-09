@@ -153,8 +153,7 @@ end in `_test` — the suite never touches real data. About 190 tests cover
 the approval gate, isolation (two-user IDOR checks on every documents/excel
 route), admin audit logging, passwords, field/upload limits, JWT and the
 pinned requirements. Frontend and admin have no unit-test runner (`npm run
-lint` and `npm run build` only); `frontend/e2e/*.cjs` are manual Playwright
-scripts.
+lint` and `npm run build` only).
 
 ## Known limitations
 
@@ -192,7 +191,7 @@ cross-user access, security headers (CSP, HSTS, nosniff, frame-ancestors),
 CORS restricted to explicit configured origins, admin routes gated by a
 server-side role check that re-reads the DB (never trusts the JWT's role
 claim) with audit logging of admin access to other users' data. See
-`CLAUDE.md` for the architecture notes and git history for specifics.
+git history for specifics.
 
 ## Admin accounts
 

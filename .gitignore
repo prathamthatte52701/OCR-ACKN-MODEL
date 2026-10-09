@@ -65,3 +65,10 @@ LOOP_LOG.md
 
 # Local tool config (preview/dev-server launcher), not part of the app
 .claude/
+
+# Local-only dev material (kept on disk, not shipped to clients)
+ANALYSIS.md
+SKILLS.md
+CLAUDE.md
+frontend/e2e/
+admin/e2e/
