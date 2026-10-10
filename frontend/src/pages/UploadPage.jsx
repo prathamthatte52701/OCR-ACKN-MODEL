@@ -8,6 +8,7 @@ import { saveDocument } from '../api/excel'
 import { validateDocumentFile } from '../utils/documentValidation'
 import UploadCard from '../components/UploadCard'
 import CorrectionModal from '../components/CorrectionModal'
+import DocumentViewer from '../components/DocumentViewer'
 import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
@@ -112,7 +113,7 @@ function UploadProcessingState({ message }) {
 // makes the <embed> really reload, changing `src` on an <embed> does not reliably do that.
 // The URL is created inside a microtask that is skipped if the effect was already cleaned up,
 // so React StrictMode's mount/unmount/mount in dev never leaks or reuses a revoked URL.
-function FilePreview({ file, index, showOpenLink = false, tall = false }) {
+function FilePreview({ file }) {
   const [previewUrl, setPreviewUrl] = useState('')
 
   useEffect(() => {
@@ -132,28 +133,19 @@ function FilePreview({ file, index, showOpenLink = false, tall = false }) {
   if (!previewUrl) return null
 
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  const testProps =
-    index === undefined
-      ? {}
-      : { 'data-testid': 'review-preview', 'data-filename': file.name, 'data-index': index }
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40" {...testProps}>
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-4 py-2.5">
         <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={file.name}>{file.name}</span>
         <span className="flex shrink-0 items-center gap-3 text-[12.6px] text-slate-500">
           {(file.size / 1024).toFixed(1)} KB
-          {showOpenLink && (
-            <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-blue-300 no-underline hover:underline">
-              Open in new tab
-            </a>
-          )}
         </span>
       </div>
       {isPdf ? (
-        <embed src={previewUrl} type="application/pdf" className={`${tall ? 'h-[560px]' : 'h-[420px]'} w-full bg-slate-900`} />
+        <embed src={previewUrl} type="application/pdf" className="h-[420px] w-full bg-slate-900" />
       ) : (
-        <img src={previewUrl} alt={`Preview of ${file.name}`} className={`${tall ? 'max-h-[560px]' : 'max-h-[420px]'} w-full object-contain bg-slate-900`} />
+        <img src={previewUrl} alt={`Preview of ${file.name}`} className="max-h-[420px] w-full object-contain bg-slate-900" />
       )}
     </div>
   )
@@ -452,9 +444,14 @@ export default function UploadPage() {
   }
 
   async function handleReviewCorrect(field, newValue) {
+    const docId = reviewEditingField?.docId
+    if (!docId) {
+      toast.error('Could not identify this document. Please reopen it and try again.')
+      return
+    }
     try {
-      const updated = await reviewCorrectMutation.mutateAsync({ docId: field.docId, field: field.key, value: newValue })
-      setBulkFiles((prev) => prev.map((f) => (f.docId === field.docId
+      const updated = await reviewCorrectMutation.mutateAsync({ docId, field: field.key, value: newValue })
+      setBulkFiles((prev) => prev.map((f) => (f.docId === docId
         ? {
             ...f,
             taxInvoiceNo: updated.taxInvoiceNo,
@@ -625,7 +622,7 @@ export default function UploadPage() {
                     )}
                   </div>
                   {/* original file of the item being reviewed - shown for failed items too */}
-                  <FilePreview key={reviewItem.docId ?? reviewIndex} file={reviewItem.file} index={reviewIndex} showOpenLink tall />
+                  <DocumentViewer file={reviewItem.file} index={reviewIndex} />
                   </div>
                 )}
 
@@ -639,7 +636,7 @@ export default function UploadPage() {
 
               {reviewEditingField && (
                 <CorrectionModal
-                  field={{ label: reviewEditingField.label, value: reviewEditingField.value, key: reviewEditingField.key }}
+                  field={{ label: reviewEditingField.label, value: reviewEditingField.value, key: reviewEditingField.key, docId: reviewEditingField.docId }}
                   onSave={handleReviewCorrect}
                   onClose={() => setReviewEditingField(null)}
                 />
