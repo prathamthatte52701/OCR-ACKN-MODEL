@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ArrowLeft, FileX } from 'lucide-react'
-import { downloadDocument } from '../api/documents'
+import { downloadDocument, fetchDocumentFile } from '../api/documents'
 import { useDocument } from '../hooks/useDocumentsQueries'
 import {
   useCorrectDocument,
@@ -12,6 +13,7 @@ import {
   usePurgeDocumentFile,
 } from '../hooks/useDocumentMutations'
 import CorrectionModal from '../components/CorrectionModal'
+import LazyDocumentViewer from '../components/LazyDocumentViewer'
 import LoadingState from '../components/LoadingState'
 import ErrorMessage from '../components/ErrorMessage'
 import ProcessingState from '../components/ProcessingState'
@@ -53,6 +55,25 @@ export default function DocumentDetailPage() {
   const deleteMutation = useDeleteDocument(id)
   const saveMutation = useSaveDocumentMutation()
   const purgeMutation = usePurgeDocumentFile(id)
+
+  // Original file for the in-page viewer. Short gcTime so big blobs do not linger; not stored anywhere else.
+  const showFile = !!doc && !doc.filePurged
+  const fileQuery = useQuery({
+    queryKey: ['document-file', id],
+    queryFn: () => fetchDocumentFile(id),
+    enabled: showFile,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 60 * 1000,
+  })
+  const blob = fileQuery.data
+  const originalFilename = doc?.originalFilename
+  const mimeType = doc?.mimeType
+  const viewerFile = useMemo(
+    () => (blob ? new File([blob], originalFilename || 'document', { type: mimeType || blob.type }) : null),
+    [blob, originalFilename, mimeType],
+  )
 
   async function handleCorrect(field, newValue) {
     try {
@@ -175,7 +196,7 @@ export default function DocumentDetailPage() {
   const reprocessing = reprocessMutation.isPending
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className={`mx-auto px-4 py-8 ${doc.filePurged ? 'max-w-4xl' : 'max-w-6xl'}`}>
       <Link to="/documents" className="mb-4 flex items-center gap-1 text-[14.7px] text-gray-500 no-underline hover:text-gray-300">
         <ArrowLeft className="h-4 w-4" /> Back to Documents
       </Link>
@@ -226,6 +247,8 @@ export default function DocumentDetailPage() {
         </div>
       )}
 
+      <div className={doc.filePurged ? '' : 'grid gap-6 lg:grid-cols-2 lg:items-start'}>
+      <div className="min-w-0">
       <div className="mb-6 flex flex-wrap gap-2">
         {doc.uploadStatus === 'processed' && (
           <button onClick={handleSave} disabled={saveMutation.isPending} className="rounded-lg bg-emerald-700 px-4 py-2 text-[14.7px] font-medium text-white transition-colors hover:bg-emerald-600 disabled:opacity-50">
@@ -278,6 +301,27 @@ export default function DocumentDetailPage() {
           )}
         </div>
       )}
+      </div>
+
+      {!doc.filePurged && (
+        <div className="min-w-0">
+          {fileQuery.isError ? (
+            <div className="grid h-[420px] place-items-center rounded-2xl border border-gray-800 bg-gray-900 px-4 text-center lg:h-[70vh]">
+              <div>
+                <p className="mb-3 text-[14.7px] text-gray-400">Could not load the original file.</p>
+                <button onClick={() => fileQuery.refetch()} className="rounded-lg bg-gray-800 px-4 py-2 text-[14.7px] text-gray-300 transition-colors hover:bg-gray-700">
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : viewerFile ? (
+            <LazyDocumentViewer key={id} file={viewerFile} />
+          ) : (
+            <div className="h-[70vh] min-h-[420px] animate-pulse rounded-2xl border border-gray-800 bg-gray-900" />
+          )}
+        </div>
+      )}
+      </div>
 
       {editingField && (
         <CorrectionModal

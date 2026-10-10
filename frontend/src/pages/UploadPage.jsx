@@ -8,7 +8,7 @@ import { saveDocument } from '../api/excel'
 import { validateDocumentFile } from '../utils/documentValidation'
 import UploadCard from '../components/UploadCard'
 import CorrectionModal from '../components/CorrectionModal'
-import DocumentViewer from '../components/DocumentViewer'
+import LazyDocumentViewer from '../components/LazyDocumentViewer'
 import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
@@ -98,55 +98,6 @@ function UploadProcessingState({ message }) {
           />
         ))}
       </div>
-    </div>
-  )
-}
-
-// Shows the actual selected file (image thumbnail, or the browser's native inline PDF
-// viewer for a PDF). Used before submit in the single-upload flow, and beside the
-// extracted data in the bulk "Review Results" screen - both read the File object that is
-// already in state, so nothing is fetched from the server.
-//
-// Memory: exactly one object URL lives per mounted preview. It is created after mount and
-// revoked on unmount. The bulk review gives each item its own `key`, so moving to the next
-// item unmounts this component (revoking its URL) and mounts a fresh one - which is also what
-// makes the <embed> really reload, changing `src` on an <embed> does not reliably do that.
-// The URL is created inside a microtask that is skipped if the effect was already cleaned up,
-// so React StrictMode's mount/unmount/mount in dev never leaks or reuses a revoked URL.
-function FilePreview({ file }) {
-  const [previewUrl, setPreviewUrl] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    let url = ''
-    Promise.resolve().then(() => {
-      if (cancelled) return
-      url = URL.createObjectURL(file)
-      setPreviewUrl(url)
-    })
-    return () => {
-      cancelled = true
-      if (url) URL.revokeObjectURL(url)
-    }
-  }, [file])
-
-  if (!previewUrl) return null
-
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-
-  return (
-    <div className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-white/10 px-4 py-2.5">
-        <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={file.name}>{file.name}</span>
-        <span className="flex shrink-0 items-center gap-3 text-[12.6px] text-slate-500">
-          {(file.size / 1024).toFixed(1)} KB
-        </span>
-      </div>
-      {isPdf ? (
-        <embed src={previewUrl} type="application/pdf" className="h-[420px] w-full bg-slate-900" />
-      ) : (
-        <img src={previewUrl} alt={`Preview of ${file.name}`} className="max-h-[420px] w-full object-contain bg-slate-900" />
-      )}
     </div>
   )
 }
@@ -622,7 +573,7 @@ export default function UploadPage() {
                     )}
                   </div>
                   {/* original file of the item being reviewed - shown for failed items too */}
-                  <DocumentViewer file={reviewItem.file} index={reviewIndex} />
+                  <LazyDocumentViewer file={reviewItem.file} index={reviewIndex} testId="review-preview" />
                   </div>
                 )}
 
@@ -770,7 +721,7 @@ export default function UploadPage() {
 
               <UploadCard onFileSelect={setFile} disabled={isProcessing} />
 
-              {file && !isProcessing && <FilePreview file={file} />}
+              {file && !isProcessing && <LazyDocumentViewer file={file} heightClass="h-[420px]" />}
 
               {error && (
                 <div className="flex items-start gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-[14.7px] text-rose-200">

@@ -47,6 +47,12 @@ export function purgeDocumentFile(id) {
   return api.post(`/documents/${id}/purge-file`).then((res) => res.data)
 }
 
+// Original file bytes for in-page viewing (needs the auth header, so it goes through the axios
+// instance). Unlike downloadDocument() this does not trigger a browser save.
+export function fetchDocumentFile(id) {
+  return api.get(`/documents/${id}/download`, { responseType: 'blob' }).then((res) => res.data)
+}
+
 export function downloadDocument(id, fallbackFilename) {
   return downloadBlob(`/documents/${id}/download`, { fallbackFilename })
 }

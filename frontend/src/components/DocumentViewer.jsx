@@ -23,7 +23,7 @@ const btn =
 // Exactly one object URL and at most one PDF document live at a time; both are released when
 // `file` changes and on unmount. The URL is created in a microtask that is skipped if the
 // effect was already cleaned up, so StrictMode's mount/unmount/mount never leaks one.
-export default function DocumentViewer({ file, index }) {
+export default function DocumentViewer({ file, index, heightClass = 'h-[70vh] min-h-[420px]', testId = 'document-viewer' }) {
   const [objectUrl, setObjectUrl] = useState('')
   const [pdf, setPdf] = useState(null)
   const [pageNum, setPageNum] = useState(1)
@@ -171,7 +171,7 @@ export default function DocumentViewer({ file, index }) {
   return (
     <div
       className="min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40"
-      data-testid="review-preview"
+      data-testid={testId}
       data-filename={file.name}
       data-index={index}
       data-object-url={objectUrl}
@@ -205,7 +205,7 @@ export default function DocumentViewer({ file, index }) {
 
       <div
         ref={boxRef}
-        className="h-[70vh] min-h-[420px] cursor-grab touch-pan-x touch-pan-y select-none overflow-auto bg-slate-900 [scrollbar-gutter:stable] active:cursor-grabbing"
+        className={`${heightClass} cursor-grab touch-pan-x touch-pan-y select-none overflow-auto bg-slate-900 [scrollbar-gutter:stable] active:cursor-grabbing`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
