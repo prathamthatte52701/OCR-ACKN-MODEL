@@ -53,6 +53,12 @@ function DocumentsError({ message, onRetry }) {
 
 const PAGE_SIZE = 30
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
+const ALL_TYPES = 'all'
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const MONTH_PARAM_RE = /^(20\d{2}|2100)-(0[1-9]|1[0-2])$/
+const CURRENT_YEAR = new Date().getFullYear()
+const YEAR_OPTIONS = Array.from({ length: 7 }, (_, i) => CURRENT_YEAR + 1 - i)
+const selectClass = 'rounded-2xl border border-white/10 bg-slate-900 px-3 py-2 text-[13.6px] font-bold text-slate-200 focus:border-blue-300/40 focus:outline-none'
 const DATE_RANGES = [
   { value: 'today', label: 'Today' },
   { value: 'week', label: 'This Week' },
@@ -64,8 +70,15 @@ export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const numberQuery = searchParams.get('number') || ''
   const dateQuery = searchParams.get('date') || ''
-  const isSearching = Boolean(numberQuery || dateQuery)
-  const selectedType = DOCUMENT_TYPES.includes(searchParams.get('type')) ? searchParams.get('type') : DOCUMENT_TYPES[0]
+  const monthRaw = searchParams.get('month') || ''
+  const monthQuery = monthRaw === 'none' || MONTH_PARAM_RE.test(monthRaw) ? monthRaw : ''
+  const isSearching = Boolean(numberQuery || dateQuery || monthQuery)
+  const typeParam = searchParams.get('type')
+  const selectedType = typeParam === ALL_TYPES || DOCUMENT_TYPES.includes(typeParam) ? typeParam : DOCUMENT_TYPES[0]
+  const monthNumber = monthQuery && monthQuery !== 'none' ? monthQuery.slice(5) : ''
+  const [yearPick, setYearPick] = useState(monthQuery && monthQuery !== 'none' ? Number(monthQuery.slice(0, 4)) : CURRENT_YEAR)
+  const monthLabel = monthQuery === 'none' ? 'no date found' : monthQuery ? `month ${MONTH_NAMES[Number(monthNumber) - 1]} ${monthQuery.slice(0, 4)}` : ''
+  const filterParts = [numberQuery && `number "${numberQuery}"`, dateQuery && `date ${dateQuery}`, monthLabel].filter(Boolean)
   const rangeParam = searchParams.get('range') || ''
   const selectedRange = DATE_RANGES.some((r) => r.value === rangeParam) ? rangeParam : ''
 
@@ -75,22 +88,23 @@ export default function DocumentsPage() {
   const downloadAllMutation = useDownloadAllDocumentsMutation()
 
   // A new/changed search, group tab, or date range should always land on page 1.
-  const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`)
+  const prevSearchKeyRef = useRef(`${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}|${monthQuery}`)
   useEffect(() => {
-    const searchKey = `${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}`
+    const searchKey = `${numberQuery}|${dateQuery}|${selectedType}|${selectedRange}|${monthQuery}`
     if (searchKey !== prevSearchKeyRef.current) {
       prevSearchKeyRef.current = searchKey
       setPage(1)
     }
-  }, [numberQuery, dateQuery, selectedType, selectedRange])
+  }, [numberQuery, dateQuery, selectedType, selectedRange, monthQuery])
 
   const { data, isLoading, isError, error, refetch } = useDocumentsList({
     page,
     limit: PAGE_SIZE,
-    documentType: selectedType,
+    ...(selectedType !== ALL_TYPES && { documentType: selectedType }),
     ...(numberQuery && { number: numberQuery }),
     ...(dateQuery && { date: dateQuery }),
     ...(selectedRange && { range: selectedRange }),
+    ...(monthQuery && { month: monthQuery }),
   })
 
   const documents = data?.documents || []
@@ -114,7 +128,29 @@ export default function DocumentsPage() {
     const next = new URLSearchParams(searchParams)
     if (range) next.set('range', range)
     else next.delete('range')
+    if (range) next.delete('month') // range (by upload time) and month (by document date) are exclusive
     setSearchParams(next)
+  }
+
+  function selectMonth(month) {
+    const next = new URLSearchParams(searchParams)
+    if (month) {
+      next.set('month', month)
+      next.delete('range')
+      next.delete('date')
+    } else {
+      next.delete('month')
+    }
+    setSearchParams(next)
+  }
+
+  function pickMonthNumber(mm) {
+    selectMonth(mm ? `${yearPick}-${mm}` : '')
+  }
+
+  function pickYear(year) {
+    setYearPick(year)
+    if (monthNumber) selectMonth(`${year}-${monthNumber}`)
   }
 
   // Scoped strictly to `documents` - the already-paginated (30/page) result
@@ -243,7 +279,7 @@ export default function DocumentsPage() {
             {isSearching && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[13.6px] text-slate-400">
                 <span>
-                  Filtered by{numberQuery && ` number "${numberQuery}"`}{numberQuery && dateQuery && ' and'}{dateQuery && ` date ${dateQuery}`}
+                  Filtered by {filterParts.join(' and ')}
                 </span>
                 <button
                   onClick={clearSearch}
@@ -279,7 +315,7 @@ export default function DocumentsPage() {
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-2">
-            {DOCUMENT_TYPES.map((type) => (
+            {[...DOCUMENT_TYPES, ALL_TYPES].map((type) => (
               <button
                 key={type}
                 type="button"
@@ -290,16 +326,43 @@ export default function DocumentsPage() {
                     : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
                 }`}
               >
-                {type}
+                {type === ALL_TYPES ? 'All' : type}
               </button>
             ))}
           </div>
           <div className="inline-flex items-center gap-2.5 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-4 py-2 shadow-[0_0_28px_rgba(37,99,235,0.15)]">
             <span className="text-2xl font-black leading-none text-white">{isLoading ? '-' : totalDocuments}</span>
             <span className="text-[12.6px] font-bold uppercase tracking-wide text-blue-300">
-              {selectedType}{totalDocuments !== 1 ? 's' : ''} total
+              {selectedType === ALL_TYPES ? `document${totalDocuments !== 1 ? 's' : ''}` : `${selectedType}${totalDocuments !== 1 ? 's' : ''}`} total
             </span>
           </div>
+        </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[12.6px] font-bold uppercase tracking-wide text-slate-500">Document month</span>
+          <select aria-label="Month" value={monthNumber} onChange={(e) => pickMonthNumber(e.target.value)} className={selectClass}>
+            <option value="">All months</option>
+            {MONTH_NAMES.map((name, i) => (
+              <option key={name} value={String(i + 1).padStart(2, '0')}>{name}</option>
+            ))}
+          </select>
+          <select aria-label="Year" value={yearPick} onChange={(e) => pickYear(Number(e.target.value))} className={selectClass}>
+            {YEAR_OPTIONS.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => selectMonth(monthQuery === 'none' ? '' : 'none')}
+            aria-pressed={monthQuery === 'none'}
+            className={`rounded-2xl border px-4 py-2 text-[13.6px] font-bold transition-all ${
+              monthQuery === 'none'
+                ? 'border-blue-300/50 bg-blue-500/15 text-blue-100'
+                : 'border-white/10 bg-white/[0.03] text-slate-400 hover:border-blue-300/25 hover:text-slate-200'
+            }`}
+          >
+            No date found
+          </button>
         </div>
 
         <div className="mb-6 flex flex-wrap gap-2">
@@ -339,7 +402,7 @@ export default function DocumentsPage() {
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-blue-300/18 bg-blue-500/10 text-[14.7px] font-black text-blue-200 shadow-[0_0_42px_rgba(37,99,235,0.2)]">N/A</div>
             <h2 className="mt-5 text-2xl font-black text-white">No results found</h2>
             <p className="mx-auto mt-2 max-w-md text-[14.7px] leading-6 text-slate-500">
-              No documents match{numberQuery && ` number "${numberQuery}"`}{numberQuery && dateQuery && ' and'}{dateQuery && ` date ${dateQuery}`}.
+              No documents match {filterParts.join(' and ')}.
             </p>
             <button
               onClick={clearSearch}
@@ -368,6 +431,11 @@ export default function DocumentsPage() {
                 {bulkSaveMutation.isPending ? `Saving ${documents.length}...` : `Save All (${documents.length} on this page)`}
               </button>
             </div>
+            {totalPages > 1 && (
+              <p className="mb-3 text-right text-[12.6px] text-slate-500">
+                Save All and Download All apply to this page only (page {page} of {totalPages})
+              </p>
+            )}
             <DocumentList documents={documents} startIndex={(page - 1) * PAGE_SIZE} />
             {totalPages > 1 && (
               <div className="mt-8 flex items-center justify-center gap-4">

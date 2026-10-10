@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
+from loguru import logger
 
 from app.core.database import get_database
 
@@ -17,6 +18,16 @@ async def log_action(user_id: ObjectId, action: str, context: dict[str, Any] | N
             "updatedAt": datetime.now(UTC),
         }
     )
+
+
+async def safe_log_action(
+    user_id: ObjectId, action: str, context: dict[str, Any] | None = None
+) -> None:
+    """log_action that can never break the caller: a logging failure is only logged."""
+    try:
+        await log_action(user_id, action, context)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Audit log '{action}' failed: {exc}")
 
 
 ADMIN_ACCESS_ACTION = "admin_access"

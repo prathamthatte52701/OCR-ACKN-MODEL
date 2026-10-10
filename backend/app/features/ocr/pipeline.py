@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from bson import ObjectId
 from loguru import logger
 
+from app.core.audit_log import safe_log_action
 from app.core.database import get_database
 from app.features.ocr.ai_extraction import extract_header
 from app.features.ocr.paddle_runner import (
@@ -168,10 +169,34 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         return None
 
 
-async def _update_active_document(doc_id: ObjectId, update: dict) -> None:
+async def _update_active_document(doc_id: ObjectId, update: dict) -> bool:
+    """Returns False when no active document matched (e.g. deleted meanwhile)."""
     db = get_database()
     update["updatedAt"] = datetime.now(UTC)
-    await db.documents.update_one({"_id": doc_id, "isDeleted": {"$ne": True}}, {"$set": update})
+    res = await db.documents.update_one(
+        {"_id": doc_id, "isDeleted": {"$ne": True}}, {"$set": update}
+    )
+    return res.matched_count > 0
+
+
+async def _log_processed(doc_id: ObjectId) -> None:
+    try:
+        doc = await get_database().documents.find_one(
+            {"_id": doc_id}, {"userId": 1, "documentType": 1, "originalFilename": 1}
+        )
+        if not doc:
+            return
+        await safe_log_action(
+            doc["userId"],
+            "document_processed",
+            {
+                "documentId": str(doc_id),
+                "documentType": doc.get("documentType"),
+                "filename": doc.get("originalFilename"),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Audit log 'document_processed' failed: {exc}")
 
 
 async def process_document(
@@ -228,7 +253,8 @@ async def process_document(
         ):
             if key in result:
                 update[key] = result[key]
-        await _update_active_document(doc_id, update)
+        if await _update_active_document(doc_id, update):
+            await _log_processed(doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.error(f"process_document error: {exc}")
         await _update_active_document(

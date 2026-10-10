@@ -19,6 +19,13 @@ const ACTION_LABELS = {
   document_reprocessed: 'Document reprocessed',
 }
 
+const FIELD_LABELS = {
+  taxInvoiceNo: 'Tax Invoice No.',
+  referenceNo: 'Reference No.',
+  number: 'Delivery Challan No.',
+  date: 'Date',
+}
+
 const ACTION_BADGE = {
   document_deleted: 'border-rose-400/25 bg-rose-500/10 text-rose-200',
   document_file_purged: 'border-amber-400/25 bg-amber-500/10 text-amber-200',
@@ -47,7 +54,7 @@ function EmptyActivity() {
       </div>
       <h2 className="mt-5 text-2xl font-black text-white">No activity yet</h2>
       <p className="mx-auto mt-2 max-w-md text-[14.7px] leading-6 text-slate-500">
-        Actions you take on your documents - edits, deletes, and more - will show up here.
+        Uploads, processing, edits, reprocessing, and deletes of your documents will show up here.
       </p>
     </div>
   )
@@ -102,6 +109,9 @@ export default function MyActivityPage() {
                           <span className={`rounded-full border px-2.5 py-1 text-[11.6px] font-black uppercase ${ACTION_BADGE[entry.action] || 'border-blue-300/25 bg-blue-500/10 text-blue-200'}`}>
                             {ACTION_LABELS[entry.action] || entry.action}
                           </span>
+                          {entry.action === 'document_corrected' && entry.context?.field && (
+                            <span className="ml-2 text-[12.6px] text-slate-500">{FIELD_LABELS[entry.context.field] || entry.context.field}</span>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-slate-300">
                           {entry.document ? (
@@ -109,7 +119,7 @@ export default function MyActivityPage() {
                               {entry.document.documentType} - {displayNumber(entry.document)}
                             </Link>
                           ) : (
-                            <span className="text-slate-600">No longer available</span>
+                            <span className="text-slate-600">{entry.context?.filename || 'No longer available'}</span>
                           )}
                         </td>
                       </tr>

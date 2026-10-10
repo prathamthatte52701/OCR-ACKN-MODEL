@@ -21,7 +21,7 @@ from fastapi import (
 from fastapi.responses import Response
 from loguru import logger
 
-from app.core.audit_log import log_action
+from app.core.audit_log import log_action, safe_log_action
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
@@ -38,6 +38,8 @@ from app.features.documents.schemas import (
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
+
+MONTH_RE = re.compile(r"^(20\d{2}|2100)-(0[1-9]|1[0-2])$")
 
 router = APIRouter()
 
@@ -233,6 +235,15 @@ async def _validate_and_store(
     )
     doc = await db.documents.find_one({"_id": insert_result.inserted_id})
     assert doc is not None
+    await safe_log_action(
+        user_id,
+        "document_uploaded",
+        {
+            "documentId": str(doc["_id"]),
+            "filename": original_name,
+            "documentType": document_type,
+        },
+    )
     return doc
 
 
@@ -365,6 +376,7 @@ async def list_documents(
     number: str | None = Query(default=None),
     date: str | None = Query(default=None),
     range: Literal["today", "week", "month", "year"] | None = Query(default=None),
+    month: str | None = Query(default=None),
     page: int | None = Query(default=None),
     limit: int | None = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -389,6 +401,17 @@ async def list_documents(
         ]
     if date and date.strip():
         filter_query["date"] = date.strip()
+    if month:
+        # By the document's OWN date (DD/MM/YYYY string), not upload time. Combined via $and so
+        # it can never overwrite the number search's $or.
+        if month == "none":
+            date_cond: dict = {"date": {"$not": re.compile(r"^\d{2}/\d{2}/\d{4}$")}}
+        else:
+            m = MONTH_RE.match(month)
+            if not m:
+                raise HTTPException(status_code=400, detail="Invalid month.")
+            date_cond = {"date": re.compile(rf"^\d{{2}}/{m.group(2)}/{m.group(1)}$")}
+        filter_query["$and"] = [date_cond]
     if range in RANGE_DAYS:
         cutoff = datetime.now(UTC) - timedelta(days=RANGE_DAYS[range])
         filter_query["createdAt"] = {"$gte": cutoff}
@@ -430,12 +453,8 @@ async def training_stats(current_user: CurrentUser = Depends(get_current_user)) 
 # Action types relevant to a regular user's own "My Activity" timeline -
 # admin-only/system entries (login, signup, password_change, user_updated,
 # admin_nuke_*, orphaned_file_*, purge_*_blocked, ...) are deliberately
-# excluded. Only "document_deleted" and "document_file_purged" are actually
-# logged for a user's own documents today (upload/OCR-processing, manual
-# corrections, and reprocess don't call log_action anywhere in this
-# codebase - corrections go to the separate `corrections` collection
-# instead) - the other names are listed for forward-compatibility only, so
-# nothing else needs to change here if logging is ever added for them.
+# excluded. Logged for a user's own documents: upload, OCR success, manual
+# correction (field name only, never values), reprocess, delete and file purge.
 MY_ACTIVITY_ACTIONS = [
     "document_processed",
     "document_uploaded",
@@ -484,8 +503,8 @@ async def my_activity(
     "my-activity" is never matched as a doc_id (same reasoning as the
     former /purge-* routes)."""
     db = get_database()
-    lim = max(1, limit or 40)
-    pg = max(1, page or 1)
+    lim = min(MAX_PAGE_SIZE, max(1, limit or 40))
+    pg = min(MAX_PAGE_NUMBER, max(1, page or 1))
     skip = (pg - 1) * lim
     filt = {"userId": current_user.id, "action": {"$in": MY_ACTIVITY_ACTIONS}}
 
@@ -671,6 +690,15 @@ async def reprocess_document(
             {"_id": doc["_id"]}, {"$set": {"reprocessedAt": datetime.now(UTC)}}
         )
 
+    await safe_log_action(
+        current_user.id,
+        "document_reprocessed",
+        {
+            "documentId": str(doc["_id"]),
+            "filename": doc.get("originalFilename"),
+            "documentType": doc.get("documentType"),
+        },
+    )
     background_tasks.add_task(_reprocess_then_stamp)
     return MessageResponse(message="Reprocessing started. Check document status shortly.")
 
@@ -700,7 +728,11 @@ async def delete_document(
 
     db = get_database()
     await db.documents.delete_one({"_id": doc["_id"]})
-    await log_action(current_user.id, "document_deleted", {"documentId": str(doc["_id"])})
+    await log_action(
+        current_user.id,
+        "document_deleted",
+        {"documentId": str(doc["_id"]), "filename": doc.get("originalFilename")},
+    )
     message = (
         "Document permanently deleted."
         if not cleanup_failed
@@ -762,7 +794,11 @@ async def purge_document_file(
             }
         },
     )
-    await log_action(current_user.id, "document_file_purged", {"documentId": str(doc["_id"])})
+    await log_action(
+        current_user.id,
+        "document_file_purged",
+        {"documentId": str(doc["_id"]), "filename": doc.get("originalFilename")},
+    )
     message = (
         "Original file permanently removed. Extracted data remains fully accessible."
         if not cleanup_failed
@@ -854,6 +890,16 @@ async def correct_document(
         }
     )
 
+    await safe_log_action(
+        current_user.id,
+        "document_corrected",
+        {
+            "documentId": str(doc["_id"]),
+            "field": body.field,
+            "filename": doc.get("originalFilename"),
+            "documentType": doc.get("documentType"),
+        },
+    )
     updated = await db.documents.find_one({"_id": doc["_id"]})
     assert updated is not None
     return {"message": "Field corrected successfully.", "document": _serialize_document(updated)}
