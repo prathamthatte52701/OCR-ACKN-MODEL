@@ -10,6 +10,16 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 
 ## Recent features
 
+- **Review flag for incomplete numbers** - a Tax Invoice No. that is not
+  `G`/`P` + 10 digits, or a Reference No. that is not 10 digits (a character
+  was dropped or added by OCR), is kept exactly as read but shown with an
+  amber "Looks incomplete - please check against the original" note. Editing
+  the field clears the note.
+- **Document viewer** - the original file is shown beside the extracted data
+  (PDF.js with zoom/pan) on the upload result, the bulk review and the detail
+  page.
+- **My Activity** logs uploads, OCR results, corrections, reprocessing, deletes
+  and file purges, per user. The Documents page also has a month filter.
 - **Admin approval for new accounts** — password signups start as `pending`
   and cannot log in (or use any route, even with an old token) until an admin
   approves them. Admins can reject, revoke or re-approve from the admin
@@ -149,7 +159,7 @@ cd backend
 
 `backend/conftest.py` forces the database name to `<name>_test` and a
 test-only JWT secret before the app loads, and aborts if the DB name does not
-end in `_test` — the suite never touches real data. About 190 tests cover
+end in `_test` — the suite never touches real data. Over 200 tests cover
 the approval gate, isolation (two-user IDOR checks on every documents/excel
 route), admin audit logging, passwords, field/upload limits, JWT and the
 pinned requirements. Frontend and admin have no unit-test runner (`npm run
@@ -185,16 +195,18 @@ and `lint` + `build` for both React apps.
   5× one file's time, not 1×.
 - **Forgot password**: username+email match, not an emailed reset link —
   no possession-of-inbox proof. Inherited from the original app's design.
-- **Minimal deployment config**: `render.yaml` starts uvicorn on `0.0.0.0`;
-  there is no Dockerfile/Procfile. Swagger/ReDoc/openapi.json are off
-  everywhere unless `ENABLE_DOCS=true`.
+- **Deployment**: `render.yaml` starts uvicorn on `0.0.0.0` for Render, and a
+  `backend/Dockerfile` + `docker-compose.yml` are provided (see Docker above).
+  Swagger/ReDoc/openapi.json are off everywhere unless `ENABLE_DOCS=true`.
 - **Google linking**: an existing password account that signs in with Google
   is linked automatically (Google verified the email).
 - **Admin forgot-password** has the same username+email reset as users.
 - **7-day tokens**: JWTs last 7 days and are revoked only by a `tokenVersion`
   bump (password change, reject).
-- **My Activity** only shows delete / file-purge / export events — uploads,
-  OCR results and corrections are not written to the audit log.
+- **OCR accuracy on photos**: the OCR step can misread one digit on blurry or
+  tilted phone photos, and on a skewed scan the invoice date can be taken from
+  the neighbouring "Sales order" row. Incomplete numbers are flagged for
+  review; always check a photo's values against the original.
 
 ## Security posture
 

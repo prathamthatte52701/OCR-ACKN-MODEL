@@ -247,6 +247,8 @@ async def process_document(
             "referenceNo",
             "number",
             "date",
+            "taxInvoiceNoNeedsReview",
+            "referenceNoNeedsReview",
             "taxInvoiceNoAutoCorrected",
             "numberAutoCorrected",
             "dateAutoCorrected",

@@ -19,8 +19,8 @@ import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 function reviewFieldsFor(f) {
   if (f.documentType === 'Tax Invoice') {
     return [
-      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo },
-      { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo },
+      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo, needsReview: f.taxInvoiceNoNeedsReview },
+      { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo, needsReview: f.referenceNoNeedsReview },
       { key: 'date', label: 'Date', value: f.date },
     ]
   }
@@ -294,6 +294,8 @@ export default function UploadPage() {
               referenceNo: polled.referenceNo,
               number: polled.number,
               date: polled.date,
+              taxInvoiceNoNeedsReview: polled.taxInvoiceNoNeedsReview,
+              referenceNoNeedsReview: polled.referenceNoNeedsReview,
               exported: polled.exported,
             }
           }
@@ -319,6 +321,8 @@ export default function UploadPage() {
             referenceNo: u.referenceNo,
             number: u.number,
             date: u.date,
+            taxInvoiceNoNeedsReview: u.taxInvoiceNoNeedsReview,
+            referenceNoNeedsReview: u.referenceNoNeedsReview,
             exported: u.exported,
           }
         }))
@@ -409,6 +413,8 @@ export default function UploadPage() {
             referenceNo: updated.referenceNo,
             number: updated.number,
             date: updated.date,
+            taxInvoiceNoNeedsReview: updated.taxInvoiceNoNeedsReview,
+            referenceNoNeedsReview: updated.referenceNoNeedsReview,
             exported: updated.exported,
           }
         : f)))
@@ -529,6 +535,7 @@ export default function UploadPage() {
                                 <div className="min-w-0">
                                   <p className="text-[12.6px] text-slate-500">{f.label}</p>
                                   <p className="truncate text-[14.7px] font-semibold text-slate-200">{f.value || 'Not available'}</p>
+                                  {f.needsReview && <p className="text-[12.6px] text-amber-400">Looks incomplete - please check against the original</p>}
                                 </div>
                               </div>
                               <button

@@ -12,6 +12,10 @@ DATE_RE = re.compile(r"^(\d{2})[./-](\d{2})[./-](\d{4})$")
 TAX_INVOICE_NO_PREFIX_RE = re.compile(r"^[GP]")
 TAX_INVOICE_NO_FORMAT_RE = re.compile(r"^[GP]\d+$")
 ALL_DIGITS_RE = re.compile(r"^\d+$")
+# Full shape of a Tax Invoice's own numbers (every real sample: G + 10 digits, 10-digit
+# Reference No.). Only used to FLAG a value for review - never to change or reject it.
+TAX_INVOICE_NO_FULL_RE = re.compile(r"^[GP]\d{10}$")
+REFERENCE_NO_FULL_RE = re.compile(r"^\d{10}$")
 DATE_CHARS_RE = re.compile(r"^[\d./-]+$")
 
 
@@ -157,6 +161,12 @@ def normalize_date_to_ddmmyyyy(raw: str | None) -> str | None:
     return f"{dd}/{mm}/{yyyy}"
 
 
+def _needs_review(value: str | None, full_shape: re.Pattern[str]) -> bool:
+    """True for a value that was read but is not the full expected shape (a dropped or
+    extra character). Flag only - the value itself is never touched."""
+    return bool(value) and full_shape.match(str(value)) is None
+
+
 def _corrected_date(raw_date: str | None) -> tuple[str | None, bool]:
     """Tries the raw date as-is first (the common case); only falls back to
     the character-correction pass if the raw value doesn't already parse -
@@ -198,6 +208,8 @@ def build_extraction_result(document_type: str, parsed: dict) -> dict:
             "taxInvoiceNo": tax_invoice_no,
             "referenceNo": reference_no,
             "date": date,
+            "taxInvoiceNoNeedsReview": _needs_review(tax_invoice_no, TAX_INVOICE_NO_FULL_RE),
+            "referenceNoNeedsReview": _needs_review(reference_no, REFERENCE_NO_FULL_RE),
             "taxInvoiceNoAutoCorrected": tin_auto_corrected,
             "dateAutoCorrected": date_auto_corrected,
         }
@@ -221,6 +233,8 @@ def empty_extraction_result(document_type: str) -> dict:
             "taxInvoiceNo": None,
             "referenceNo": None,
             "date": None,
+            "taxInvoiceNoNeedsReview": False,
+            "referenceNoNeedsReview": False,
             "taxInvoiceNoAutoCorrected": False,
             "dateAutoCorrected": False,
         }

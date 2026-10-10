@@ -876,6 +876,9 @@ async def correct_document(
         # Manual entry supersedes the auto-correction pass - no longer
         # something the OCR correction layer touched.
         set_fields[f"{body.field}AutoCorrected"] = False
+    if body.field in ("taxInvoiceNo", "referenceNo"):
+        # The user typed this value - the "looks incomplete" flag no longer applies.
+        set_fields[f"{body.field}NeedsReview"] = False
     await db.documents.update_one({"_id": doc["_id"]}, {"$set": set_fields})
     await db.corrections.insert_one(
         {

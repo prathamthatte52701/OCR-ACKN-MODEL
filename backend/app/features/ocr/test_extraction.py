@@ -90,6 +90,8 @@ def demo() -> None:
     test_build_extraction_result_end_to_end_delivery_challan()
     test_build_extraction_result_reference_no_confusion_corrected()
     test_results_carry_no_confidence_keys()
+    test_wrong_length_tax_invoice_numbers_are_flagged_not_changed()
+    test_well_formed_and_missing_numbers_are_not_flagged()
     print("All extraction/correction self-checks passed.")
 
 
@@ -102,6 +104,31 @@ def test_results_carry_no_confidence_keys() -> None:
             empty_extraction_result(doc_type),
         ):
             assert not [k for k in result if k.endswith("Confidence")]
+
+
+def test_wrong_length_tax_invoice_numbers_are_flagged_not_changed() -> None:
+    # Real OCR misreads: an extra "0" on the Tax Invoice No, a dropped digit on the Reference No.
+    flagged = build_extraction_result(
+        "Tax Invoice",
+        {"taxInvoiceNo": "G00277053700", "referenceNo": "980039537", "date": "10/07/2026"},
+    )
+    assert flagged["taxInvoiceNo"] == "G00277053700" and flagged["referenceNo"] == "980039537"
+    assert flagged["taxInvoiceNoNeedsReview"] is True
+    assert flagged["referenceNoNeedsReview"] is True
+
+
+def test_well_formed_and_missing_numbers_are_not_flagged() -> None:
+    ok = build_extraction_result(
+        "Tax Invoice",
+        {"taxInvoiceNo": "G0027705370", "referenceNo": "9800601391", "date": "10/07/2026"},
+    )
+    assert ok["taxInvoiceNoNeedsReview"] is False and ok["referenceNoNeedsReview"] is False
+    missing = build_extraction_result("Tax Invoice", {})
+    assert missing["taxInvoiceNoNeedsReview"] is False
+    assert missing["referenceNoNeedsReview"] is False
+    assert "taxInvoiceNoNeedsReview" not in build_extraction_result(
+        "Delivery Challan", {"number": "12", "date": "10/07/2026"}
+    )
 
 
 if __name__ == "__main__":

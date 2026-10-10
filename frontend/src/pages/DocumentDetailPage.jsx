@@ -31,8 +31,8 @@ function formatSize(bytes) {
 function fieldsFor(doc) {
   if (doc.documentType === 'Tax Invoice') {
     return [
-      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: doc.taxInvoiceNo },
-      { key: 'referenceNo', label: 'Reference No.', value: doc.referenceNo },
+      { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: doc.taxInvoiceNo, needsReview: doc.taxInvoiceNoNeedsReview },
+      { key: 'referenceNo', label: 'Reference No.', value: doc.referenceNo, needsReview: doc.referenceNoNeedsReview },
       { key: 'date', label: 'Date', value: doc.date },
     ]
   }
@@ -285,6 +285,7 @@ export default function DocumentDetailPage() {
                   <div className="min-w-0">
                     <p className="text-[12.6px] text-gray-500">{f.label}</p>
                     <p className="truncate text-[14.7px] font-semibold text-gray-100">{f.value || 'Not available'}</p>
+                    {f.needsReview && <p className="text-[12.6px] text-amber-400">Looks incomplete - please check against the original</p>}
                   </div>
                 </div>
                 <button
