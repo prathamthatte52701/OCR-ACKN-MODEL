@@ -31,7 +31,7 @@ async def _seed(
 
 
 async def _list(client: Any, user: Any, **params: Any) -> Any:
-    return await client.get("/documents", headers=user.headers, params={"page": 1, **params})
+    return await client.get("/api/documents", headers=user.headers, params={"page": 1, **params})
 
 
 async def _numbers(client: Any, user: Any, **params: Any) -> set[str]:

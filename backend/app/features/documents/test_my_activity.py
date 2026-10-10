@@ -26,7 +26,7 @@ def no_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _activity(client: Any, user: Any, **params: Any) -> dict:
-    res = await client.get("/documents/my-activity", headers=user.headers, params=params)
+    res = await client.get("/api/documents/my-activity", headers=user.headers, params=params)
     assert res.status_code == 200
     body: dict = res.json()
     return body
@@ -34,7 +34,7 @@ async def _activity(client: Any, user: Any, **params: Any) -> dict:
 
 async def _upload(client: Any, user: Any) -> str:
     res = await client.post(
-        "/documents/upload",
+        "/api/documents/upload",
         headers=user.headers,
         files={"document": ("a.pdf", io.BytesIO(PDF), "application/pdf")},
         data={"documentType": "Delivery Challan"},
@@ -69,7 +69,7 @@ async def test_user_actions_each_log_one_entry_only_for_owner(
     assert _actions(await _activity(client, a)).count("document_processed") == 1
 
     res = await client.patch(
-        f"/documents/{doc_id}/correct",
+        f"/api/documents/{doc_id}/correct",
         headers=a.headers,
         json={"field": "number", "value": "820000002"},
     )
@@ -80,11 +80,11 @@ async def test_user_actions_each_log_one_entry_only_for_owner(
     assert corrected[0]["context"]["field"] == "number"
     assert "820000002" not in str(corrected[0]["context"])
 
-    res = await client.post(f"/documents/{doc_id}/reprocess", headers=a.headers)
+    res = await client.post(f"/api/documents/{doc_id}/reprocess", headers=a.headers)
     assert res.status_code == 200, res.text
     assert _actions(await _activity(client, a)).count("document_reprocessed") == 1
 
-    res = await client.delete(f"/documents/{doc_id}", headers=a.headers)
+    res = await client.delete(f"/api/documents/{doc_id}", headers=a.headers)
     assert res.status_code == 200, res.text
     body = await _activity(client, a)
     assert _actions(body).count("document_deleted") == 1
