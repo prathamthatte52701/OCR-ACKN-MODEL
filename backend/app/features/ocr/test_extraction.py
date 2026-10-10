@@ -92,6 +92,7 @@ def demo() -> None:
     test_results_carry_no_confidence_keys()
     test_wrong_length_tax_invoice_numbers_are_flagged_not_changed()
     test_well_formed_and_missing_numbers_are_not_flagged()
+    test_delivery_challan_number_shape_is_flagged_not_changed()
     print("All extraction/correction self-checks passed.")
 
 
@@ -129,6 +130,17 @@ def test_well_formed_and_missing_numbers_are_not_flagged() -> None:
     assert "taxInvoiceNoNeedsReview" not in build_extraction_result(
         "Delivery Challan", {"number": "12", "date": "10/07/2026"}
     )
+
+
+def test_delivery_challan_number_shape_is_flagged_not_changed() -> None:
+    # Real misread: the Order number (starts "27") was taken instead of the challan number.
+    wrong = build_extraction_result(
+        "Delivery Challan", {"number": "270728435", "date": "25/09/2026"}
+    )
+    assert wrong["number"] == "270728435" and wrong["numberNeedsReview"] is True
+    ok = build_extraction_result("Delivery Challan", {"number": "820762791", "date": "03/10/2026"})
+    assert ok["numberNeedsReview"] is False
+    assert build_extraction_result("Delivery Challan", {})["numberNeedsReview"] is False
 
 
 if __name__ == "__main__":

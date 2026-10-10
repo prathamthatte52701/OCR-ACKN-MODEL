@@ -25,7 +25,7 @@ function reviewFieldsFor(f) {
     ]
   }
   return [
-    { key: 'number', label: 'Delivery Challan No.', value: f.number },
+    { key: 'number', label: 'Delivery Challan No.', value: f.number, needsReview: f.numberNeedsReview },
     { key: 'date', label: 'Date', value: f.date },
   ]
 }
@@ -294,6 +294,7 @@ export default function UploadPage() {
               referenceNo: polled.referenceNo,
               number: polled.number,
               date: polled.date,
+              numberNeedsReview: polled.numberNeedsReview,
               taxInvoiceNoNeedsReview: polled.taxInvoiceNoNeedsReview,
               referenceNoNeedsReview: polled.referenceNoNeedsReview,
               exported: polled.exported,
@@ -321,6 +322,7 @@ export default function UploadPage() {
             referenceNo: u.referenceNo,
             number: u.number,
             date: u.date,
+            numberNeedsReview: u.numberNeedsReview,
             taxInvoiceNoNeedsReview: u.taxInvoiceNoNeedsReview,
             referenceNoNeedsReview: u.referenceNoNeedsReview,
             exported: u.exported,
@@ -413,6 +415,7 @@ export default function UploadPage() {
             referenceNo: updated.referenceNo,
             number: updated.number,
             date: updated.date,
+            numberNeedsReview: updated.numberNeedsReview,
             taxInvoiceNoNeedsReview: updated.taxInvoiceNoNeedsReview,
             referenceNoNeedsReview: updated.referenceNoNeedsReview,
             exported: updated.exported,

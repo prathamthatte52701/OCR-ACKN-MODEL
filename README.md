@@ -11,8 +11,9 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 ## Recent features
 
 - **Review flag for incomplete numbers** - a Tax Invoice No. that is not
-  `G`/`P` + 10 digits, or a Reference No. that is not 10 digits (a character
-  was dropped or added by OCR), is kept exactly as read but shown with an
+  `G`/`P` + 10 digits, a Reference No. that is not 10 digits, or a Delivery
+  Challan No. that is not 9 digits starting `82` (a character was dropped or
+  added, or an Order number was picked up), is kept exactly as read but shown with an
   amber "Looks incomplete - please check against the original" note. Editing
   the field clears the note.
 - **Document viewer** - the original file is shown beside the extracted data

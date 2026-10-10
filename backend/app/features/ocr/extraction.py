@@ -16,6 +16,8 @@ ALL_DIGITS_RE = re.compile(r"^\d+$")
 # Reference No.). Only used to FLAG a value for review - never to change or reject it.
 TAX_INVOICE_NO_FULL_RE = re.compile(r"^[GP]\d{10}$")
 REFERENCE_NO_FULL_RE = re.compile(r"^\d{10}$")
+# Delivery Challan No.: 9 digits starting "82" in every real sample (an Order number starts "27").
+DELIVERY_CHALLAN_NO_FULL_RE = re.compile(r"^82\d{7}$")
 DATE_CHARS_RE = re.compile(r"^[\d./-]+$")
 
 
@@ -222,6 +224,7 @@ def build_extraction_result(document_type: str, parsed: dict) -> dict:
     return {
         "number": number,
         "date": date,
+        "numberNeedsReview": _needs_review(number, DELIVERY_CHALLAN_NO_FULL_RE),
         "numberAutoCorrected": number_auto_corrected,
         "dateAutoCorrected": date_auto_corrected,
     }
@@ -241,6 +244,7 @@ def empty_extraction_result(document_type: str) -> dict:
     return {
         "number": None,
         "date": None,
+        "numberNeedsReview": False,
         "numberAutoCorrected": False,
         "dateAutoCorrected": False,
     }

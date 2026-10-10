@@ -37,7 +37,7 @@ function fieldsFor(doc) {
     ]
   }
   return [
-    { key: 'number', label: 'Delivery Challan No.', value: doc.number },
+    { key: 'number', label: 'Delivery Challan No.', value: doc.number, needsReview: doc.numberNeedsReview },
     { key: 'date', label: 'Date', value: doc.date },
   ]
 }
