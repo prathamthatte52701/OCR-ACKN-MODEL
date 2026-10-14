@@ -80,8 +80,7 @@ export default function DocumentViewer({ file, index, heightClass = 'h-[70vh] mi
     return () => {
       cancelled = true
       if (url) URL.revokeObjectURL(url)
-      doc?.destroy()
-      task?.destroy()
+      task?.destroy?.()
     }
   }, [file, isPdf])
 
