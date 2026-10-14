@@ -179,6 +179,11 @@ route), admin audit logging, passwords, field/upload limits, JWT and the
 pinned requirements. Frontend and admin have no unit-test runner (`npm run
 lint` and `npm run build` only).
 
+Browser regression scripts for the PDF/image viewer live in `frontend/tests/`
+(raw Playwright, all `/api/` calls mocked, no backend needed). Start `npm run dev`
+and run `BASE=http://localhost:5174 node frontend/tests/test_viewer_cleanup.cjs`
+or `node frontend/tests/test_viewer_break.cjs` (optional `SHOTS_DIR` for screenshots).
+
 ## Docker
 
 ```bash
