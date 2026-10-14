@@ -1,6 +1,10 @@
-import io
+import asyncio
+import os
 import re
+import tempfile
+import time
 import zipfile
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
@@ -18,9 +22,10 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pymongo import ReturnDocument
+from starlette.background import BackgroundTask
 
 from app.core.audit_log import log_action, safe_log_action
 from app.core.database import get_database
@@ -55,6 +60,14 @@ REPROCESS_STUCK_AFTER = timedelta(minutes=10)
 MAX_PAGE_NUMBER = 100_000
 MAX_FILE_SIZE = 5 * 1024 * 1024
 MAX_BULK_FILES = 10
+MAX_DOWNLOAD_ALL_IDS = 50
+MAX_DOWNLOAD_ALL_BYTES = 150 * 1024 * 1024
+# A running download-all holds its user's slot at most this long; an older slot is treated as
+# free, so a leaked slot (cancelled task, bug) heals itself instead of blocking the user forever.
+DOWNLOAD_SLOT_TIMEOUT_SECONDS = 10 * 60
+# user id -> time.monotonic() when the slot was taken. In-process only (single worker); with
+# multiple workers the limit would be per process.
+_active_downloads: dict[ObjectId, float] = {}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/jpg", "image/png", "application/pdf"}
 
 EDITABLE_FIELDS = {"taxInvoiceNo", "referenceNo", "number", "date"}
@@ -618,50 +631,118 @@ async def download_document(
 @router.post("/download-all")
 async def download_all_documents(
     body: DownloadAllRequest, current_user: CurrentUser = Depends(get_current_user)
-) -> Response:
+) -> StreamingResponse:
     """ "Download All" for one documents page: bundles every requested
     document's original file into a single ZIP, same page-scoping contract
     as bulk-save (excel/router.py::bulk_save_documents_to_excel) - the
-    frontend sends exactly the ids currently on that page. Any id that
-    doesn't belong to this user (ownership lookup 404s the same way
-    _get_owned_document does, just non-fatally here), any document with no
-    file (filePurged, or a GridFS fetch that fails for any reason) is
-    silently skipped and counted rather than aborting the whole archive -
-    a manipulated id list can only ever skip an entry, never leak another
-    user's file into the zip."""
-    db = get_database()
-    seen_names: dict[str, int] = {}
-    included = 0
-    skipped = 0
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # dict.fromkeys keeps order and drops repeats - the same id sent 200
-        # times used to re-read the same GridFS file 200 times.
-        for doc_id in dict.fromkeys(body.document_ids):
-            doc = await db.documents.find_one(
-                {"_id": doc_id, "userId": current_user.id, "isDeleted": {"$ne": True}}
-            )
-            if not doc or doc.get("filePurged") or not doc.get("gridFsFileId"):
-                skipped += 1
-                continue
-            try:
-                file_buffer = await download_buffer(doc["gridFsFileId"])
-            except Exception:  # noqa: BLE001
-                skipped += 1
-                continue
-            zf.writestr(_zip_entry_name(doc, seen_names), file_buffer)
-            included += 1
+    frontend sends exactly the document ids currently on that page. Any id that
+    doesn't belong to this user, any document with no file (filePurged, or a
+    GridFS fetch that fails for any reason) is silently skipped and counted
+    rather than aborting the whole archive - a manipulated id list can only
+    ever skip an entry, never leak another user's file into the zip.
 
-    await log_action(
-        current_user.id,
-        "documents_download_all",
-        {"requested": len(body.document_ids), "included": included, "skipped": skipped},
-    )
-    return Response(
-        content=buf.getvalue(),
+    Limits: MAX_DOWNLOAD_ALL_IDS ids, MAX_DOWNLOAD_ALL_BYTES of stored originals
+    (checked from metadata before any file is read), one running download per
+    user. The zip is built on disk one file at a time and streamed back."""
+    if len(body.document_ids) > MAX_DOWNLOAD_ALL_IDS:
+        raise HTTPException(status_code=400, detail="Select fewer documents.")
+    user_id = current_user.id
+    # Check-and-add with no await in between: race-free within one event loop.
+    now = time.monotonic()
+    started = _active_downloads.get(user_id)
+    if started is not None and now - started < DOWNLOAD_SLOT_TIMEOUT_SECONDS:
+        raise HTTPException(status_code=429, detail="A download is already running.")
+    _active_downloads[user_id] = now
+    tmp_path: str | None = None
+    released = False
+
+    def cleanup() -> None:
+        # Idempotent: runs from the generator's finally AND a BackgroundTask.
+        nonlocal released
+        if released:
+            return
+        released = True
+        # Only free our own slot - a stale one may already have been taken over by a newer run.
+        if _active_downloads.get(user_id) == now:
+            del _active_downloads[user_id]
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    try:
+        db = get_database()
+        # dict.fromkeys keeps order and drops repeats.
+        ids = list(dict.fromkeys(body.document_ids))
+        docs = {
+            d["_id"]: d
+            async for d in db.documents.find(
+                {"_id": {"$in": ids}, "userId": user_id, "isDeleted": {"$ne": True}}
+            )
+        }
+        usable = [
+            d
+            for d in (docs.get(i) for i in ids)
+            if d and not d.get("filePurged") and d.get("gridFsFileId")
+        ]
+        total_bytes = sum(d.get("size") or MAX_FILE_SIZE for d in usable)
+        if total_bytes > MAX_DOWNLOAD_ALL_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Selected files are too large to download together. "
+                "Select fewer documents.",
+            )
+
+        seen_names: dict[str, int] = {}
+        included = 0
+        skipped = len(ids) - len(usable)
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="download-all-")
+        os.close(fd)
+        zf = await asyncio.to_thread(zipfile.ZipFile, tmp_path, "w", zipfile.ZIP_DEFLATED)
+        try:
+            for doc in usable:
+                try:
+                    file_buffer = await download_buffer(doc["gridFsFileId"])
+                except Exception:  # noqa: BLE001
+                    skipped += 1
+                    continue
+                await asyncio.to_thread(zf.writestr, _zip_entry_name(doc, seen_names), file_buffer)
+                del file_buffer
+                included += 1
+        finally:
+            await asyncio.to_thread(zf.close)
+        zip_size = os.path.getsize(tmp_path)
+
+        await log_action(
+            user_id,
+            "documents_download_all",
+            {"requested": len(body.document_ids), "included": included, "skipped": skipped},
+        )
+    except BaseException:
+        cleanup()
+        raise
+
+    path = tmp_path
+
+    async def stream() -> AsyncIterator[bytes]:
+        # The finally runs when Starlette cancels/closes the generator on client
+        # disconnect; a BackgroundTask alone would NOT run then. The BackgroundTask
+        # below covers the case where the body is never iterated at all.
+        try:
+            with open(path, "rb") as f:
+                while chunk := await asyncio.to_thread(f.read, 64 * 1024):
+                    yield chunk
+        finally:
+            cleanup()
+
+    return StreamingResponse(
+        stream(),
         media_type="application/zip",
+        background=BackgroundTask(cleanup),
         headers={
             "Content-Disposition": 'attachment; filename="documents.zip"',
+            "Content-Length": str(zip_size),
             "X-Download-Included": str(included),
             "X-Download-Skipped": str(skipped),
             "X-Download-Total": str(len(body.document_ids)),

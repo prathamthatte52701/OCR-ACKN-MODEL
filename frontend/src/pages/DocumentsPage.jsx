@@ -245,8 +245,10 @@ export default function DocumentsPage() {
   // headers, not an error - no confirmation needed here since downloading
   // is non-destructive, only Save All (which writes duplicate rows) gates
   // behind a popup.
+  const downloadAllBusyRef = useRef(false)
   async function handleDownloadAll() {
-    if (documents.length === 0) return
+    if (documents.length === 0 || downloadAllBusyRef.current) return
+    downloadAllBusyRef.current = true
     try {
       const res = await downloadAllMutation.mutateAsync(documents.map((d) => d._id))
       const included = Number(res.headers?.['x-download-included'] ?? 0)
@@ -263,6 +265,8 @@ export default function DocumentsPage() {
       }
     } catch (err) {
       toast.error(err.userMessage || 'Could not download documents. Please try again.')
+    } finally {
+      downloadAllBusyRef.current = false
     }
   }
 
@@ -440,7 +444,7 @@ export default function DocumentsPage() {
                 disabled={documents.length === 0 || downloadAllMutation.isPending}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-5 py-2.5 text-[13.6px] font-black text-blue-200 transition-all hover:border-blue-300/45 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {downloadAllMutation.isPending ? `Zipping ${documents.length}...` : `Download All (${documents.length} on this page)`}
+                {downloadAllMutation.isPending ? 'Preparing...' : `Download All (${documents.length} on this page)`}
               </button>
               <button
                 type="button"
