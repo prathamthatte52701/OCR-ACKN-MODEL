@@ -20,9 +20,11 @@ from fastapi import (
 )
 from fastapi.responses import Response
 from loguru import logger
+from pymongo import ReturnDocument
 
 from app.core.audit_log import log_action, safe_log_action
 from app.core.database import get_database
+from app.core.image_limits import ImageTooLarge, check_upload
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import limiter
@@ -200,6 +202,12 @@ async def _validate_and_store(
             )
         if pages > 4:
             raise HTTPException(status_code=400, detail="PDF must be 4 pages or less.")
+
+    # Pixel-size check BEFORE anything is stored: a tiny file can decode to GBs of RAM.
+    try:
+        await check_upload(buffer, detected or mime_type)
+    except ImageTooLarge as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
     db = get_database()
     auto_name = _name_from_original_filename(original_name)
@@ -699,6 +707,7 @@ async def reprocess_document(
             "$set": {
                 "uploadStatus": "uploaded",
                 "processingError": None,
+                "recoveryAttempts": 0,
                 "taxInvoiceNo": None,
                 "referenceNo": None,
                 "number": None,
@@ -934,14 +943,53 @@ async def correct_document(
     return {"message": "Field corrected successfully.", "document": _serialize_document(updated)}
 
 
+MAX_RECOVERY_ATTEMPTS = 2
+RECOVERY_GAVE_UP_MESSAGE = (
+    "Processing was interrupted several times and was stopped. Please reprocess this document."
+)
+
+
+async def _claim_for_recovery(doc: dict) -> dict | None:
+    """Atomically bumps recoveryAttempts and returns the document AFTER the bump, or None
+    if another run already claimed it (the filter pins the counter value we read, so two
+    concurrent runs cannot both win). Saved BEFORE processing starts, so a process killed
+    mid-OCR (e.g. out of memory) has already counted this attempt."""
+    seen = doc.get("recoveryAttempts") or 0
+    return await get_database().documents.find_one_and_update(
+        {
+            "_id": doc["_id"],
+            "uploadStatus": "uploaded",
+            "recoveryAttempts": {"$in": [None, 0]} if seen == 0 else seen,
+        },
+        {"$inc": {"recoveryAttempts": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+
+
 async def recover_interrupted_uploads() -> int:
     """Requeues anything stuck in 'uploaded' status after a server restart -
     ported from the old app's recoverInterruptedUploads(), called once at
-    startup from main.py's lifespan."""
+    startup from main.py's lifespan. A document that keeps killing the server is
+    given up on after MAX_RECOVERY_ATTEMPTS."""
     db = get_database()
     cursor = db.documents.find({"uploadStatus": "uploaded", "isDeleted": {"$ne": True}})
     docs = await cursor.to_list(length=None)
     for doc in docs:
+        claimed = await _claim_for_recovery(doc)
+        if claimed is None:
+            continue
+        if claimed["recoveryAttempts"] > MAX_RECOVERY_ATTEMPTS:
+            await db.documents.update_one(
+                {"_id": doc["_id"]},
+                {
+                    "$set": {
+                        "uploadStatus": "failed",
+                        "processingError": RECOVERY_GAVE_UP_MESSAGE,
+                        "updatedAt": datetime.now(UTC),
+                    }
+                },
+            )
+            continue
         try:
             buffer = await download_buffer(doc["gridFsFileId"])
             await process_document(doc["_id"], buffer, doc["mimeType"], doc["documentType"])

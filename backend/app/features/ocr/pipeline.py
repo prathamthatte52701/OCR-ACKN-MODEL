@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.core.audit_log import safe_log_action
 from app.core.database import get_database
+from app.core.image_limits import ImageTooLarge, check_upload
 from app.features.ocr.ai_extraction import extract_header
 from app.features.ocr.paddle_runner import (
     OCR_TIMEOUT_SECONDS_IMAGE,
@@ -205,6 +206,15 @@ async def process_document(
     """Full OCR -> AI extraction -> validation pipeline for one document -
     mirrors the old app's processDocument()."""
     try:
+        # Defense in depth: covers reprocess, startup recovery and files stored before the
+        # upload-time check existed. Must run before any decode.
+        try:
+            await check_upload(buffer, mime_type)
+        except ImageTooLarge as exc:
+            await _update_active_document(
+                doc_id, {"uploadStatus": "failed", "processingError": str(exc)}
+            )
+            return
         header_text = await _extract_header_text(buffer, mime_type)
         if not header_text or not header_text.strip():
             await _update_active_document(

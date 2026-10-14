@@ -205,6 +205,8 @@ and `lint` + `build` for both React apps.
   time through a single global lock, by design — protects memory on a
   single-machine deployment, but means a 5-file bulk upload takes roughly
   5× one file's time, not 1×.
+- **Image size**: images over 50 megapixels and PDFs with an oversized page
+  are rejected (a tiny file can decode to gigabytes of RAM).
 - **Forgot password**: username+email match, not an emailed reset link —
   no possession-of-inbox proof. Inherited from the original app's design.
 - **Deployment**: `render.yaml` starts uvicorn on `0.0.0.0` for Render, and a
