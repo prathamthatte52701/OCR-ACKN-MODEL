@@ -180,7 +180,8 @@ _LOW_CONTRAST_DELTA_THRESHOLD = 80.0
 # angles larger than this are treated as gross rotation, not a deskew case -
 # handled (best-effort) by the orientation branch instead.
 _MIN_DESKEW_ANGLE_DEG = 0.5
-_MAX_DESKEW_ANGLE_DEG = 30.0
+# Never rotate by more than this; a bigger apparent skew is a bad estimate, not a tilt.
+MAX_DESKEW_DEGREES = 15.0
 # Max-vs-min brightness delta across quadrants above this (0-255 scale) =
 # shadow/uneven lighting worth normalizing.
 _SHADOW_BRIGHTNESS_DELTA = 25.0
@@ -246,19 +247,25 @@ def _ink_mask(gray: np.ndarray) -> np.ndarray:
     return thresh
 
 
+def _normalise_skew_angle(rect_angle: float) -> float:
+    # cv2.minAreaRect's angle is the direction of whichever side it labels "w",
+    # and the labelling/range differs by version (4.x: (0, 90]; 5.x: [-90, 0)),
+    # so an axis-aligned box reads 90, -90 or 0. A rectangle is symmetric under
+    # 90-degree turns, so fold into [-45, 45): every convention gives the same
+    # skew (the old "+90 if w < h" step is a no-op modulo 90 and is dropped).
+    return ((rect_angle + 45.0) % 90.0) - 45.0
+
+
 def _deskew(img: np.ndarray, gray: np.ndarray) -> tuple[np.ndarray, float]:
     coords = cv2.findNonZero(_ink_mask(gray))
     if coords is None or len(coords) < 20:
         return img, 0.0
-    (rect_w, rect_h), rect_angle = cv2.minAreaRect(coords)[1:]
-    # cv2.minAreaRect's angle is relative to whichever side it labels "w" -
-    # which flips depending on box orientation, not on the actual text tilt.
-    # Normalizing against which side is longer (text lines are always wider
-    # than tall) gives a stable signed rotation-from-horizontal. Verified
-    # empirically against a known ~10-degree synthetic tilt in
-    # test_preprocessing.py (residual angle after correction: 0.0).
-    angle = rect_angle + 90 if rect_w < rect_h else rect_angle
-    if abs(angle) < _MIN_DESKEW_ANGLE_DEG or abs(angle) > _MAX_DESKEW_ANGLE_DEG:
+    angle = _normalise_skew_angle(cv2.minAreaRect(coords)[2])
+    if abs(angle) > MAX_DESKEW_DEGREES:
+        # Gross rotation / unreliable estimate: leave untouched, report 0 so
+        # the caller records no "deskew:" step for a rotation that never ran.
+        return img, 0.0
+    if abs(angle) < _MIN_DESKEW_ANGLE_DEG:
         return img, angle
     height, width = img.shape[:2]
     center = (width // 2, height // 2)

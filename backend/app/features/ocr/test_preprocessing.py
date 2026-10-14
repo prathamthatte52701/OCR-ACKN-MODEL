@@ -15,6 +15,7 @@ import io
 
 import cv2
 import numpy as np
+import pytest
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from app.features.ocr.preprocessing import (
@@ -245,6 +246,66 @@ def test_blur_triggers_sharpen() -> None:
 def test_tilt_triggers_deskew() -> None:
     _, steps = assess_and_preprocess(_to_png_bytes(variant_tilt()))
     assert any(s.startswith("deskew:") for s in steps), steps
+
+
+def test_normalise_skew_angle_folds_all_conventions() -> None:
+    from app.features.ocr.preprocessing import _normalise_skew_angle
+
+    for raw, expected in [
+        (0, 0),
+        (90, 0),
+        (180, 0),
+        (-90, 0),
+        (89.9, -0.1),
+        (-89.9, 0.1),
+        (10, 10),
+        (-10, -10),
+        (14.9, 14.9),
+        (15.1, 15.1),
+        (30, 30),
+        (-45, -45),
+        (45, -45),
+    ]:
+        assert _normalise_skew_angle(raw) == pytest.approx(expected, abs=1e-9), raw
+
+
+def _patched_min_area_rect(monkeypatch, rect):  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(cv2, "minAreaRect", lambda _coords: rect)
+
+
+def test_deskew_same_result_for_cv2_4x_and_5x_minarearect_conventions(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    clean_bytes = _to_png_bytes(make_clean_header())
+    # (rect, expected deskew step or None): same physical image, both conventions.
+    cases = {
+        "axis_aligned": (
+            ((436.0, 187.5), (279.0, 790.0), 90.0),  # 4.x
+            ((436.0, 187.5), (790.0, 279.0), -90.0),  # 5.x
+            ((436.0, 187.5), (179.0, 29.0), -90.0),  # 5.x, other box size
+            None,
+        ),
+        "tilt_5deg": (
+            ((436.0, 187.5), (790.0, 279.0), 5.0),  # 4.x
+            ((436.0, 187.5), (279.0, 790.0), -85.0),  # 5.x: w/h swapped, angle - 90
+            "deskew:5.0deg",
+        ),
+    }
+    for name, (*rects, step) in cases.items():
+        results = []
+        for rect in rects:
+            _patched_min_area_rect(monkeypatch, rect)
+            out, steps = assess_and_preprocess(clean_bytes)
+            results.append((out, steps))
+        assert all(r == results[0] for r in results), name
+        deskew = [s for s in results[0][1] if s.startswith("deskew:")]
+        assert deskew == ([step] if step else []), (name, results[0][1])
+
+
+def test_deskew_skips_rotation_beyond_max_limit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    clean_bytes = _to_png_bytes(make_clean_header())
+    _patched_min_area_rect(monkeypatch, ((436.0, 187.5), (790.0, 279.0), 30.0))
+    out, steps = assess_and_preprocess(clean_bytes)
+    assert not any(s.startswith("deskew:") for s in steps), steps
+    assert out == clean_bytes
 
 
 def test_faded_triggers_contrast_fix() -> None:
