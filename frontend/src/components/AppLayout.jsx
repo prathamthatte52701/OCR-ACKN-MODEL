@@ -40,7 +40,7 @@ export default function AppLayout() {
           </NavLink>
 
           {/* Desktop nav */}
-          <nav className="hidden items-center gap-1 rounded-full border border-white/8 bg-white/[0.035] p-1 md:flex">
+          <nav className="hidden items-center gap-1 rounded-full border border-white/8 bg-white/[0.035] p-1 lg:flex">
             {navLinks.map((link) => (
               <NavLink
                 key={link.to}
@@ -59,7 +59,7 @@ export default function AppLayout() {
             ))}
           </nav>
 
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="hidden items-center gap-3 lg:flex">
             <NavLink
               to="/profile"
               className={({ isActive }) =>
@@ -80,7 +80,7 @@ export default function AppLayout() {
 
           {/* Mobile menu button */}
           <button
-            className="rounded-lg border border-white/10 bg-white/[0.04] p-2 text-slate-300 transition-colors hover:text-white md:hidden"
+            className="rounded-lg border border-white/10 bg-white/[0.04] p-2 text-slate-300 transition-colors hover:text-white lg:hidden"
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label="Toggle menu"
           >
@@ -90,7 +90,7 @@ export default function AppLayout() {
 
         {/* Mobile nav */}
         {menuOpen && (
-          <div className="flex flex-col gap-1 border-t border-blue-400/10 bg-slate-950/95 px-4 py-3 md:hidden">
+          <div className="flex flex-col gap-1 border-t border-blue-400/10 bg-slate-950/95 px-4 py-3 lg:hidden">
             {navLinks.map((link) => (
               <NavLink
                 key={link.to}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import PasswordInput from '../components/PasswordInput'
 
@@ -50,10 +50,7 @@ export default function AdminLoginPage() {
             />
           </div>
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="block text-[12.6px] font-semibold text-slate-400">Password</label>
-              <Link to="/forgot-password" className="text-[12.6px] font-semibold text-emerald-300 no-underline hover:text-emerald-200">Forgot password?</Link>
-            </div>
+            <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Password</label>
             <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}

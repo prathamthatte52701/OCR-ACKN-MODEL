@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { previousPath, recordLocation } from '../utils/routeHistory'
 
-const AUTH_PATHS = ['/login', '/forgot-password']
+const AUTH_PATHS = ['/login']
 
 // Goes back inside the app only: browser history when this tab has in-app history,
 // otherwise `fallback` (replace, so Back never bounces to the page it just left).

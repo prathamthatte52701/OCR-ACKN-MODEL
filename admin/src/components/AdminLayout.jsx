@@ -51,7 +51,7 @@ export default function AdminLayout() {
             </span>
           </NavLink>
 
-          <nav className="hidden items-center gap-1 rounded-full border border-white/8 bg-white/[0.035] p-1 md:flex">
+          <nav className="hidden items-center gap-1 rounded-full border border-white/8 bg-white/[0.035] p-1 lg:flex">
             {navLinks.map((link) => (
               <NavLink
                 key={link.to}
@@ -73,7 +73,7 @@ export default function AdminLayout() {
             ))}
           </nav>
 
-          <div className="hidden items-center gap-3 md:flex">
+          <div className="hidden items-center gap-3 lg:flex">
             <NavLink
               to="/profile"
               className={({ isActive }) =>
@@ -93,7 +93,7 @@ export default function AdminLayout() {
           </div>
 
           <button
-            className="rounded-lg border border-white/10 bg-white/[0.04] p-2 text-slate-300 transition-colors hover:text-white md:hidden"
+            className="rounded-lg border border-white/10 bg-white/[0.04] p-2 text-slate-300 transition-colors hover:text-white lg:hidden"
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Toggle menu"
           >
@@ -112,7 +112,7 @@ export default function AdminLayout() {
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="overflow-hidden border-t border-emerald-400/10 bg-slate-950/95 md:hidden"
+              className="overflow-hidden border-t border-emerald-400/10 bg-slate-950/95 lg:hidden"
             >
               <div className="flex flex-col gap-1 px-4 py-3">
                 {navLinks.map((link) => (

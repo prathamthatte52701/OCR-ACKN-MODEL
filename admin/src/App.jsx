@@ -6,7 +6,6 @@ import GuestOnly from './components/GuestOnly'
 import AdminLayout from './components/AdminLayout'
 import ServerDownBanner from './components/ServerDownBanner'
 import AdminLoginPage from './pages/AdminLoginPage'
-import AdminForgotPasswordPage from './pages/AdminForgotPasswordPage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
 import AdminProfilePage from './pages/AdminProfilePage'
 import AdminUsersPage from './pages/AdminUsersPage'
@@ -36,7 +35,6 @@ function AppRoutes() {
       <Routes location={location} key={location.pathname}>
         <Route element={<GuestOnly />}>
           <Route path="/login" element={<FadeIn><AdminLoginPage /></FadeIn>} />
-          <Route path="/forgot-password" element={<FadeIn><AdminForgotPasswordPage /></FadeIn>} />
         </Route>
 
         <Route element={<RequireAdminAuth />}>
