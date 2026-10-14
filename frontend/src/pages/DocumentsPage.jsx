@@ -12,6 +12,7 @@ import DocumentList from '../components/DocumentList'
 import PageBackground from '../components/PageBackground'
 import { confirmAction, promptText } from '../store/dialogStore'
 import BackButton from '../components/BackButton'
+import { UPLOAD_RANGES } from '../utils/uploadRange'
 
 function DocumentsSkeleton() {
   return (
@@ -60,12 +61,24 @@ const MONTH_PARAM_RE = /^(20\d{2}|2100)-(0[1-9]|1[0-2])$/
 const CURRENT_YEAR = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 7 }, (_, i) => CURRENT_YEAR + 1 - i)
 const selectClass = 'rounded-2xl border border-white/10 bg-slate-900 px-3 py-2 text-[13.6px] font-bold text-slate-200 focus:border-blue-300/40 focus:outline-none'
-const DATE_RANGES = [
-  { value: 'today', label: 'Today' },
-  { value: 'week', label: 'This Week' },
-  { value: 'month', label: 'This Month' },
-  { value: 'year', label: 'This Year' },
-]
+const DATE_RANGES = UPLOAD_RANGES
+const RANGE_LABELS = Object.fromEntries(UPLOAD_RANGES.map((r) => [r.value, r.label.toLowerCase()]))
+
+// Today's local date, re-read every minute and when the tab becomes visible again, so a tab
+// left open past midnight refetches "Today" instead of showing yesterday's result.
+function useLocalDay() {
+  const [day, setDay] = useState(() => new Date().toDateString())
+  useEffect(() => {
+    const tick = () => setDay(new Date().toDateString())
+    const id = setInterval(tick, 60000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [])
+  return day
+}
 
 export default function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -79,10 +92,12 @@ export default function DocumentsPage() {
   const monthNumber = monthQuery && monthQuery !== 'none' ? monthQuery.slice(5) : ''
   const [yearPick, setYearPick] = useState(monthQuery && monthQuery !== 'none' ? Number(monthQuery.slice(0, 4)) : CURRENT_YEAR)
   const monthLabel = monthQuery === 'none' ? 'no date found' : monthQuery ? `month ${MONTH_NAMES[Number(monthNumber) - 1]} ${monthQuery.slice(0, 4)}` : ''
-  const filterParts = [numberQuery && `number "${numberQuery}"`, dateQuery && `date ${dateQuery}`, monthLabel].filter(Boolean)
   const rangeParam = searchParams.get('range') || ''
   const selectedRange = DATE_RANGES.some((r) => r.value === rangeParam) ? rangeParam : ''
+  const rangeLabel = selectedRange ? `uploaded ${RANGE_LABELS[selectedRange]}` : ''
+  const filterParts = [numberQuery && `number "${numberQuery}"`, dateQuery && `date ${dateQuery}`, monthLabel, rangeLabel].filter(Boolean)
 
+  const dayKey = useLocalDay()
   const [page, setPage] = useState(1)
   const newExcelFileMutation = useNewExcelFileMutation()
   const bulkSaveMutation = useBulkSaveDocumentsMutation()
@@ -104,7 +119,7 @@ export default function DocumentsPage() {
     ...(selectedType !== ALL_TYPES && { documentType: selectedType }),
     ...(numberQuery && { number: numberQuery }),
     ...(dateQuery && { date: dateQuery }),
-    ...(selectedRange && { range: selectedRange }),
+    ...(selectedRange && { range: selectedRange, dayKey }),
     ...(monthQuery && { month: monthQuery }),
   })
 
@@ -115,7 +130,8 @@ export default function DocumentsPage() {
   function clearSearch() {
     const next = new URLSearchParams()
     if (searchParams.get('type')) next.set('type', searchParams.get('type'))
-    if (searchParams.get('range')) next.set('range', searchParams.get('range'))
+    // The chip is its own visible control: keep it while clearing a search/month, drop it when it is the only filter.
+    if (isSearching && searchParams.get('range')) next.set('range', searchParams.get('range'))
     setSearchParams(next)
   }
 
@@ -342,7 +358,7 @@ export default function DocumentsPage() {
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <span className="text-[12.6px] font-bold uppercase tracking-wide text-slate-500">Document month</span>
+          <span className="text-[12.6px] font-bold uppercase tracking-wide text-slate-500">Doc by date</span>
           <select aria-label="Month" value={monthNumber} onChange={(e) => pickMonthNumber(e.target.value)} className={selectClass}>
             <option value="">All months</option>
             {MONTH_NAMES.map((name, i) => (
@@ -368,7 +384,8 @@ export default function DocumentsPage() {
           </button>
         </div>
 
-        <div className="mb-6 flex flex-wrap gap-2">
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          <span className="text-[12.6px] font-bold uppercase tracking-wide text-slate-500">Upload by date</span>
           <button
             type="button"
             onClick={() => selectRange('')}
@@ -400,7 +417,7 @@ export default function DocumentsPage() {
           <DocumentsSkeleton />
         ) : isError ? (
           <DocumentsError message={error?.userMessage || 'Could not load your documents. Please try again.'} onRetry={refetch} />
-        ) : isSearching && documents.length === 0 ? (
+        ) : (isSearching || selectedRange) && documents.length === 0 ? (
           <div className="rounded-[30px] border border-blue-300/12 bg-slate-900/62 p-10 text-center shadow-[0_28px_100px_rgba(2,8,23,0.35)] backdrop-blur-xl">
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-blue-300/18 bg-blue-500/10 text-[14.7px] font-black text-blue-200 shadow-[0_0_42px_rgba(37,99,235,0.2)]">N/A</div>
             <h2 className="mt-5 text-2xl font-black text-white">No results found</h2>

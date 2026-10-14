@@ -44,9 +44,8 @@ MONTH_RE = re.compile(r"^(20\d{2}|2100)-(0[1-9]|1[0-2])$")
 router = APIRouter()
 
 DOCUMENT_TYPES = {"Tax Invoice", "Delivery Challan"}
-# Rolling windows from "now", not calendar-aligned (e.g. "today" = last 24h,
-# not midnight-to-now) - simplest, deterministic, avoids timezone-boundary
-# ambiguity between server UTC and the user's local day/week/month/year.
+# Legacy rolling windows from "now" (?range=), kept for old callers. The My Documents chips send
+# a calendar-based ?uploadedFrom= (start of day/week/month/year in the USER's timezone) instead.
 RANGE_DAYS = {"today": 1, "week": 7, "month": 30, "year": 365}
 CORRECTABLE_NUMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./_-]{0,39}$")
 MAX_PAGE_SIZE = 100
@@ -366,6 +365,27 @@ def _serialize_document(doc: dict) -> dict:
     return out
 
 
+UPLOADED_FROM_MIN = datetime(2000, 1, 1, tzinfo=UTC)
+
+
+def _parse_uploaded_from(value: str) -> datetime:
+    """Strict ISO-8601 with an explicit offset (the browser sends ...Z). The client computes
+    "start of today/week/month/year" in ITS timezone; the server only compares instants."""
+    invalid = HTTPException(status_code=400, detail="Invalid date filter.")
+    if len(value) > 40:
+        raise invalid
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise invalid from None
+    if parsed.tzinfo is None:
+        raise invalid
+    parsed = parsed.astimezone(UTC)
+    if parsed < UPLOADED_FROM_MIN or parsed > datetime.now(UTC) + timedelta(days=1):
+        raise invalid
+    return parsed
+
+
 def _escape_regex(value: str) -> str:
     return re.escape(value)
 
@@ -377,6 +397,7 @@ async def list_documents(
     date: str | None = Query(default=None),
     range: Literal["today", "week", "month", "year"] | None = Query(default=None),
     month: str | None = Query(default=None),
+    uploaded_from: str | None = Query(default=None, alias="uploadedFrom"),
     page: int | None = Query(default=None),
     limit: int | None = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -412,9 +433,14 @@ async def list_documents(
                 raise HTTPException(status_code=400, detail="Invalid month.")
             date_cond = {"date": re.compile(rf"^\d{{2}}/{m.group(2)}/{m.group(1)}$")}
         filter_query["$and"] = [date_cond]
+    # Lower bounds on upload time (createdAt). Both filters may be present: the later one wins.
+    lower_bounds: list[datetime] = []
     if range in RANGE_DAYS:
-        cutoff = datetime.now(UTC) - timedelta(days=RANGE_DAYS[range])
-        filter_query["createdAt"] = {"$gte": cutoff}
+        lower_bounds.append(datetime.now(UTC) - timedelta(days=RANGE_DAYS[range]))
+    if uploaded_from and uploaded_from.strip():
+        lower_bounds.append(_parse_uploaded_from(uploaded_from.strip()))
+    if lower_bounds:
+        filter_query["createdAt"] = {"$gte": max(lower_bounds)}
 
     if page:
         # Capped: page=10**18 used to overflow Mongo's skip (500) and

@@ -1,8 +1,16 @@
 import api from './client'
 import { downloadBlob } from './download'
+import { uploadedFromParam } from '../utils/uploadRange'
 
 export function listDocuments(params) {
-  return api.get('/documents', { params }).then((res) => res.data)
+  // `range` is a chip NAME (today|week|month|year); its start instant is computed here, at fetch
+  // time, in the user's local timezone. `dayKey` only exists to change the cache key at midnight.
+  // eslint-disable-next-line no-unused-vars
+  const { range, dayKey, ...rest } = params || {}
+  const uploadedFrom = range ? uploadedFromParam(range) : undefined
+  return api
+    .get('/documents', { params: { ...rest, ...(uploadedFrom && { uploadedFrom }) } })
+    .then((res) => res.data)
 }
 
 export function getDocument(id) {
