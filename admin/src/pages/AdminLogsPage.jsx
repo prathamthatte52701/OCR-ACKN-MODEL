@@ -3,6 +3,7 @@ import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
 import Banner from '../components/Banner'
 import { formatIST } from '../utils/formatDate'
+import BackButton from '../components/BackButton'
 
 const PAGE_SIZE = 30
 const ACTIONS = [
@@ -60,6 +61,7 @@ export default function AdminLogsPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
+      <BackButton fallback="/" />
       <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Audit logs</h1>
       <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${totalLogs} entr${totalLogs !== 1 ? 'ies' : 'y'}`}</p>
 

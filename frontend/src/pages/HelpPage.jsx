@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import PageBackground from '../components/PageBackground'
+import BackButton from '../components/BackButton'
 
 // Plain-language help for non-technical office staff. Every entry here
 // describes a real, verified behavior of this app - nothing invented. If the
@@ -147,6 +148,8 @@ export default function HelpPage() {
       <PageBackground variant="dots" />
 
       <main className="relative mx-auto max-w-[900px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+
+        <BackButton fallback="/" />
         <div className="mb-7">
           <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">Help &amp; Troubleshooting</h1>
           <p className="mt-2 text-[14.7px] font-medium text-slate-500">

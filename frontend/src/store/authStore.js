@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { queryClient } from '../lib/queryClient'
 
 const TOKEN_KEY = 'ackintel_token'
 
@@ -30,6 +31,7 @@ export const useAuthStore = create((set) => ({
   },
   clear() {
     localStorage.removeItem(TOKEN_KEY)
+    queryClient.clear() // no previous user's cached data survives logout
     set({ token: null, user: null, justApproved: false, approvedAt: null })
   },
   setLoading(loading) {

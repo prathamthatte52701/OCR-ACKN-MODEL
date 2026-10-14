@@ -1,12 +1,13 @@
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
 import Banner from '../components/Banner'
 import ConfirmPurgeModal from '../components/ConfirmPurgeModal'
 import { formatIST } from '../utils/formatDate'
+import BackButton from '../components/BackButton'
 
 const SECTION_PAGE_SIZE = 10
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -258,7 +259,7 @@ export default function AdminUserDetailPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
-      <Link to="/users" className="mb-4 inline-block text-[13.6px] font-bold text-slate-500 hover:text-emerald-300">&larr; Back to Users</Link>
+      <BackButton fallback="/users" />
 
       <Banner error={error} />
 

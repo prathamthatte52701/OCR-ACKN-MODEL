@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { validateUsername, validateEmail, validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
+import BackButton from '../components/BackButton'
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -36,6 +37,7 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#020817] px-4 py-10">
       <div className="w-full max-w-sm rounded-[26px] border border-blue-300/18 bg-slate-900/62 p-7 shadow-[0_34px_120px_rgba(2,8,23,0.55)] backdrop-blur-xl">
+        <BackButton fallback="/login" />
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-[14.7px] font-black text-blue-200">AI</span>
           <h1 className="text-2xl font-black text-white">Create account</h1>

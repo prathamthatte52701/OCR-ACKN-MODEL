@@ -11,6 +11,17 @@ export function useInitAuth() {
   const setLoading = useAuthStore((s) => s.setLoading)
   const clear = useAuthStore((s) => s.clear)
 
+  // Logging out in another tab removes the token from localStorage - follow it here so
+  // this tab cannot keep showing (or navigating Back to) protected pages.
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key === 'ackintel_token' && !e.newValue) clear()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     if (!token) {

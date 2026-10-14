@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
+import BackButton from '../components/BackButton'
 
 const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
 const panelClass = 'rounded-[28px] border border-emerald-300/12 bg-slate-900/68 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur-xl'
@@ -106,6 +107,7 @@ export default function AdminProfilePage() {
 
   return (
     <main className="relative mx-auto max-w-[720px] px-4 py-6 sm:px-6 lg:px-10">
+      <BackButton fallback="/" />
       <h1 className="mb-6 text-3xl font-black tracking-tight text-white">Account</h1>
       <div className="space-y-6">
         <ProfileDetailsPanel user={user} />

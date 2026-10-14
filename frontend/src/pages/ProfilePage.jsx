@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { validateUsername, validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
+import BackButton from '../components/BackButton'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-blue-300/60'
 const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
@@ -182,6 +183,7 @@ export default function ProfilePage() {
 
   return (
     <main className="relative mx-auto max-w-[720px] px-4 py-6 sm:px-6 lg:px-10">
+      <BackButton fallback="/" />
       <h1 className="mb-6 text-3xl font-black tracking-tight text-white">Account</h1>
       <div className="space-y-6">
         <ProfileDetailsPanel user={user} updateProfile={updateProfile} />

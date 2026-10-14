@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
 import PageBackground from '../components/PageBackground'
+import BackButton from '../components/BackButton'
 
 const PAGE_SIZE = 30
 const EMPTY_DOCUMENTS = []
@@ -64,6 +64,8 @@ export default function DocumentsViewAllPage() {
       <PageBackground variant="dots" />
 
       <main className="relative mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+
+        <BackButton fallback="/documents" />
         <div className="mb-7 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">View All Details</h1>
@@ -72,12 +74,6 @@ export default function DocumentsViewAllPage() {
               {isLoading ? 'Loading documents...' : `${documents.length} document${documents.length !== 1 ? 's' : ''}`}
             </p>
           </div>
-          <Link
-            to="/documents"
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-200 no-underline transition-colors hover:border-blue-300/30 hover:bg-blue-500/10"
-          >
-            Back to My Documents
-          </Link>
         </div>
 
         {isLoading ? (

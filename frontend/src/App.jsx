@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import { queryClient } from './lib/queryClient'
 import { useInitAuth } from './hooks/useInitAuth'
 import RequireAuth from './components/RequireAuth'
+import GuestOnly from './components/GuestOnly'
 import AppLayout from './components/AppLayout'
 import ServerDownBanner from './components/ServerDownBanner'
 import GlobalConfirmDialog from './components/GlobalConfirmDialog'
@@ -41,9 +42,11 @@ export default function App() {
         <AuthGate>
           <ErrorBoundary>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route element={<GuestOnly />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            </Route>
 
             <Route element={<RequireAuth />}>
               <Route element={<AppLayout />}>

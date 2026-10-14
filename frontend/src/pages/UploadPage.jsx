@@ -11,6 +11,7 @@ import CorrectionModal from '../components/CorrectionModal'
 import LazyDocumentViewer from '../components/LazyDocumentViewer'
 import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
+import BackButton from '../components/BackButton'
 
 // Per-documentType editable field list for the bulk review view - mirrors
 // DocumentDetailPage's fieldsFor(), but reads from a bulk result item
@@ -445,6 +446,8 @@ export default function UploadPage() {
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.035)_1px,transparent_1px)] bg-[size:56px_56px] opacity-55" />
 
       <main className={`relative mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-6 lg:min-h-[calc(100vh-94px)] lg:items-center lg:px-10 lg:py-12 ${reviewActive ? 'lg:grid-cols-1' : 'lg:grid-cols-[0.75fr_1.25fr]'}`}>
+
+        <BackButton fallback="/" className="justify-self-start lg:col-span-full" />
         <section className={`max-w-xl ${reviewActive ? 'hidden' : ''}`}>
           <p className="mb-6 text-[14.7px] font-bold text-blue-400">Upload Document</p>
           <h1 className="text-4xl font-black leading-[1.16] tracking-[-0.035em] text-white sm:text-5xl xl:text-[56px]">

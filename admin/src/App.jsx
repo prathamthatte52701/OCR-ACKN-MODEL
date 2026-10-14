@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { AnimatePresence, motion } from 'framer-motion'
 import { AdminAuthProvider } from './context/AdminAuthContext'
 import RequireAdminAuth from './components/RequireAdminAuth'
+import GuestOnly from './components/GuestOnly'
 import AdminLayout from './components/AdminLayout'
 import ServerDownBanner from './components/ServerDownBanner'
 import AdminLoginPage from './pages/AdminLoginPage'
@@ -33,8 +34,10 @@ function AppRoutes() {
   return (
     <AnimatePresence mode="wait" initial={false}>
       <Routes location={location} key={location.pathname}>
-        <Route path="/login" element={<FadeIn><AdminLoginPage /></FadeIn>} />
-        <Route path="/forgot-password" element={<FadeIn><AdminForgotPasswordPage /></FadeIn>} />
+        <Route element={<GuestOnly />}>
+          <Route path="/login" element={<FadeIn><AdminLoginPage /></FadeIn>} />
+          <Route path="/forgot-password" element={<FadeIn><AdminForgotPasswordPage /></FadeIn>} />
+        </Route>
 
         <Route element={<RequireAdminAuth />}>
           <Route element={<AdminLayout />}>

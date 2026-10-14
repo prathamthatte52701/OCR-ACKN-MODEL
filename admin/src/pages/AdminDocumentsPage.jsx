@@ -5,6 +5,7 @@ import PaginationControls from '../components/PaginationControls'
 import Banner from '../components/Banner'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
+import BackButton from '../components/BackButton'
 
 const PAGE_SIZE = 30
 
@@ -164,6 +165,7 @@ export default function AdminDocumentsPage() {
 
   return (
     <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
+      <BackButton fallback="/" />
       <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Documents</h1>
       <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${totalDocuments} document${totalDocuments !== 1 ? 's' : ''} across all users`}</p>
 

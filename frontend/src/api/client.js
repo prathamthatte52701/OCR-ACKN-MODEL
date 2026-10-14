@@ -88,7 +88,7 @@ api.interceptors.response.use(
       useAuthStore.getState().clear()
       const next = encodeURIComponent(window.location.pathname + window.location.search)
       if (!window.location.pathname.startsWith('/login')) {
-        window.location.href = `/login?next=${next}`
+        window.location.replace(`/login?next=${next}`)
       }
     }
 
@@ -104,7 +104,7 @@ api.interceptors.response.use(
     ) {
       useAuthStore.getState().clear()
       if (!window.location.pathname.startsWith('/login')) {
-        window.location.href = `/login?notice=${encodeURIComponent(detail.message || '')}`
+        window.location.replace(`/login?notice=${encodeURIComponent(detail.message || '')}`)
       }
     }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { safeNext } from '../utils/safeNext'
 
 // Renders the Google Identity Services button (GSI script tag lives in
 // index.html) and wires its ID-token credential response to the backend's
@@ -34,7 +35,7 @@ export default function GoogleSignInButton() {
       try {
         await loginWithGoogle(credential)
         const next = searchParams.get('next')
-        navigate(next && next.startsWith('/') ? next : '/', { replace: true })
+        navigate(safeNext(next), { replace: true })
       } catch {
         // No error-UI hook back into the page from here - the existing
         // email/password form's error state already covers that path.

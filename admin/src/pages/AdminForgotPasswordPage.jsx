@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import { validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
+import BackButton from '../components/BackButton'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-emerald-300/60'
 const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
@@ -58,6 +59,7 @@ export default function AdminForgotPasswordPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#04070d] px-4">
       <div className="w-full max-w-sm rounded-[26px] border border-emerald-300/18 bg-slate-900/62 p-7 shadow-[0_34px_120px_rgba(2,8,23,0.55)] backdrop-blur-xl">
+        <BackButton fallback="/login" />
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl border border-emerald-400/30 bg-emerald-500/15 text-[14.7px] font-black text-emerald-200">AD</span>
           <h1 className="text-2xl font-black text-white">{verified ? 'Set new password' : 'Forgot password'}</h1>

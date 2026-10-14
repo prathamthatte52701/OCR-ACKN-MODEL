@@ -7,6 +7,7 @@ import LoadingState from '../components/LoadingState'
 import PageBackground from '../components/PageBackground'
 import { formatIST } from '../utils/formatDate'
 import { displayNumber } from '../utils/documentDisplay'
+import BackButton from '../components/BackButton'
 
 function HistoryError({ message, onRetry }) {
   return (
@@ -66,6 +67,8 @@ export default function ExportHistoryPage() {
       <PageBackground variant="dots" />
 
       <main className="relative mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+
+        <BackButton fallback="/" />
         <div className="mb-7">
           <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">Export History</h1>
           <p className="mt-2 flex items-center gap-2 text-[14.7px] font-medium text-slate-500">

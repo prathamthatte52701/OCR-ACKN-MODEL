@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../utils/api'
 import Banner from '../components/Banner'
+import BackButton from '../components/BackButton'
 
 async function downloadWorkbook(id, filename) {
   let res
@@ -64,6 +65,7 @@ export default function AdminWorkbooksPage() {
 
   return (
     <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-6 lg:px-10">
+      <BackButton fallback="/" />
       <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Workbooks</h1>
       <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${workbooks.length} workbook${workbooks.length !== 1 ? 's' : ''} across all users`}</p>
 

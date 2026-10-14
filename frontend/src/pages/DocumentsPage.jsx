@@ -11,6 +11,7 @@ import {
 import DocumentList from '../components/DocumentList'
 import PageBackground from '../components/PageBackground'
 import { confirmAction, promptText } from '../store/dialogStore'
+import BackButton from '../components/BackButton'
 
 function DocumentsSkeleton() {
   return (
@@ -269,6 +270,8 @@ export default function DocumentsPage() {
       <PageBackground variant="dots" />
 
       <main className="relative mx-auto max-w-[1440px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+
+        <BackButton fallback="/" />
         <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">My Documents</h1>

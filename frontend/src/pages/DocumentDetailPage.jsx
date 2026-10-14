@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowLeft, FileX } from 'lucide-react'
+import { FileX } from 'lucide-react'
 import { downloadDocument, fetchDocumentFile } from '../api/documents'
 import { useDocument } from '../hooks/useDocumentsQueries'
 import {
@@ -19,6 +19,7 @@ import ErrorMessage from '../components/ErrorMessage'
 import ProcessingState from '../components/ProcessingState'
 import { formatIST } from '../utils/formatDate'
 import { confirmAction } from '../store/dialogStore'
+import BackButton from '../components/BackButton'
 
 function formatSize(bytes) {
   if (!bytes) return '-'
@@ -184,7 +185,7 @@ export default function DocumentDetailPage() {
   }
 
   if (isLoading) return <div className="mx-auto max-w-4xl px-4 py-8"><LoadingState /></div>
-  if (isError) return <div className="mx-auto max-w-4xl px-4 py-8"><ErrorMessage message={error?.userMessage || 'Document not found or could not be loaded.'} onRetry={refetch} /></div>
+  if (isError) return <div className="mx-auto max-w-4xl px-4 py-8"><BackButton fallback="/documents" /><ErrorMessage message={error?.userMessage || 'Document not found or could not be loaded.'} onRetry={refetch} /></div>
   if (!doc) return null
 
   const statusColor = {
@@ -197,9 +198,7 @@ export default function DocumentDetailPage() {
 
   return (
     <div className={`mx-auto px-4 py-8 ${doc.filePurged ? 'max-w-4xl' : 'max-w-6xl'}`}>
-      <Link to="/documents" className="mb-4 flex items-center gap-1 text-[14.7px] text-gray-500 no-underline hover:text-gray-300">
-        <ArrowLeft className="h-4 w-4" /> Back to Documents
-      </Link>
+      <BackButton fallback="/documents" />
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>

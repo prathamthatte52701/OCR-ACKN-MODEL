@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth'
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
 import { formatLocal } from '../utils/formatDate'
+import { safeNext } from '../utils/safeNext'
+import BackButton from '../components/BackButton'
 
 // Plain-text status card for a 403 login (pending / rejected / revoked). Text nodes only -
 // the admin's reason is user-controlled data and is never rendered as HTML.
@@ -36,6 +38,15 @@ export default function LoginPage() {
   const [success, setSuccess] = useState(location.state?.success || '')
   const [submitting, setSubmitting] = useState(false)
 
+  // Back from the pending/rejected/revoked card: return to a clean form.
+  function backToForm() {
+    setError('')
+    setNotice('')
+    setSuccess('')
+    setPassword('')
+    navigate('/login', { replace: true })
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -45,7 +56,7 @@ export default function LoginPage() {
     try {
       await login(email, password)
       const next = searchParams.get('next')
-      navigate(next && next.startsWith('/') ? next : '/', { replace: true })
+      navigate(safeNext(next), { replace: true })
     } catch (err) {
       const detail = err.response?.data?.detail
       if (err.response?.status === 403 && typeof detail?.code === 'string') setNotice(statusText(detail))
@@ -59,6 +70,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#020817] px-4">
       <div className="w-full max-w-sm rounded-[26px] border border-blue-300/18 bg-slate-900/62 p-7 shadow-[0_34px_120px_rgba(2,8,23,0.55)] backdrop-blur-xl">
+        {notice && <BackButton onBack={backToForm} />}
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-[14.7px] font-black text-blue-200">AI</span>
           <h1 className="text-2xl font-black text-white">Log in</h1>
