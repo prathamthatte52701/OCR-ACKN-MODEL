@@ -63,6 +63,21 @@ def _is_google_only(user: dict) -> bool:
     return user.get("authProvider") == "google"
 
 
+async def _forgot_password_target(db: AsyncIOMotorDatabase, username: str, email: str) -> dict:
+    """The account a forgot-password request may act on, else the one generic 400.
+    Admins are treated exactly like a non-match (same lookup, same error, no extra
+    work): an admin's password is changed only by that admin via change-password, or
+    by the server-side reset_admin_password script. Runs before any write."""
+    user = await db.users.find_one(
+        {"username": normalize_username(username), "email": normalize_email(email)}
+    )
+    if not user or user.get("role") == "admin":
+        raise HTTPException(status_code=400, detail=GENERIC_FORGOT_PASSWORD_ERROR)
+    if _is_google_only(user):
+        raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
+    return user
+
+
 def _user_out(user: dict) -> UserOut:
     return UserOut(
         id=str(user["_id"]), username=user["username"], email=user["email"], role=user["role"]
@@ -327,13 +342,7 @@ async def change_password(
 @limiter.limit("20/15minute")
 async def forgot_password_verify(request: Request, body: ForgotPasswordVerifyRequest) -> dict:
     db = get_database()
-    user = await db.users.find_one(
-        {"username": normalize_username(body.username), "email": normalize_email(body.email)}
-    )
-    if not user:
-        raise HTTPException(status_code=400, detail=GENERIC_FORGOT_PASSWORD_ERROR)
-    if _is_google_only(user):
-        raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
+    await _forgot_password_target(db, body.username, body.email)
     return {"verified": True}
 
 
@@ -346,20 +355,15 @@ async def forgot_password_reset(
         raise HTTPException(status_code=400, detail="New password and confirmation do not match.")
 
     db = get_database()
-    user = await db.users.find_one(
-        {"username": normalize_username(body.username), "email": normalize_email(body.email)}
-    )
-    if not user:
-        raise HTTPException(status_code=400, detail=GENERIC_FORGOT_PASSWORD_ERROR)
-    if _is_google_only(user):
-        raise HTTPException(status_code=400, detail=GOOGLE_ONLY_FORGOT_PASSWORD_ERROR)
+    user = await _forgot_password_target(db, body.username, body.email)
 
     if err := validate_password(body.new_password, user.get("username"), user.get("email")):
         raise HTTPException(status_code=400, detail=err)
 
     new_hash = hash_password(body.new_password)
+    # role filter: if the account became an admin since the lookup, write nothing.
     await db.users.update_one(
-        {"_id": user["_id"]},
+        {"_id": user["_id"], "role": {"$ne": "admin"}},
         {
             "$set": {
                 "passwordHash": new_hash,
