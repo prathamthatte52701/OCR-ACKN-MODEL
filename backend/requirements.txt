@@ -32,4 +32,4 @@ paddleocr==3.7.0
 paddlepaddle==3.3.1
 psutil==7.2.2  # RSS memory measurement for bulk-upload leak testing (Feature 2)
 google-auth==2.56.2  # verifies Google ID tokens for OAuth login
-opencv-python-headless==5.0.0.93  # server-side image preprocessing (Feature 6), headless: no GUI deps
+opencv-contrib-python==4.10.0.84  # the ONE OpenCV build: paddlex pins exactly this. Never add another opencv-* package - they all write into the same cv2/ dir and clobber each other

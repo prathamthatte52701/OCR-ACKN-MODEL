@@ -106,6 +106,8 @@ python -m venv ../venv          # or use the existing venv/ at repo root
 ../venv/Scripts/activate         # Windows
 pip install -r requirements-dev.txt   # exact runtime pins + ruff/black/isort/mypy/pytest
                                        # (production installs requirements.txt only)
+# OpenCV: keep exactly one opencv-* package (opencv-contrib-python, pinned by paddlex).
+# A second one (e.g. opencv-python-headless) overwrites the same cv2/ dir; `pip list | grep opencv` must show one row.
 cp .env.example .env             # fill in real values, see below
 ```
 
