@@ -46,7 +46,7 @@ async def test_reject_revokes_existing_token(client: Any, make_user: Any, db: An
     # old token: tokenVersion bumped => 401 (revoked); fresh login => 403 rejected message
     assert (await client.get("/api/auth/me", headers=u.headers)).status_code == 401
     login = await _login(client, u)
-    assert login.status_code == 403 and login.json()["detail"] == REJECTED
+    assert login.status_code == 403 and login.json()["detail"]["message"] == REJECTED
     assert await db.auditlogs.count_documents({"action": "user_rejected"}) == 1
 
 

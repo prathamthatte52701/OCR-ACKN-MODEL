@@ -10,6 +10,12 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 
 ## Recent features
 
+- **Approval decision details** - the admin can give an optional reason (max 300
+  characters, plain text) when rejecting or revoking a user. A user who logs in
+  with the right password sees a status card: request date while pending, or
+  decision date and reason if rejected/revoked; the first login after approval
+  shows the approval date. No email is sent. A wrong password never reveals any
+  of this.
 - **Review flag for incomplete numbers** - a Tax Invoice No. that is not
   `G`/`P` + 10 digits, a Reference No. that is not 10 digits, or a Delivery
   Challan No. that is not 9 digits starting `82` (a character was dropped or

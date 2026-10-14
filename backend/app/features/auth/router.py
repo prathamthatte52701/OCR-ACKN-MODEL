@@ -27,6 +27,7 @@ from app.features.auth.dependencies import (
     STATUS_PENDING,
     CurrentUser,
     get_current_user,
+    iso_utc,
     raise_if_not_approved,
 )
 from app.features.auth.schemas import (
@@ -136,7 +137,7 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     # Password is checked FIRST so the pending/rejected message is only ever
     # shown to someone who proved they own the account (no status oracle).
-    raise_if_not_approved(user.get("status", STATUS_APPROVED))
+    raise_if_not_approved(user)
 
     # Consume the one-time "you're approved" notice. Reached only after the password check
     # AND the approval gate above, so a wrong password or a pending/rejected account can never
@@ -148,7 +149,12 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
 
     token = sign_token(str(user["_id"]), user["tokenVersion"], user["role"])
     await log_action(user["_id"], "login", {"email": email})
-    return TokenResponse(token=token, user=_user_out(user), just_approved=consumed is not None)
+    return TokenResponse(
+        token=token,
+        user=_user_out(user),
+        just_approved=consumed is not None,
+        approved_at=iso_utc(user.get("decidedAt")) if user.get("decision") == "approved" else None,
+    )
 
 
 async def _derive_google_username(db: AsyncIOMotorDatabase, email: str) -> str:

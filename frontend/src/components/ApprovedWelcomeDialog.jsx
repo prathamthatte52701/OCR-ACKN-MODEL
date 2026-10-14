@@ -1,5 +1,6 @@
 import { useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import { formatLocal } from '../utils/formatDate'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog'
 
 // Pages where the notice must never appear: the login response sets the flag a moment
@@ -13,6 +14,7 @@ const HIDDEN_ON = ['/login', '/signup', '/forgot-password']
 export default function ApprovedWelcomeDialog() {
   const justApproved = useAuthStore((s) => s.justApproved)
   const user = useAuthStore((s) => s.user)
+  const approvedAt = useAuthStore((s) => s.approvedAt)
   const clearJustApproved = useAuthStore((s) => s.clearJustApproved)
   const { pathname } = useLocation()
 
@@ -29,6 +31,9 @@ export default function ApprovedWelcomeDialog() {
             <p className="text-sm text-gray-300">
               The admin has approved your account. You can now upload and manage documents.
             </p>
+            {formatLocal(approvedAt) && (
+              <p className="mt-2 text-xs text-gray-400">Approved on {formatLocal(approvedAt)}</p>
+            )}
           </div>
           <DialogFooter>
             <button

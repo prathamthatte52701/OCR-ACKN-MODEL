@@ -23,3 +23,14 @@ export function isTodayIST(dateStr) {
   const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }) // YYYY-MM-DD
   return fmt.format(new Date(dateStr)) === fmt.format(new Date())
 }
+
+// "14 Oct 2026, 3:42 PM" in the viewer's own timezone (account decision dates).
+export function formatLocal(dateStr) {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(date).replace(/\bam\b/, 'AM').replace(/\bpm\b/, 'PM')
+}

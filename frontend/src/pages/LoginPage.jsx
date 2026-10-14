@@ -3,6 +3,24 @@ import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-do
 import { useAuth } from '../hooks/useAuth'
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
+import { formatLocal } from '../utils/formatDate'
+
+// Plain-text status card for a 403 login (pending / rejected / revoked). Text nodes only -
+// the admin's reason is user-controlled data and is never rendered as HTML.
+function statusText(d) {
+  const reason = d.reason || 'No reason was given'
+  if (d.code === 'ACCOUNT_PENDING') {
+    const when = formatLocal(d.requestedAt)
+    return `${when ? `Your request was sent on ${when}. ` : ''}The admin has not decided yet. Log in again later to check. No email is sent.`
+  }
+  if (d.code === 'ACCOUNT_REJECTED') {
+    return `Your request was not approved${d.decidedAt ? ` on ${formatLocal(d.decidedAt)}` : ''}. Reason: ${reason}. Contact your admin.`
+  }
+  if (d.code === 'ACCOUNT_REVOKED') {
+    return `Your access was removed${d.decidedAt ? ` on ${formatLocal(d.decidedAt)}` : ''}. Reason: ${reason}. Contact your admin.`
+  }
+  return d.message || ''
+}
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -29,7 +47,9 @@ export default function LoginPage() {
       const next = searchParams.get('next')
       navigate(next && next.startsWith('/') ? next : '/', { replace: true })
     } catch (err) {
-      if (err.response?.status === 403) setNotice(err.userMessage)
+      const detail = err.response?.data?.detail
+      if (err.response?.status === 403 && typeof detail?.code === 'string') setNotice(statusText(detail))
+      else if (err.response?.status === 403) setNotice(err.userMessage)
       else setError(err.userMessage || 'Could not log in. Please try again.')
     } finally {
       setSubmitting(false)
@@ -77,7 +97,7 @@ export default function LoginPage() {
           )}
 
           {notice && (
-            <div role="status" className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-2.5 text-[13.6px] text-amber-200">
+            <div role="status" data-testid="account-status" className="break-words rounded-xl border border-amber-400/30 bg-amber-500/10 px-3.5 py-2.5 text-[13.6px] text-amber-200">
               {notice}
             </div>
           )}

@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -23,6 +23,7 @@ from app.features.admin.schemas import (
     AdminChangeEmailRequest,
     AdminMonthsRequest,
     AdminUpdateUserRequest,
+    RejectRequest,
 )
 from app.features.auth.dependencies import CurrentUser, require_admin
 from app.features.documents.gridfs_service import delete_file
@@ -72,6 +73,10 @@ def _serialize_user(user: dict) -> dict:
         "authProvider": user.get("authProvider", "local"),
         "createdAt": user.get("createdAt"),
         "updatedAt": user.get("updatedAt"),
+        # Approval decision details - this serializer is admin-only (never used for /me or login).
+        "decision": user.get("decision"),
+        "decidedAt": user.get("decidedAt"),
+        "decisionReason": user.get("decisionReason"),
     }
 
 
@@ -131,19 +136,25 @@ def _status_query(status: str) -> dict:
     return {"status": status}
 
 
-async def _set_user_status(user_id: ObjectId, new_status: str, admin: CurrentUser) -> dict:
+async def _set_user_status(
+    user_id: ObjectId, new_status: str, admin: CurrentUser, reason: str | None = None
+) -> dict:
     db = get_database()
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    update: dict = {"$set": {"status": new_status, "updatedAt": datetime.now(UTC)}}
+    now = datetime.now(UTC)
+    previous = user.get("status", "approved")
+    update: dict = {"$set": {"status": new_status, "updatedAt": now}}
+    decision = "approved"
     if new_status == "approved":
         # One-time "you're approved" notice for the user's next login - but only when this
         # really is a change to approved (pending/rejected -> approved). Re-approving someone
         # who is already approved, or a legacy account with no status (= approved), sets nothing.
-        if user.get("status", "approved") != "approved":
+        if previous != "approved":
             update["$set"]["approvalNoticePending"] = True
+        update["$set"].update({"decision": "approved", "decidedAt": now, "decisionReason": None})
     if new_status == "rejected":
         update["$set"]["approvalNoticePending"] = False
         # Admins (including yourself) can never be locked out this way.
@@ -153,6 +164,15 @@ async def _set_user_status(user_id: ObjectId, new_status: str, admin: CurrentUse
             raise HTTPException(status_code=400, detail="You cannot reject your own account.")
         # Bumping tokenVersion kills every token already issued to this user.
         update["$inc"] = {"tokenVersion": 1}
+        # Rejecting someone who was already approved is a revoke; repeating a reject keeps
+        # whatever the first one was.
+        decision = (
+            "revoked"
+            if previous == "approved"
+            or (previous == "rejected" and user.get("decision") == "revoked")
+            else "rejected"
+        )
+        update["$set"].update({"decision": decision, "decidedAt": now, "decisionReason": reason})
     await db.users.update_one({"_id": user_id}, update)
     await log_action(
         admin.id,
@@ -160,7 +180,8 @@ async def _set_user_status(user_id: ObjectId, new_status: str, admin: CurrentUse
         {
             "targetUserId": str(user_id),
             "targetEmail": user["email"],
-            "previous": user.get("status", "approved"),
+            "previous": previous,
+            **({"decision": decision, "reason": reason} if new_status == "rejected" else {}),
         },
     )
     refreshed = await db.users.find_one({"_id": user_id}, {"passwordHash": 0})
@@ -177,11 +198,16 @@ async def approve_user(
 
 @router.post("/users/{user_id}/reject")
 async def reject_user(
-    user_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+    user_id: PyObjectId,
+    body: RejectRequest | None = Body(default=None),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     """Reject a pending request OR revoke an approved user - same action, the
-    account is locked out and every issued token dies (tokenVersion bump)."""
-    return await _set_user_status(user_id, "rejected", current_user)
+    account is locked out and every issued token dies (tokenVersion bump). The optional
+    reason is shown to the user on their next login attempt."""
+    return await _set_user_status(
+        user_id, "rejected", current_user, body.reason if body is not None else None
+    )
 
 
 @router.get("/users/{user_id}")

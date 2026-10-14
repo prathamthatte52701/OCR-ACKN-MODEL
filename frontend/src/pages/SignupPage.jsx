@@ -25,7 +25,7 @@ export default function SignupPage() {
     setSubmitting(true)
     try {
       await signup(username, email.trim().toLowerCase(), password)
-      navigate('/login', { replace: true, state: { success: 'Account created. Waiting for admin approval.' } })
+      navigate('/login', { replace: true, state: { success: 'Request sent. You will NOT get an email. Log in later to check the status.' } })
     } catch (err) {
       setError(err.userMessage || 'Could not create your account. Please try again.')
     } finally {

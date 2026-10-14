@@ -25,14 +25,14 @@ async def test_signup_creates_pending_user(client: Any, db: Any, new_password: s
 async def test_pending_login_blocked_without_token(client: Any, make_user: Any) -> None:
     u = await make_user(status="pending")
     r = await client.post("/api/auth/login", json={"email": u.email, "password": u.password})
-    assert r.status_code == 403 and r.json()["detail"] == PENDING
+    assert r.status_code == 403 and r.json()["detail"]["message"] == PENDING
     assert "token" not in r.text
 
 
 async def test_rejected_login_blocked(client: Any, make_user: Any) -> None:
     u = await make_user(status="rejected")
     r = await client.post("/api/auth/login", json={"email": u.email, "password": u.password})
-    assert r.status_code == 403 and r.json()["detail"] == REJECTED
+    assert r.status_code == 403 and r.json()["detail"]["message"] == REJECTED
 
 
 async def test_wrong_password_never_reveals_status(client: Any, make_user: Any) -> None:
@@ -55,7 +55,7 @@ async def test_old_token_blocked_on_protected_routes(
     u = await make_user(status=status)
     for path in ("/api/auth/me", "/api/documents", "/api/documents/export-history"):
         r = await client.get(path, headers=u.headers)
-        assert r.status_code == 403 and r.json()["detail"] == msg, path
+        assert r.status_code == 403 and r.json()["detail"]["message"] == msg, path
 
 
 async def test_status_change_takes_effect_on_existing_token(

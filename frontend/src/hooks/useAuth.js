@@ -13,7 +13,7 @@ export function useAuth() {
 
   async function login(email, password) {
     const data = await authApi.login(email, password)
-    setSession(data.token, data.user, Boolean(data.justApproved))
+    setSession(data.token, data.user, Boolean(data.justApproved), data.approvedAt || null)
     return data.user
   }
 

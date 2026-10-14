@@ -7,6 +7,7 @@ import PaginationControls from '../components/PaginationControls'
 import Banner from '../components/Banner'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
+import RejectReasonModal from '../components/RejectReasonModal'
 import { formatISTDate } from '../utils/formatDate'
 
 const PAGE_SIZE = 30
@@ -76,6 +77,7 @@ export default function AdminUsersPage() {
   const [editingUser, setEditingUser] = useState(null)
   const [deletingUser, setDeletingUser] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [rejectingUser, setRejectingUser] = useState(null)
   const [tab, setTab] = useState('approved')
   const [pendingCount, setPendingCount] = useState(0)
   // Until the admin picks a tab themselves, land on Pending as soon as the first
@@ -129,16 +131,19 @@ export default function AdminUsersPage() {
     }
   }
 
-  async function setStatus(user, action) {
+  async function setStatus(user, action, reason = null) {
+    if (busyId) return // double-click safe
     setBusyId(user.id)
     setError('')
     setSuccess('')
     try {
-      await api.post(`/admin/users/${user.id}/${action}`)
+      await api.post(`/admin/users/${user.id}/${action}`, action === 'reject' ? { reason } : undefined)
       setSuccess(`${user.username} ${action === 'approve' ? 'approved' : 'rejected'}.`)
+      setRejectingUser(null)
       load(page)
     } catch (err) {
       setError(err.userMessage || `Could not ${action} user.`)
+      setRejectingUser(null)
     } finally {
       setBusyId(null)
     }
@@ -215,6 +220,7 @@ export default function AdminUsersPage() {
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Joined</th>
+                <th className="px-4 py-3">Decision</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -231,6 +237,16 @@ export default function AdminUsersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-500">{formatISTDate(u.createdAt)}</td>
+                  <td className="max-w-[16rem] px-4 py-3 text-slate-400">
+                    {u.decidedAt ? (
+                      <>
+                        <span className="capitalize">{u.decision}</span> {formatISTDate(u.decidedAt)}
+                        {u.decisionReason && (
+                          <div title={u.decisionReason} className="truncate text-[12.6px] text-slate-500">{u.decisionReason}</div>
+                        )}
+                      </>
+                    ) : '-'}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
                       {u.status === 'pending' && (
@@ -238,7 +254,7 @@ export default function AdminUsersPage() {
                           <button disabled={busyId === u.id} onClick={() => setStatus(u, 'approve')} className="rounded-full border border-emerald-300/30 bg-emerald-500/15 px-3 py-1.5 text-[11.6px] font-bold text-emerald-200 hover:border-emerald-300/50 disabled:opacity-50">
                             Approve
                           </button>
-                          <button disabled={busyId === u.id} onClick={() => setStatus(u, 'reject')} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
+                          <button disabled={busyId === u.id} onClick={() => setRejectingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
                             Reject
                           </button>
                         </>
@@ -249,7 +265,7 @@ export default function AdminUsersPage() {
                         </button>
                       )}
                       {u.status === 'approved' && u.role !== 'admin' && (
-                        <button disabled={busyId === u.id} onClick={() => setStatus(u, 'reject')} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-amber-300 hover:border-amber-300/30 hover:bg-amber-500/10 disabled:opacity-50">
+                        <button disabled={busyId === u.id} onClick={() => setRejectingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-amber-300 hover:border-amber-300/30 hover:bg-amber-500/10 disabled:opacity-50">
                           Revoke
                         </button>
                       )}
@@ -286,6 +302,15 @@ export default function AdminUsersPage() {
               setEditingUser(null)
               setSuccess(message)
             }}
+          />
+        )}
+        {rejectingUser && (
+          <RejectReasonModal
+            user={rejectingUser}
+            revoke={rejectingUser.status === 'approved'}
+            busy={busyId === rejectingUser.id}
+            onConfirm={(reason) => setStatus(rejectingUser, 'reject', reason)}
+            onClose={() => setRejectingUser(null)}
           />
         )}
         {deletingUser && (

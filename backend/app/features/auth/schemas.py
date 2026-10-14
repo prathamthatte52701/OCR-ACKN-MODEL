@@ -67,6 +67,9 @@ class TokenResponse(CamelModel):
     user: UserOut
     # True exactly once: on the first password login after an admin approved the account.
     just_approved: bool = False
+    # When the admin approved the account (ISO UTC) - only set for an account that went
+    # through the approval step, otherwise None.
+    approved_at: str | None = None
 
 
 class MessageResponse(CamelModel):

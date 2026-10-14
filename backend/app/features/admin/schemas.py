@@ -1,6 +1,7 @@
+import unicodedata
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, StrictStr, field_validator
 
 from app.core.base_model import CamelModel
 
@@ -15,6 +16,32 @@ class AdminUpdateUserRequest(CamelModel):
     username: str | None = Field(default=None, max_length=64)
     email: str | None = Field(default=None, max_length=254)
     role: Literal["user", "admin"] | None = None
+
+
+MAX_REASON = 300
+
+
+def clean_reason(raw: str) -> str | None:
+    """Plain text only: line breaks/tabs become spaces, every other control character
+    (incl. null bytes) is dropped, whitespace is trimmed. Empty -> None; > 300 -> error."""
+    spaced = "".join(" " if ch in "\r\n\t" else ch for ch in raw)
+    kept = "".join(ch for ch in spaced if unicodedata.category(ch) != "Cc")
+    text = " ".join(kept.split())
+    if len(text) > MAX_REASON:
+        raise ValueError(f"The reason can be at most {MAX_REASON} characters.")
+    return text or None
+
+
+class RejectRequest(CamelModel):
+    """Optional body of reject/revoke. StrictStr: a list/number/object is a 422, never coerced."""
+
+    # the raw cap only stops a huge payload being scanned; the real limit is applied after cleaning
+    reason: StrictStr | None = Field(default=None, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def _clean(cls, value: str | None) -> str | None:
+        return clean_reason(value) if value is not None else None
 
 
 class AdminChangeEmailRequest(CamelModel):
