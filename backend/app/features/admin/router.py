@@ -1123,38 +1123,133 @@ async def list_logs(
 # ---------------------------------------------------------------------------
 
 
+FEED_SIZE = 10
+FEED_FETCH = 60  # raw events read to build FEED_SIZE grouped items
+FEED_GROUP_WINDOW = timedelta(minutes=10)
+
+
+def _feed_items(events: list[dict], names: dict) -> list[dict]:
+    """Newest-first audit events -> at most FEED_SIZE items. Consecutive identical actions by the
+    same user within FEED_GROUP_WINDOW collapse into one item with a count ("saved 3 documents").
+    Only a plain-text target email and the user's name leave the server - never the raw context."""
+    items: list[dict] = []
+    for ev in events:
+        uid = ev.get("userId")
+        when = ev.get("createdAt")
+        last = items[-1] if items else None
+        if (
+            last is not None
+            and last["_uid"] == uid
+            and last["action"] == ev.get("action")
+            and isinstance(when, datetime)
+            and isinstance(last["_oldest"], datetime)
+            and last["_oldest"] - when <= FEED_GROUP_WINDOW
+        ):
+            last["count"] += 1
+            last["_oldest"] = when
+            continue
+        if len(items) >= FEED_SIZE:
+            break
+        raw_ctx = ev.get("context")
+        ctx: dict = raw_ctx if isinstance(raw_ctx, dict) else {}
+        target = ctx.get("targetEmail")
+        owner = names.get(uid)
+        items.append(
+            {
+                "id": str(ev["_id"]),
+                "action": str(ev.get("action", "")),
+                "createdAt": when,
+                "user": {"id": str(owner["_id"]), "username": owner["username"]} if owner else None,
+                "targetEmail": target if isinstance(target, str) else None,
+                "count": 1,
+                "_uid": uid,
+                "_oldest": when,
+            }
+        )
+    for it in items:
+        it.pop("_uid", None)
+        it.pop("_oldest", None)
+    return items
+
+
 @router.get("/telemetry")
 async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
+    """Dashboard numbers. Count queries only (never loads every document), usernames for the
+    feed are resolved in ONE query."""
     db = get_database()
     now = datetime.now(UTC)
     day_ago = now - timedelta(hours=24)
     week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+    live = {"isDeleted": {"$ne": True}}
 
     total_users = await db.users.count_documents({})
-    docs = await db.documents.find(
-        {"isDeleted": {"$ne": True}}, {"uploadStatus": 1, "documentType": 1}
-    ).to_list(length=None)
+    by_status = {
+        s: await db.documents.count_documents({**live, "uploadStatus": s})
+        for s in ("uploaded", "processed", "failed")
+    }
+    by_type = {
+        t: await db.documents.count_documents({**live, "documentType": t})
+        for t in ("Tax Invoice", "Delivery Challan")
+    }
+    total_documents = await db.documents.count_documents(live)
     total_exports = await db.exportedrows.count_documents({})
     activity_24h = await db.auditlogs.count_documents({"createdAt": {"$gte": day_ago}})
     activity_7d = await db.auditlogs.count_documents({"createdAt": {"$gte": week_ago}})
 
-    by_status = {"uploaded": 0, "processed": 0, "failed": 0}
-    by_type = {"Tax Invoice": 0, "Delivery Challan": 0}
-    for d in docs:
-        if d["uploadStatus"] in by_status:
-            by_status[d["uploadStatus"]] += 1
-        if d["documentType"] in by_type:
-            by_type[d["documentType"]] += 1
-
     finished = by_status["processed"] + by_status["failed"]
     ocr_failure_rate = round((by_status["failed"] / finished) * 1000) / 10 if finished > 0 else 0
 
+    async def window(collection: str, field: str, extra: dict | None = None) -> dict:
+        base = extra or {}
+        coll = db[collection]
+        return {
+            "current": await coll.count_documents({**base, field: {"$gte": week_ago}}),
+            "previous": await coll.count_documents(
+                {**base, field: {"$gte": two_weeks_ago, "$lt": week_ago}}
+            ),
+        }
+
+    pending_count = await db.users.count_documents(_status_query("pending"))
+    pending_oldest = [
+        {
+            "id": str(u["_id"]),
+            "username": u["username"],
+            "email": u["email"],
+            "createdAt": u.get("createdAt"),
+        }
+        async for u in db.users.find(
+            _status_query("pending"), {"username": 1, "email": 1, "createdAt": 1}
+        )
+        .sort("createdAt", 1)
+        .limit(5)
+    ]
+
+    # "admin_access" (an admin opened another user's data) is audit noise, not dashboard news.
+    events = (
+        await db.auditlogs.find({"action": {"$ne": "admin_access"}})
+        .sort("createdAt", -1)
+        .limit(FEED_FETCH)
+        .to_list(FEED_FETCH)
+    )
+    owner_ids = list({e["userId"] for e in events if e.get("userId")})
+    names = {o["_id"]: o async for o in db.users.find({"_id": {"$in": owner_ids}}, {"username": 1})}
+
     return {
         "totalUsers": total_users,
-        "totalDocuments": len(docs),
+        "totalDocuments": total_documents,
         "totalExports": total_exports,
         "documentsByStatus": by_status,
         "documentsByType": by_type,
         "ocrFailureRate": ocr_failure_rate,
         "recentActivity": {"last24h": activity_24h, "last7d": activity_7d},
+        "pendingUsers": {"count": pending_count, "oldest": pending_oldest},
+        "orphanedFiles": await db.orphanedfiles.count_documents({}),
+        "failedDocuments": by_status["failed"],
+        "trends": {
+            "users": await window("users", "createdAt"),
+            "documents": await window("documents", "createdAt", live),
+            "exports": await window("exportedrows", "exportedAt"),
+        },
+        "activityFeed": _feed_items(events, names),
     }

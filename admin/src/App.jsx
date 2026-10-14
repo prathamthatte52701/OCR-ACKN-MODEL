@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { AdminAuthProvider } from './context/AdminAuthContext'
 import RequireAdminAuth from './components/RequireAdminAuth'
 import GuestOnly from './components/GuestOnly'
@@ -14,6 +14,7 @@ import AdminDocumentsPage from './pages/AdminDocumentsPage'
 import AdminWorkbooksPage from './pages/AdminWorkbooksPage'
 import AdminLogsPage from './pages/AdminLogsPage'
 import AdminOrphanedFilesPage from './pages/AdminOrphanedFilesPage'
+import AdminMaintenancePage from './pages/AdminMaintenancePage'
 
 function FadeIn({ children }) {
   return (
@@ -46,6 +47,7 @@ function AppRoutes() {
             <Route path="/workbooks" element={<FadeIn><AdminWorkbooksPage /></FadeIn>} />
             <Route path="/logs" element={<FadeIn><AdminLogsPage /></FadeIn>} />
             <Route path="/orphaned-files" element={<FadeIn><AdminOrphanedFilesPage /></FadeIn>} />
+            <Route path="/maintenance" element={<FadeIn><AdminMaintenancePage /></FadeIn>} />
             <Route path="/profile" element={<FadeIn><AdminProfilePage /></FadeIn>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
@@ -62,10 +64,12 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <ServerDownBanner />
-      <AdminAuthProvider>
-        <AppRoutes />
-      </AdminAuthProvider>
+      <MotionConfig reducedMotion="user">
+        <ServerDownBanner />
+        <AdminAuthProvider>
+          <AppRoutes />
+        </AdminAuthProvider>
+      </MotionConfig>
     </BrowserRouter>
   )
 }

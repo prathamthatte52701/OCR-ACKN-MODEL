@@ -20,3 +20,123 @@
     box-sizing: border-box;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Admin "HUD" theme. Everything is scoped under .theme-admin (the admin layout wrapper) so
+   the tokens below are the single place to tune colours. Green is the main accent, cyan the
+   secondary, amber = warning, violet only as a chart mix colour, red ONLY for danger.
+   --------------------------------------------------------------------------- */
+.theme-admin {
+  --hud-bg: #04100c;
+  --hud-bg-2: #0a1814;
+  --hud-card: rgba(12, 32, 26, 0.66);
+  --hud-border: rgba(43, 255, 136, 0.2);
+  --hud-text: #e6f4ee;
+  --hud-muted: #93b5a8; /* >= 6:1 on --hud-bg */
+  --hud-green: #2bff88;
+  --hud-cyan: #22d3ee;
+  --hud-amber: #fbbf24;
+  --hud-violet: #a78bfa;
+  --hud-red: #fb7185;
+  --hud-glow: rgba(43, 255, 136, 0.45);
+
+  color: var(--hud-text);
+  background-color: var(--hud-bg);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(43, 255, 136, 0.075) 1px, transparent 0),
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(34, 211, 238, 0.07), transparent 70%);
+  background-size: 28px 28px, 100% 100%;
+  background-attachment: fixed;
+}
+
+/* Glass card with a thin green-tinted border. */
+.theme-admin .hud-card {
+  position: relative;
+  border: 1px solid var(--hud-border);
+  border-radius: 14px;
+  background: var(--hud-card);
+  backdrop-filter: blur(6px);
+}
+/* Key cards only: small corner brackets + a very soft outer glow. */
+.theme-admin .hud-key {
+  box-shadow: 0 0 0 1px rgba(43, 255, 136, 0.06), 0 0 28px rgba(43, 255, 136, 0.07);
+}
+.theme-admin .hud-key::before,
+.theme-admin .hud-key::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  border: 2px solid var(--hud-green);
+  opacity: 0.85;
+}
+.theme-admin .hud-key::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
+.theme-admin .hud-key::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
+
+/* Danger variant (Maintenance). */
+.theme-admin .hud-danger {
+  border-color: rgba(251, 113, 133, 0.4);
+  background: rgba(60, 12, 22, 0.45);
+}
+
+.theme-admin .hud-glow-text { text-shadow: 0 0 14px var(--hud-glow); }
+.theme-admin .hud-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+/* Sidebar */
+.theme-admin .hud-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--hud-muted);
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.theme-admin .hud-nav-link:hover { background: rgba(43, 255, 136, 0.06); color: var(--hud-text); }
+.theme-admin .hud-nav-link[aria-current='page'] {
+  color: var(--hud-green);
+  background: rgba(43, 255, 136, 0.1);
+  border-color: rgba(43, 255, 136, 0.35);
+  box-shadow: 0 0 18px rgba(43, 255, 136, 0.16);
+}
+.theme-admin .hud-nav-danger { color: #fda4af; }
+.theme-admin .hud-nav-danger:hover { background: rgba(251, 113, 133, 0.08); color: #fecdd3; }
+.theme-admin .hud-nav-danger[aria-current='page'] {
+  color: #fecdd3;
+  background: rgba(251, 113, 133, 0.12);
+  border-color: rgba(251, 113, 133, 0.45);
+  box-shadow: 0 0 18px rgba(251, 113, 133, 0.16);
+}
+.theme-admin :focus-visible {
+  outline: 2px solid var(--hud-green);
+  outline-offset: 2px;
+}
+
+/* Readability floor for the pages that are not restyled yet: nothing under 13px. */
+.theme-admin .text-\[10\.5px\],
+.theme-admin .text-\[11px\],
+.theme-admin .text-\[11\.6px\],
+.theme-admin .text-\[12\.6px\] {
+  font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-admin *,
+  .theme-admin *::before,
+  .theme-admin *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,297 +1,231 @@
-import { useEffect, useState } from 'react'
-import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts'
-import { AnimatePresence } from 'framer-motion'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../utils/api'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import { COUNTS_CHANGED_EVENT } from '../components/AdminLayout'
 import Banner from '../components/Banner'
-import ConfirmPurgeModal from '../components/ConfirmPurgeModal'
+import { Donut, Gauge, Spinner } from '../components/hud'
+import { HUD } from '../components/hudColors'
+import { describeActivity, relativeTime } from '../utils/activity'
 
-const STATUS_COLORS = { processed: '#34d399', failed: '#fb7185', uploaded: '#fbbf24' }
-const TYPE_COLORS = ['#34d399', '#22d3ee']
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const STATUS_META = [
+  { name: 'processed', label: 'Processed', color: HUD.green },
+  { name: 'failed', label: 'Failed', color: HUD.red },
+  { name: 'uploaded', label: 'Uploaded', color: HUD.amber },
+]
+const TYPE_META = [
+  { name: 'Tax Invoice', color: HUD.cyan },
+  { name: 'Delivery Challan', color: HUD.violet },
+]
 
-function WarningIcon({ className = 'h-4 w-4' }) {
+function Trend({ data }) {
+  if (!data) return null
+  const diff = data.current - data.previous
+  const tone = diff > 0 ? 'text-[var(--hud-green)]' : 'text-[var(--hud-muted)]'
+  const text = diff === 0 ? 'No change' : `${diff > 0 ? '+' : ''}${diff}`
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
+    <p className={`mt-1 text-[13px] ${tone}`}>
+      <span className="font-bold">{text}</span> vs previous 7 days <span className="text-[var(--hud-muted)]">({data.current} this week)</span>
+    </p>
   )
 }
 
-function purgeGlobalRange(body) {
-  return api.delete('/admin/purge-range', { data: body }).then((res) => res.data)
-}
-
-function purgeGlobalMonths(body) {
-  return api.delete('/admin/purge-months', { data: body }).then((res) => res.data)
-}
-
-// Two selectable modes, both ALWAYS applied across every user's data: (a)
-// age-based oldest-first (1/2/3/6/9 months), (b) exact year + specific
-// month(s). Distinct concepts offered side by side, not merged - reuses the
-// same confirmation gate/rate limit/surgical row-removal mechanism as the
-// per-user "Nuke This User" action on the user detail page.
-function GlobalNukePanel() {
-  const [mode, setMode] = useState('age')
-  const [months, setMonths] = useState(6)
-  const [year, setYear] = useState(new Date().getFullYear())
-  const [selectedMonths, setSelectedMonths] = useState([])
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [banner, setBanner] = useState({ error: '', success: '' })
-
-  function toggleMonth(monthNum) {
-    setSelectedMonths((prev) =>
-      prev.includes(monthNum) ? prev.filter((m) => m !== monthNum) : [...prev, monthNum].sort((a, b) => a - b)
-    )
-  }
-
-  function handleDeleted(result) {
-    setConfirmOpen(false)
-    setBanner({ error: '', success: result?.message || 'Data deleted across all users.' })
-  }
-
-  const canOpenConfirm = mode === 'age' || selectedMonths.length > 0
-  const monthLabel = selectedMonths.map((m) => MONTH_NAMES[m - 1]).join(', ')
-
+function Kpi({ label, value, trend, color = HUD.green }) {
   return (
-    <section className="mt-6 rounded-[24px] border border-rose-500/25 bg-rose-950/10 p-6">
-      <h2 className="mb-1 text-lg font-black text-rose-300">Global Nuke</h2>
-      <p className="mb-4 text-[13.6px] text-rose-200/70">
-        Permanently deletes matching documents (and their exported Excel rows) across EVERY
-        user simultaneously. Not scoped to any one account.
-      </p>
+    <div className="hud-card hud-key p-5">
+      <div className="hud-label">{label}</div>
+      <div className="mt-2 text-4xl font-black" style={{ color, textShadow: `0 0 14px ${color}66` }}>{value}</div>
+      <Trend data={trend} />
+    </div>
+  )
+}
 
-      <Banner error={banner.error} success={banner.success} />
+function AttentionCard({ to, label, value, tone = 'text-[var(--hud-text)]', hint }) {
+  return (
+    <Link to={to} className="hud-card block p-4 no-underline transition-colors hover:border-[var(--hud-green)]/50">
+      <div className="hud-label">{label}</div>
+      <div className={`mt-1 text-3xl font-black ${tone}`}>{value}</div>
+      <div className="mt-1 text-[13px] text-[var(--hud-muted)]">{hint}</div>
+    </Link>
+  )
+}
 
-      <div className="mb-3 flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[12.6px] text-rose-200/80">
-          <input type="radio" checked={mode === 'age'} onChange={() => setMode('age')} />
-          Age-based (oldest first)
-        </label>
-        <label className="flex items-center gap-1.5 text-[12.6px] text-rose-200/80">
-          <input type="radio" checked={mode === 'months'} onChange={() => setMode('months')} />
-          Specific year + month(s)
-        </label>
+function PendingCard({ pending, onApprove, busyId }) {
+  const list = pending?.oldest || []
+  return (
+    <section className="hud-card hud-key p-5" aria-labelledby="pending-h">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 id="pending-h" className="text-[16px] font-bold text-white">
+          Pending approvals
+          {pending?.count > 0 && <span className="ml-3 rounded-full bg-amber-400 px-2.5 py-0.5 text-[13px] font-black text-slate-950">{pending.count}</span>}
+        </h2>
+        {pending?.count > 0 && (
+          <Link to="/users" className="text-[14px] font-semibold text-[var(--hud-cyan)] no-underline hover:underline">Review all</Link>
+        )}
       </div>
-
-      {mode === 'age' ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-[12.6px] text-rose-200/80">Delete data older than</label>
-          <select
-            value={months}
-            onChange={(e) => setMonths(Number(e.target.value))}
-            className="rounded-lg border border-rose-800/50 bg-slate-950 px-2 py-1.5 text-[12.6px] text-white"
-          >
-            <option value={1}>1 month</option>
-            <option value={2}>2 months</option>
-            <option value={3}>3 months</option>
-            <option value={6}>6 months</option>
-            <option value={9}>9 months</option>
-          </select>
-        </div>
+      {list.length === 0 ? (
+        <p className="py-6 text-center text-[14px] text-[var(--hud-muted)]">No pending requests</p>
       ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-[12.6px] text-rose-200/80">Year</label>
-            <input
-              type="number"
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              className="w-24 rounded-lg border border-rose-800/50 bg-slate-950 px-2 py-1.5 text-[12.6px] text-white"
-            />
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {MONTH_NAMES.map((name, idx) => {
-              const monthNum = idx + 1
-              const active = selectedMonths.includes(monthNum)
-              return (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => toggleMonth(monthNum)}
-                  className={`rounded-lg border px-2.5 py-1.5 text-[11.6px] font-bold transition-colors ${active ? 'border-rose-500 bg-rose-700 text-white' : 'border-rose-800/50 bg-slate-950 text-rose-200/70 hover:bg-rose-900/30'}`}
-                >
-                  {name.slice(0, 3)}
-                </button>
-              )
-            })}
-          </div>
-        </>
+        <ul className="divide-y divide-white/5">
+          {list.map((u) => (
+            <li key={u.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-bold text-white">{u.username}</p>
+                <p className="truncate text-[13px] text-[var(--hud-muted)]">{u.email} · requested {relativeTime(u.createdAt) || 'recently'}</p>
+              </div>
+              <Link to="/users" className="rounded-full border border-white/10 px-3 py-1.5 text-[13px] font-bold text-[var(--hud-text)] no-underline hover:border-[var(--hud-cyan)]/50">Review</Link>
+              <button
+                type="button"
+                disabled={busyId === u.id}
+                onClick={() => onApprove(u)}
+                className="rounded-full border border-[var(--hud-green)]/50 bg-[var(--hud-green)]/15 px-4 py-1.5 text-[13px] font-black text-[var(--hud-green)] shadow-[0_0_14px_rgba(43,255,136,0.18)] hover:bg-[var(--hud-green)]/25 disabled:opacity-50"
+              >
+                {busyId === u.id ? 'Approving...' : 'Approve'}
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-
-      <button
-        type="button"
-        onClick={() => setConfirmOpen(true)}
-        disabled={!canOpenConfirm}
-        className="mt-4 flex items-center gap-2 rounded-xl border-2 border-rose-500 bg-gradient-to-r from-rose-700 to-red-700 px-4 py-2 text-[12.6px] font-black text-white shadow-[0_0_0_3px_rgba(244,63,94,0.15)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <WarningIcon />
-        Global Nuke
-      </button>
-
-      <AnimatePresence>
-        {confirmOpen && mode === 'age' && (
-          <ConfirmPurgeModal
-            title="Confirm global age-based nuke"
-            message={`This will permanently delete documents and exported Excel rows older than ${months} month(s), across EVERY user's account.`}
-            phrase="NUKE ALL RANGE"
-            purgeFn={(body) => purgeGlobalRange({ ...body, olderThanMonths: months })}
-            onClose={() => setConfirmOpen(false)}
-            onDeleted={handleDeleted}
-          />
-        )}
-        {confirmOpen && mode === 'months' && (
-          <ConfirmPurgeModal
-            title="Confirm global year+month nuke"
-            message={`This will permanently delete documents and exported Excel rows from ${monthLabel} ${year} only, across EVERY user's account. All other months and years are left completely untouched.`}
-            phrase="NUKE ALL MONTHS"
-            purgeFn={(body) => purgeGlobalMonths({ ...body, year: Number(year), months: selectedMonths })}
-            onClose={() => setConfirmOpen(false)}
-            onDeleted={handleDeleted}
-          />
-        )}
-      </AnimatePresence>
     </section>
   )
 }
 
-function StatCard({ label, value, accent = 'text-white' }) {
-  return (
-    <div className="rounded-[22px] border border-emerald-300/12 bg-slate-900/60 p-5">
-      <div className="text-[11.6px] font-black uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-2 text-3xl font-black ${accent}`}>{value}</div>
-    </div>
-  )
-}
-
-function BreakdownRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between border-b border-white/5 py-2.5 last:border-0">
-      <span className="text-[13.6px] text-slate-400">{label}</span>
-      <span className="text-[13.6px] font-black text-white">{value}</span>
-    </div>
-  )
-}
-
-function ChartPanel({ title, children }) {
-  return (
-    <div className="rounded-[22px] border border-emerald-300/12 bg-slate-900/60 p-5">
-      <h2 className="mb-3 text-[13.6px] font-black uppercase tracking-wide text-slate-500">{title}</h2>
-      <div className="h-56">{children}</div>
-    </div>
-  )
-}
-
-const CHART_TOOLTIP_STYLE = {
-  contentStyle: { background: '#0f172a', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10, fontSize: 12.6 },
-  labelStyle: { color: '#e2e8f0' },
-}
-
 export default function AdminDashboardPage() {
   const { user } = useAdminAuth()
-  const [telemetry, setTelemetry] = useState(null)
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const approving = useRef(new Set()) // synchronous guard: a double click is ignored, not re-sent
 
-  useEffect(() => {
-    let cancelled = false
-    api.get('/admin/telemetry')
-      .then((res) => { if (!cancelled) setTelemetry(res.data) })
-      .catch((err) => { if (!cancelled) setError(err.userMessage || 'Could not load telemetry.') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+  const load = useCallback(() => {
+    return api.get('/admin/telemetry')
+      .then((res) => { setData(res.data); setError('') })
+      .catch((err) => setError(err.userMessage || 'Could not load the dashboard.'))
+      .finally(() => setLoading(false))
   }, [])
 
-  const statusData = telemetry
-    ? Object.entries(telemetry.documentsByStatus).map(([name, value]) => ({ name, value }))
-    : []
-  const typeData = telemetry
-    ? Object.entries(telemetry.documentsByType).map(([name, value]) => ({ name, value }))
-    : []
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function approve(u) {
+    if (approving.current.has(u.id)) return
+    approving.current.add(u.id)
+    setBusyId(u.id)
+    setError('')
+    setSuccess('')
+    try {
+      await api.post(`/admin/users/${u.id}/approve`)
+      setSuccess(`${u.username} approved.`)
+    } catch (err) {
+      setError(err.userMessage || 'Could not approve this user.')
+    } finally {
+      approving.current.delete(u.id)
+      setBusyId(null)
+      await load()
+      window.dispatchEvent(new Event(COUNTS_CHANGED_EVENT))
+    }
+  }
+
+  const byStatus = data?.documentsByStatus || {}
+  const byType = data?.documentsByType || {}
+  const finished = (byStatus.processed || 0) + (byStatus.failed || 0)
+  const successRate = finished > 0 ? Math.round(((byStatus.processed || 0) / finished) * 1000) / 10 : null
+  const typeMax = Math.max(1, ...TYPE_META.map((t) => byType[t.name] || 0))
+  const feed = data?.activityFeed || []
 
   return (
-    <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-6 lg:px-10">
-      <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Welcome, {user?.username}</h1>
-      <p className="mb-6 text-[14.7px] text-slate-500">System-wide telemetry across every user.</p>
+    <div className="mx-auto max-w-[1200px] px-4 py-8 sm:px-6 lg:px-10">
+      <h1 className="text-3xl font-black tracking-tight text-white">Welcome, {user?.username}</h1>
+      <p className="mb-6 mt-1 text-[14px] text-[var(--hud-muted)]">Overview of all users and documents</p>
 
-      <Banner error={error} />
+      <Banner error={error} success={success} />
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-emerald-400" />
-        </div>
-      ) : telemetry && (
+      {loading ? <Spinner /> : data && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Total users" value={telemetry.totalUsers} />
-            <StatCard label="Total documents" value={telemetry.totalDocuments} />
-            <StatCard label="Total exports" value={telemetry.totalExports} />
-            <StatCard label="OCR failure rate" value={`${telemetry.ocrFailureRate}%`} accent={telemetry.ocrFailureRate > 10 ? 'text-rose-300' : 'text-emerald-300'} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <ChartPanel title="Documents by status">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={3}>
-                    {statusData.map((entry) => (
-                      <Cell key={entry.name} fill={STATUS_COLORS[entry.name] || '#64748b'} />
-                    ))}
-                  </Pie>
-                  <Tooltip {...CHART_TOOLTIP_STYLE} />
-                  <Legend wrapperStyle={{ fontSize: 12.6, color: '#94a3b8' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartPanel>
-
-            <ChartPanel title="Documents by type">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={typeData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" />
-                  <XAxis dataKey="name" stroke="#64748b" fontSize={11.6} />
-                  <YAxis stroke="#64748b" fontSize={11.6} allowDecimals={false} />
-                  <Tooltip {...CHART_TOOLTIP_STYLE} />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                    {typeData.map((entry, i) => (
-                      <Cell key={entry.name} fill={TYPE_COLORS[i % TYPE_COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartPanel>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-[22px] border border-emerald-300/12 bg-slate-900/60 p-5">
-              <h2 className="mb-3 text-[13.6px] font-black uppercase tracking-wide text-slate-500">Documents by status</h2>
-              <BreakdownRow label="Processed" value={telemetry.documentsByStatus.processed} />
-              <BreakdownRow label="Failed" value={telemetry.documentsByStatus.failed} />
-              <BreakdownRow label="Uploaded" value={telemetry.documentsByStatus.uploaded} />
+          <section aria-label="Needs attention" className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2"><PendingCard pending={data.pendingUsers} onApprove={approve} busyId={busyId} /></div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <AttentionCard to="/documents" label="Failed documents" value={data.failedDocuments} tone={data.failedDocuments > 0 ? 'text-[var(--hud-red)]' : 'text-[var(--hud-text)]'} hint="Open documents" />
+              <AttentionCard to="/orphaned-files" label="Orphaned files" value={data.orphanedFiles} tone={data.orphanedFiles > 0 ? 'text-[var(--hud-amber)]' : 'text-[var(--hud-text)]'} hint="Files without a record" />
+              <AttentionCard to="/documents" label="OCR failure rate" value={`${data.ocrFailureRate}%`} tone={data.ocrFailureRate > 10 ? 'text-[var(--hud-red)]' : 'text-[var(--hud-green)]'} hint="Of finished documents" />
             </div>
-            <div className="rounded-[22px] border border-emerald-300/12 bg-slate-900/60 p-5">
-              <h2 className="mb-3 text-[13.6px] font-black uppercase tracking-wide text-slate-500">Recent activity</h2>
-              <BreakdownRow label="Last 24 hours" value={telemetry.recentActivity.last24h} />
-              <BreakdownRow label="Last 7 days" value={telemetry.recentActivity.last7d} />
-            </div>
-          </div>
+          </section>
 
-          <GlobalNukePanel />
+          <section aria-label="Totals" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Kpi label="Total users" value={data.totalUsers} trend={data.trends?.users} color={HUD.cyan} />
+            <Kpi label="Total documents" value={data.totalDocuments} trend={data.trends?.documents} />
+            <Kpi label="Total exports" value={data.totalExports} trend={data.trends?.exports} color={HUD.violet} />
+          </section>
+
+          <section aria-label="Charts" className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="hud-card p-5">
+              <h2 className="hud-label mb-3">Documents by status</h2>
+              <div className="flex flex-col items-center gap-4 sm:flex-row lg:flex-col xl:flex-row">
+                <Donut segments={STATUS_META.map((s) => ({ ...s, value: byStatus[s.name] || 0 }))} total={data.totalDocuments} />
+                <ul className="w-full space-y-2">
+                  {STATUS_META.map((s) => (
+                    <li key={s.name} className="flex items-center justify-between gap-3 text-[14px]">
+                      <span className="flex items-center gap-2 text-[var(--hud-muted)]"><span className="h-3 w-3 rounded-sm" style={{ background: s.color }} />{s.label}</span>
+                      <span className="font-black text-white">{byStatus[s.name] || 0}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            <div className="hud-card p-5">
+              <h2 className="hud-label mb-4">Documents by type</h2>
+              <ul className="space-y-5">
+                {TYPE_META.map((t) => {
+                  const v = byType[t.name] || 0
+                  return (
+                    <li key={t.name}>
+                      <div className="mb-1 flex items-baseline justify-between text-[14px]">
+                        <span className="text-[var(--hud-text)]">{t.name}</span>
+                        <span className="font-black text-white">{v}</span>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-full bg-white/5" role="presentation">
+                        <div className="h-full rounded-full" style={{ width: `${(v / typeMax) * 100}%`, background: t.color, boxShadow: `0 0 10px ${t.color}66` }} />
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+
+            <div className="hud-card flex flex-col items-center justify-center p-5">
+              <h2 className="hud-label mb-3 self-start">OCR success rate</h2>
+              {successRate === null ? (
+                <p className="py-10 text-center text-[14px] text-[var(--hud-muted)]">No finished documents yet</p>
+              ) : (
+                <Gauge value={successRate} label="success" color={successRate >= 90 ? HUD.green : successRate >= 70 ? HUD.amber : HUD.red} caption={`${byStatus.processed || 0} of ${finished} finished documents`} />
+              )}
+            </div>
+          </section>
+
+          <section className="hud-card p-5" aria-labelledby="feed-h">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 id="feed-h" className="text-[16px] font-bold text-white">Recent activity</h2>
+              <Link to="/logs" className="text-[14px] font-semibold text-[var(--hud-cyan)] no-underline hover:underline">View all</Link>
+            </div>
+            {feed.length === 0 ? (
+              <p className="py-6 text-center text-[14px] text-[var(--hud-muted)]">Nothing has happened yet</p>
+            ) : (
+              <ul className="divide-y divide-white/5">
+                {feed.map((item) => (
+                  <li key={item.id} className="flex items-baseline justify-between gap-4 py-2.5">
+                    <span className="min-w-0 text-[14px] text-[var(--hud-text)]">{describeActivity(item)}</span>
+                    <time className="shrink-0 text-[13px] text-[var(--hud-muted)]" dateTime={item.createdAt}>{relativeTime(item.createdAt)}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       )}
-    </main>
+    </div>
   )
 }
