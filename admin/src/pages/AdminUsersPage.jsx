@@ -9,6 +9,9 @@ import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import RejectReasonModal from '../components/RejectReasonModal'
 import { formatISTDate } from '../utils/formatDate'
+import { useAdminAuth } from '../context/AdminAuthContext'
+
+const ADMIN_LOCK_TIP = 'Admins can only be changed by themselves.'
 
 const PAGE_SIZE = 30
 const TABS = [
@@ -78,6 +81,7 @@ export default function AdminUsersPage() {
   const [deletingUser, setDeletingUser] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [rejectingUser, setRejectingUser] = useState(null)
+  const { user: me } = useAdminAuth()
   const [tab, setTab] = useState('approved')
   const [pendingCount, setPendingCount] = useState(0)
   // Until the admin picks a tab themselves, land on Pending as soon as the first
@@ -225,7 +229,10 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {users.map((u) => {
+                // another admin's row: the backend refuses these too (403) - this only greys them out
+                const locked = u.role === 'admin' && u.id !== me?.id
+                return (
                 <tr key={u.id} className="border-b border-white/5 last:border-0">
                   <td className="px-4 py-3 font-bold text-white">
                     <Link to={`/users/${u.id}`} className="hover:text-emerald-300 hover:underline">{u.username}</Link>
@@ -272,19 +279,20 @@ export default function AdminUsersPage() {
                       <Link to={`/users/${u.id}`} className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-3 py-1.5 text-[11.6px] font-bold text-emerald-200 hover:border-emerald-300/45">
                         View Activity
                       </Link>
-                      <button disabled={busyId === u.id} onClick={() => toggleRole(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30 disabled:opacity-50">
+                      <button disabled={busyId === u.id || locked} title={locked ? ADMIN_LOCK_TIP : undefined} onClick={() => toggleRole(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30 disabled:opacity-50">
                         {u.role === 'admin' ? 'Make user' : 'Make admin'}
                       </button>
-                      <button onClick={() => setEditingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30">
+                      <button disabled={locked} title={locked ? ADMIN_LOCK_TIP : undefined} onClick={() => setEditingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30 disabled:opacity-50">
                         Edit
                       </button>
-                      <button disabled={busyId === u.id} onClick={() => setDeletingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
+                      <button disabled={busyId === u.id || locked} title={locked ? ADMIN_LOCK_TIP : undefined} onClick={() => setDeletingUser(u)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
                         Delete
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

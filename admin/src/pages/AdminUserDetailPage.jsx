@@ -1,3 +1,4 @@
+import { useAdminAuth } from '../context/AdminAuthContext'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
@@ -186,6 +187,7 @@ function Section({ title, count, page, totalPages, onPageChange, children }) {
 export default function AdminUserDetailPage() {
   const { id } = useParams()
   const [user, setUser] = useState(null)
+  const { user: me } = useAdminAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -275,7 +277,13 @@ export default function AdminUserDetailPage() {
         </div>
       )}
 
-      {user && <NukeUserPanel userId={id} username={user.username} />}
+      {user && (user.role === 'admin' && user.id !== me?.id ? (
+        <p className="mb-6 rounded-[24px] border border-white/10 bg-white/[0.035] px-4 py-3 text-[13.6px] text-slate-400">
+          Admins can only be changed by themselves.
+        </p>
+      ) : (
+        <NukeUserPanel userId={id} username={user.username} />
+      ))}
 
       <Section title="Documents" count={docTotal} page={docPage} totalPages={docTotalPages} onPageChange={setDocPage}>
         <table className="w-full text-left text-[13.6px]">

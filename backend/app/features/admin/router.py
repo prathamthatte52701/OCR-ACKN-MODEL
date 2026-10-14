@@ -43,6 +43,8 @@ router = APIRouter()
 NUKE_RATE_LIMIT = "5/24hour"
 NUKE_RATE_SCOPE = "admin_nuke"
 
+ADMIN_ONLY_SELF_MSG = "Admin accounts can only be changed by that admin."
+
 EDITABLE_FIELDS = {"taxInvoiceNo", "referenceNo", "number", "date"}
 FIELDS_BY_DOCUMENT_TYPE = {
     "Tax Invoice": {"taxInvoiceNo", "referenceNo", "date"},
@@ -136,6 +138,14 @@ def _status_query(status: str) -> dict:
     return {"status": status}
 
 
+def _guard_other_admin(user: dict, current_user: CurrentUser) -> None:
+    """One admin may never change (edit, demote, reject, delete, purge) ANOTHER admin - only that
+    admin can touch their own account. Call right after loading the target and BEFORE any write
+    or file deletion; every endpoint that acts on a user by id goes through here."""
+    if user.get("role") == "admin" and user["_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail=ADMIN_ONLY_SELF_MSG)
+
+
 async def _set_user_status(
     user_id: ObjectId, new_status: str, admin: CurrentUser, reason: str | None = None
 ) -> dict:
@@ -143,6 +153,7 @@ async def _set_user_status(
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(user, admin)
 
     now = datetime.now(UTC)
     previous = user.get("status", "approved")
@@ -244,6 +255,7 @@ async def change_user_email(
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(user, current_user)
     email = await _validated_new_email(db, user, body.email)
     if email is not None:
         try:
@@ -280,6 +292,7 @@ async def update_user(
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(user, current_user)
 
     updates: dict = {}
     if body.username is not None:
@@ -346,6 +359,7 @@ async def delete_user(
     user = await db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(user, current_user)
     if user.get("role") == "admin" and await db.users.count_documents({"role": "admin"}) <= 1:
         raise HTTPException(status_code=400, detail="You cannot delete the last admin.")
 
@@ -443,6 +457,7 @@ async def admin_purge_user_range(
     target = await db.users.find_one({"_id": user_id})
     if not target:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(target, current_user)
 
     filter_query, range_end = purge_service.build_age_filter(user_id, body.older_than_months)
 
@@ -503,6 +518,7 @@ async def admin_purge_user_months(
     target = await db.users.find_one({"_id": user_id})
     if not target:
         raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(target, current_user)
 
     filter_query = purge_service.build_months_filter(body.year, body.months, user_id)
 

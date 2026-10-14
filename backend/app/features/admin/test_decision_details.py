@@ -216,7 +216,7 @@ async def test_permissions_non_admin_admin_target_and_self(client: Any, make_use
     user, target = await make_user(), await make_user(status="pending")
     assert (await _reject(client, user, target, {"reason": "x"})).status_code == 403
     admin, other_admin = await make_user(role="admin"), await make_user(role="admin")
-    assert (await _reject(client, admin, other_admin, {"reason": "x"})).status_code == 400
+    assert (await _reject(client, admin, other_admin, {"reason": "x"})).status_code == 403
     assert (await _reject(client, admin, admin, {"reason": "x"})).status_code == 400
     assert (await client.get("/api/auth/me", headers=other_admin.headers)).status_code == 200
 

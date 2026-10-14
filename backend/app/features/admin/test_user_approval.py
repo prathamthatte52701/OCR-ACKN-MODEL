@@ -56,7 +56,7 @@ async def test_admins_and_self_cannot_be_rejected(client: Any, make_user: Any) -
     r = await client.post(f"/api/admin/users/{admin.id}/reject", headers=admin.headers)
     assert r.status_code == 400
     r = await client.post(f"/api/admin/users/{other_admin.id}/reject", headers=admin.headers)
-    assert r.status_code == 400
+    assert r.status_code == 403  # another admin: admin-vs-admin rule
     assert (await client.get("/api/auth/me", headers=other_admin.headers)).status_code == 200
 
 
