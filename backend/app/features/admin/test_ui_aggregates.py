@@ -9,6 +9,7 @@ import pytest
 from bson import ObjectId
 
 import app.features.excel.service as excel_service
+from app.core.timezones import IST
 
 
 async def _tele(client: Any, admin: Any) -> dict:
@@ -33,8 +34,8 @@ async def test_series_has_30_days_ending_today_with_correct_counts(
 ) -> None:
     admin = await make_user(role="admin")  # created today
     u = await make_user()  # created today
-    now = datetime.now(UTC)
-    # Noon of the target day keeps this independent of the time the test runs.
+    now = datetime.now(IST)  # the dashboard groups by IST calendar day
+    # Noon (IST) of the target day keeps this independent of the time the test runs.
     noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
     await db.documents.insert_many(
         [_doc(u.id, createdAt=noon - timedelta(days=3)) for _ in range(2)]

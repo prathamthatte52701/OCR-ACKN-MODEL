@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from app.core.audit_log import log_action
 from app.core.database import get_database
 from app.core.security import verify_password
+from app.core.timezones import IST
 from app.features.auth.dependencies import CurrentUser
 from app.features.excel import service as excel_service
 
@@ -74,13 +75,15 @@ def build_age_filter(user_id: ObjectId | None, older_than_months: int) -> tuple[
     filter_query: dict = {"isDeleted": {"$ne": True}}
     if user_id is not None:
         filter_query["userId"] = user_id
+    # Rolling window (now minus N*30 days), so timezone does not matter.
     range_end = datetime.now(UTC) - timedelta(days=older_than_months * 30)
     filter_query["createdAt"] = {"$lt": range_end}
     return filter_query, range_end
 
 
 def build_months_filter(year: int, months: Sequence[int], user_id: ObjectId | None = None) -> dict:
-    """Precise calendar-range filter: exact year + one or more specific
+    """Precise calendar-range filter (windows are IST calendar months, what
+    the admin sees in the UI): exact year + one or more specific
     months, ANDed together via $or of per-month [start, end) windows on the
     same createdAt field build_age_filter uses. `user_id=None` means every
     user (the global admin-dashboard mode); a real ObjectId scopes to
@@ -90,11 +93,11 @@ def build_months_filter(year: int, months: Sequence[int], user_id: ObjectId | No
         raise HTTPException(status_code=400, detail="Select at least one month.")
     ranges = []
     for month in sorted(set(months)):
-        start = datetime(year, month, 1, tzinfo=UTC)
+        start = datetime(year, month, 1, tzinfo=IST)
         end = (
-            datetime(year + 1, 1, 1, tzinfo=UTC)
+            datetime(year + 1, 1, 1, tzinfo=IST)
             if month == 12
-            else datetime(year, month + 1, 1, tzinfo=UTC)
+            else datetime(year, month + 1, 1, tzinfo=IST)
         )
         ranges.append({"createdAt": {"$gte": start, "$lt": end}})
     filter_query: dict = {"isDeleted": {"$ne": True}, "$or": ranges}

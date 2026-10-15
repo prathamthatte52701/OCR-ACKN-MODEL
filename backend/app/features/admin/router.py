@@ -14,6 +14,7 @@ from app.core.database import get_database
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import limiter, user_or_ip_key
+from app.core.timezones import IST_OFFSET_STRING, ist_midnight_utc, now_ist
 from app.core.validators import (
     normalize_email,
     normalize_username,
@@ -1246,14 +1247,20 @@ async def _daily_series(
     days: list[str],
     extra: dict | None = None,
 ) -> list[int]:
-    """Per-day counts for the given UTC day strings via ONE aggregation; missing days are 0."""
-    start = datetime.fromisoformat(days[0]).replace(tzinfo=UTC)
+    """Per-day counts for the given IST day strings via ONE aggregation; missing days are 0."""
+    start = ist_midnight_utc(datetime.fromisoformat(days[0]))
     rows = db[collection].aggregate(
         [
             {"$match": {**(extra or {}), field: {"$gte": start}}},
             {
                 "$group": {
-                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": f"${field}"}},
+                    "_id": {
+                        "$dateToString": {
+                            "format": "%Y-%m-%d",
+                            "date": f"${field}",
+                            "timezone": IST_OFFSET_STRING,
+                        }
+                    },
                     "n": {"$sum": 1},
                 }
             },
@@ -1268,7 +1275,7 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
     """Dashboard numbers. Count queries only (never loads every document), usernames for the
     feed are resolved in ONE query."""
     db = get_database()
-    now = datetime.now(UTC)
+    now = datetime.now(UTC)  # trend/activity windows below are rolling, so timezone is irrelevant
     day_ago = now - timedelta(hours=24)
     week_ago = now - timedelta(days=7)
     two_weeks_ago = now - timedelta(days=14)
@@ -1305,7 +1312,7 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
         names = {o["_id"]: o async for o in db.users.find({"_id": {"$in": ids}}, {"username": 1})}
         return events, names
 
-    today = now.date()
+    today = now_ist().date()  # series buckets are IST calendar days
     days = [(today - timedelta(days=i)).isoformat() for i in range(SERIES_DAYS - 1, -1, -1)]
     # Independent reads run concurrently: each is a network round trip to the database.
     (

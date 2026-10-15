@@ -11,6 +11,8 @@ from filelock import FileLock
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.core.timezones import now_ist
+
 EXPORT_DIR = Path(__file__).resolve().parents[3] / "exports"
 HEADERS = ["Document Type", "Number", "Date", "Timestamp"]
 MONTHS = [
@@ -87,7 +89,8 @@ def file_path(filename: str) -> Path:
 
 
 def current_period(now: datetime | None = None) -> tuple[int, str]:
-    now = now or datetime.now()
+    # IST, not the server clock: the year/month a user sees rolls over at IST midnight.
+    now = now or now_ist()
     return now.year, MONTHS[now.month - 1]
 
 
