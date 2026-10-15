@@ -24,7 +24,7 @@ export default function Modal({ onClose, children, maxWidth = 'max-w-sm' }) {
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#03051a]/75 px-4"
       onClick={onClose}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -32,7 +32,7 @@ export default function Modal({ onClose, children, maxWidth = 'max-w-sm' }) {
       transition={{ duration: 0.15 }}
     >
       <motion.div
-        className={`w-full ${maxWidth} rounded-[24px] border border-emerald-300/18 bg-slate-900/95 p-6 shadow-2xl`}
+        className={`w-full ${maxWidth} max-h-[92vh] overflow-y-auto rounded-[20px] border border-[var(--line)] bg-[var(--surface-solid)] p-6 text-[var(--text)] shadow-[0_24px_80px_rgba(2,4,24,0.7),0_0_40px_rgba(124,92,255,0.18)]`}
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

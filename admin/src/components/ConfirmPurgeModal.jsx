@@ -2,6 +2,9 @@ import { useState } from 'react'
 import Modal from './Modal'
 import PasswordInput from './PasswordInput'
 
+// PasswordInput keeps its own (old) base classes; these override them to the admin tokens.
+const PW_CLASS = '!border-[var(--line)] !bg-[rgba(10,13,44,0.8)] !text-[var(--text)] focus:!border-[var(--violet-2)]'
+
 // Shared by every admin nuke-delete variant (per-user age-based, global
 // age-based, global year+month) - built on the same Modal wrapper as
 // ConfirmModal/EditUserModal so it matches the rest of the admin app,
@@ -52,24 +55,24 @@ export default function ConfirmPurgeModal({ title, message, phrase, purgeFn, ext
 
   return (
     <Modal onClose={handleClose} maxWidth="max-w-md">
-      <h2 className="mb-2 text-lg font-black text-white">{title}</h2>
-      <div className="mb-4 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3.5 py-2.5 text-[12.6px] leading-5 text-amber-200">
-        {message} This action <span className="font-black">CANNOT be undone</span> and there is
+      <h2 className="mb-2 text-lg font-extrabold text-white">{title}</h2>
+      <div className="mb-4 rounded-xl border border-amber-400/35 bg-amber-400/10 px-3.5 py-2.5 text-[13px] leading-5 text-amber-200">
+        {message} This action <span className="font-extrabold">CANNOT be undone</span> and there is
         no recovery path.
       </div>
 
       <div className="space-y-3.5">
         <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Your password</label>
-          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} disabled={deleting} autoFocus autoComplete="current-password" />
+          <label className="ui-label mb-1 block">Your password</label>
+          <PasswordInput className={PW_CLASS} value={password} onChange={(e) => setPassword(e.target.value)} disabled={deleting} autoFocus autoComplete="current-password" />
         </div>
         <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Re-enter your password to confirm</label>
-          <PasswordInput value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={deleting} autoComplete="current-password" />
-          {passwordsMismatch && <p className="mt-1 text-[12px] text-rose-400">Passwords do not match.</p>}
+          <label className="ui-label mb-1 block">Re-enter your password to confirm</label>
+          <PasswordInput className={PW_CLASS} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={deleting} autoComplete="current-password" />
+          {passwordsMismatch && <p className="mt-1 text-[13px] text-rose-300">Passwords do not match.</p>}
         </div>
         <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">
+          <label className="ui-label mb-1 block">
             Type <span className="font-mono font-bold text-rose-300">{phrase}</span> to confirm
           </label>
           <input
@@ -78,18 +81,18 @@ export default function ConfirmPurgeModal({ title, message, phrase, purgeFn, ext
             onChange={(e) => setTypedPhrase(e.target.value)}
             disabled={deleting}
             placeholder={phrase}
-            className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-rose-400/60"
+            className="input"
           />
         </div>
-        {error && <p className="text-[13.6px] text-rose-400">{error}</p>}
+        {error && <p className="text-[14px] text-rose-300">{error}</p>}
       </div>
 
-      <div className="mt-5 flex gap-3">
+      <div className="mt-5 flex flex-wrap gap-3">
         <button
           type="button"
           onClick={handleDestroy}
           disabled={!canSubmit}
-          className="rounded-xl bg-gradient-to-r from-rose-600 to-red-500 px-4 py-2.5 text-[14.7px] font-black text-white transition-all disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-danger"
         >
           {deleting ? pendingLabel : submitLabel}
         </button>
@@ -97,7 +100,7 @@ export default function ConfirmPurgeModal({ title, message, phrase, purgeFn, ext
           type="button"
           onClick={handleClose}
           disabled={deleting}
-          className="rounded-xl border border-white/10 bg-white/[0.035] px-4 py-2.5 text-[14.7px] font-bold text-slate-300 hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn btn-ghost"
         >
           Cancel
         </button>
