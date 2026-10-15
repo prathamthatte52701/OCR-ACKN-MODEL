@@ -1,5 +1,8 @@
+import asyncio
+import re
+import time
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -30,6 +33,7 @@ from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
 from app.features.excel import service as excel_service
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
+from app.features.ocr.pipeline import ocr_lock_status
 
 router = APIRouter()
 
@@ -107,26 +111,62 @@ async def ping(current_user: CurrentUser = Depends(require_admin)) -> dict:
 # ---------------------------------------------------------------------------
 
 
+async def _document_counts(db: AsyncIOMotorDatabase, user_ids: list[ObjectId]) -> dict:
+    """Non-deleted documents per owner, for a whole page of users in ONE aggregation."""
+    rows = db.documents.aggregate(
+        [
+            {"$match": {"userId": {"$in": user_ids}, "isDeleted": {"$ne": True}}},
+            {"$group": {"_id": "$userId", "n": {"$sum": 1}}},
+        ]
+    )
+    return {r["_id"]: r["n"] async for r in rows}
+
+
 @router.get("/users")
 async def list_users(
     page: int | None = Query(default=None),
     limit: int | None = Query(default=None),
     status: Literal["pending", "approved", "rejected"] | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=100),
+    role: Literal["user", "admin"] | None = Query(default=None),
     current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     db = get_database()
     lim, pg, skip = _pagination(page, limit)
-    query = _status_query(status) if status else {}
-    total_users = await db.users.count_documents(query)
+    clauses: list[dict] = []
+    if status:
+        clauses.append(_status_query(status))
+    if role:
+        clauses.append({"role": role})
+    if q:
+        rx = {"$regex": re.escape(q), "$options": "i"}
+        clauses.append({"$or": [{"username": rx}, {"email": rx}]})
+    query = {"$and": clauses} if clauses else {}
     cursor = db.users.find(query, {"passwordHash": 0}).sort("createdAt", -1).skip(skip).limit(lim)
-    users = [_serialize_user(u) async for u in cursor]
+    raw, total_users, all_users, approved, pending, rejected = await asyncio.gather(
+        cursor.to_list(length=None),
+        db.users.count_documents(query),
+        db.users.count_documents({}),
+        db.users.count_documents(_status_query("approved")),
+        db.users.count_documents(_status_query("pending")),
+        db.users.count_documents(_status_query("rejected")),
+    )
+    counts = await _document_counts(db, [u["_id"] for u in raw])
+    users = [{**_serialize_user(u), "documentCount": counts.get(u["_id"], 0)} for u in raw]
     return {
         "users": users,
         "totalUsers": total_users,
         "totalPages": max(1, -(-total_users // lim)),
         "currentPage": pg,
         # Drives the badge on the admin panel's Pending tab.
-        "pendingCount": await db.users.count_documents(_status_query("pending")),
+        "pendingCount": pending,
+        # Whole-collection tallies, unaffected by q/role/status.
+        "statusCounts": {
+            "total": all_users,
+            "approved": approved,
+            "pending": pending,
+            "rejected": rejected,
+        },
     }
 
 
@@ -227,7 +267,16 @@ async def get_user(user_id: PyObjectId, current_user: CurrentUser = Depends(requ
     user = await db.users.find_one({"_id": user_id}, {"passwordHash": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
-    return {"user": _serialize_user(user)}
+    last_event = await db.auditlogs.find_one(
+        {"userId": user_id}, {"createdAt": 1}, sort=[("createdAt", -1)]
+    )
+    return {
+        "user": {
+            **_serialize_user(user),
+            "documentCount": (await _document_counts(db, [user_id])).get(user_id, 0),
+            "lastActiveAt": last_event.get("createdAt") if last_event else None,
+        }
+    }
 
 
 async def _validated_new_email(db: AsyncIOMotorDatabase, user: dict, raw: str) -> str | None:
@@ -1123,6 +1172,19 @@ async def list_logs(
 # ---------------------------------------------------------------------------
 
 
+SERIES_DAYS = 30
+MAINTENANCE_ACTIONS = [
+    "admin_nuke_global_range_data",
+    "admin_nuke_global_months_data",
+    "admin_nuke_user_range_data",
+    "admin_nuke_user_months_data",
+    "document_file_purged",
+    "orphaned_file_dismissed",
+    "orphaned_file_retry_succeeded",
+    "user_deleted",
+]
+_PROCESS_START = datetime.now(UTC)
+
 FEED_SIZE = 10
 FEED_FETCH = 60  # raw events read to build FEED_SIZE grouped items
 FEED_GROUP_WINDOW = timedelta(minutes=10)
@@ -1172,6 +1234,35 @@ def _feed_items(events: list[dict], names: dict) -> list[dict]:
     return items
 
 
+async def _gather_untyped(*aws: Any) -> list[Any]:
+    """asyncio.gather, but typed loosely: its overloads stop at 6 awaitables."""
+    return list(await asyncio.gather(*aws))
+
+
+async def _daily_series(
+    db: AsyncIOMotorDatabase,
+    collection: str,
+    field: str,
+    days: list[str],
+    extra: dict | None = None,
+) -> list[int]:
+    """Per-day counts for the given UTC day strings via ONE aggregation; missing days are 0."""
+    start = datetime.fromisoformat(days[0]).replace(tzinfo=UTC)
+    rows = db[collection].aggregate(
+        [
+            {"$match": {**(extra or {}), field: {"$gte": start}}},
+            {
+                "$group": {
+                    "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": f"${field}"}},
+                    "n": {"$sum": 1},
+                }
+            },
+        ]
+    )
+    by_day = {r["_id"]: r["n"] async for r in rows}
+    return [by_day.get(d, 0) for d in days]
+
+
 @router.get("/telemetry")
 async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
     """Dashboard numbers. Count queries only (never loads every document), usernames for the
@@ -1183,59 +1274,117 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
     two_weeks_ago = now - timedelta(days=14)
     live = {"isDeleted": {"$ne": True}}
 
-    total_users = await db.users.count_documents({})
-    by_status = {
-        s: await db.documents.count_documents({**live, "uploadStatus": s})
-        for s in ("uploaded", "processed", "failed")
-    }
-    by_type = {
-        t: await db.documents.count_documents({**live, "documentType": t})
-        for t in ("Tax Invoice", "Delivery Challan")
-    }
-    total_documents = await db.documents.count_documents(live)
-    total_exports = await db.exportedrows.count_documents({})
-    activity_24h = await db.auditlogs.count_documents({"createdAt": {"$gte": day_ago}})
-    activity_7d = await db.auditlogs.count_documents({"createdAt": {"$gte": week_ago}})
-
-    finished = by_status["processed"] + by_status["failed"]
-    ocr_failure_rate = round((by_status["failed"] / finished) * 1000) / 10 if finished > 0 else 0
-
     async def window(collection: str, field: str, extra: dict | None = None) -> dict:
         base = extra or {}
         coll = db[collection]
-        return {
-            "current": await coll.count_documents({**base, field: {"$gte": week_ago}}),
-            "previous": await coll.count_documents(
-                {**base, field: {"$gte": two_weeks_ago, "$lt": week_ago}}
-            ),
-        }
-
-    pending_count = await db.users.count_documents(_status_query("pending"))
-    pending_oldest = [
-        {
-            "id": str(u["_id"]),
-            "username": u["username"],
-            "email": u["email"],
-            "createdAt": u.get("createdAt"),
-        }
-        async for u in db.users.find(
-            _status_query("pending"), {"username": 1, "email": 1, "createdAt": 1}
+        cur, prev = await asyncio.gather(
+            coll.count_documents({**base, field: {"$gte": week_ago}}),
+            coll.count_documents({**base, field: {"$gte": two_weeks_ago, "$lt": week_ago}}),
         )
-        .sort("createdAt", 1)
-        .limit(5)
-    ]
+        return {"current": cur, "previous": prev}
 
-    # "admin_access" (an admin opened another user's data) is audit noise, not dashboard news.
-    events = (
-        await db.auditlogs.find({"action": {"$ne": "admin_access"}})
-        .sort("createdAt", -1)
-        .limit(FEED_FETCH)
-        .to_list(FEED_FETCH)
+    async def pending_oldest_users() -> list[dict]:
+        return [
+            {
+                "id": str(u["_id"]),
+                "username": u["username"],
+                "email": u["email"],
+                "createdAt": u.get("createdAt"),
+            }
+            async for u in db.users.find(
+                _status_query("pending"), {"username": 1, "email": 1, "createdAt": 1}
+            )
+            .sort("createdAt", 1)
+            .limit(5)
+        ]
+
+    async def recent_events(query: dict, n: int) -> tuple[list[dict], dict]:
+        """Newest-first audit events + their authors' usernames (one extra query)."""
+        events = await db.auditlogs.find(query).sort("createdAt", -1).limit(n).to_list(n)
+        ids = list({e["userId"] for e in events if e.get("userId")})
+        names = {o["_id"]: o async for o in db.users.find({"_id": {"$in": ids}}, {"username": 1})}
+        return events, names
+
+    today = now.date()
+    days = [(today - timedelta(days=i)).isoformat() for i in range(SERIES_DAYS - 1, -1, -1)]
+    # Independent reads run concurrently: each is a network round trip to the database.
+    (
+        total_users,
+        n_uploaded,
+        n_processed,
+        n_failed,
+        n_tax,
+        n_challan,
+        total_documents,
+        total_exports,
+        activity_24h,
+        activity_7d,
+        pending_count,
+        pending_oldest,
+        (events, names),
+        (maintenance, maint_names),
+        orphaned,
+        users_series,
+        docs_series,
+        exports_series,
+        processed_window,
+        users_trend,
+        docs_trend,
+        exports_trend,
+    ) = await _gather_untyped(
+        db.users.count_documents({}),
+        *(
+            db.documents.count_documents({**live, "uploadStatus": s})
+            for s in ("uploaded", "processed", "failed")
+        ),
+        *(
+            db.documents.count_documents({**live, "documentType": t})
+            for t in ("Tax Invoice", "Delivery Challan")
+        ),
+        db.documents.count_documents(live),
+        db.exportedrows.count_documents({}),
+        db.auditlogs.count_documents({"createdAt": {"$gte": day_ago}}),
+        db.auditlogs.count_documents({"createdAt": {"$gte": week_ago}}),
+        db.users.count_documents(_status_query("pending")),
+        pending_oldest_users(),
+        # "admin_access" (an admin opened another user's data) is audit noise, not dashboard news.
+        recent_events({"action": {"$ne": "admin_access"}}, FEED_FETCH),
+        recent_events({"action": {"$in": MAINTENANCE_ACTIONS}}, 5),
+        db.orphanedfiles.count_documents({}),
+        _daily_series(db, "users", "createdAt", days),
+        _daily_series(db, "documents", "createdAt", days, live),
+        _daily_series(db, "exportedrows", "exportedAt", days),
+        window("documents", "processedAt", {**live, "uploadStatus": "processed"}),
+        window("users", "createdAt"),
+        window("documents", "createdAt", live),
+        window("exportedrows", "exportedAt"),
     )
-    owner_ids = list({e["userId"] for e in events if e.get("userId")})
-    names = {o["_id"]: o async for o in db.users.find({"_id": {"$in": owner_ids}}, {"username": 1})}
+    by_status = {"uploaded": n_uploaded, "processed": n_processed, "failed": n_failed}
+    by_type = {"Tax Invoice": n_tax, "Delivery Challan": n_challan}
+    finished = n_processed + n_failed
+    ocr_failure_rate = round((n_failed / finished) * 1000) / 10 if finished > 0 else 0
+
+    def maint_user(e: dict) -> dict | None:
+        o = maint_names.get(e.get("userId"))
+        return {"id": str(o["_id"]), "username": o["username"]} if o else None
 
     return {
+        "series": {
+            "days": days,
+            "users": users_series,
+            "documents": docs_series,
+            "exports": exports_series,
+        },
+        "processedDocuments": {"total": n_processed, **processed_window},
+        "recentMaintenance": [
+            {
+                "id": str(e["_id"]),
+                "action": e["action"],
+                "createdAt": e.get("createdAt"),
+                "user": maint_user(e),
+            }
+            for e in maintenance
+        ],
         "totalUsers": total_users,
         "totalDocuments": total_documents,
         "totalExports": total_exports,
@@ -1244,12 +1393,61 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
         "ocrFailureRate": ocr_failure_rate,
         "recentActivity": {"last24h": activity_24h, "last7d": activity_7d},
         "pendingUsers": {"count": pending_count, "oldest": pending_oldest},
-        "orphanedFiles": await db.orphanedfiles.count_documents({}),
-        "failedDocuments": by_status["failed"],
-        "trends": {
-            "users": await window("users", "createdAt"),
-            "documents": await window("documents", "createdAt", live),
-            "exports": await window("exportedrows", "exportedAt"),
-        },
+        "orphanedFiles": orphaned,
+        "failedDocuments": n_failed,
+        "trends": {"users": users_trend, "documents": docs_trend, "exports": exports_trend},
         "activityFeed": _feed_items(events, names),
+    }
+
+
+# ---------------------------------------------------------------------------
+# System health
+# ---------------------------------------------------------------------------
+
+
+def _workbook_storage() -> dict:
+    """Bytes/count of real *.xlsx workbooks in the exports dir (ignores .lock and .tmp<pid>.xlsx
+    scratch files). A missing or unreadable dir is simply 0/0."""
+    total = count = 0
+    try:
+        for f in excel_service.EXPORT_DIR.iterdir():
+            if f.name.endswith(".xlsx") and not re.search(r"\.tmp\d*\.xlsx$", f.name):
+                total += f.stat().st_size
+                count += 1
+    except OSError:
+        pass
+    return {"bytes": total, "count": count}
+
+
+@router.get("/system")
+async def system_status(current_user: CurrentUser = Depends(require_admin)) -> dict:
+    db = get_database()
+    now = datetime.now(UTC)
+    ok = True
+    t0 = time.perf_counter()
+    try:
+        await db.command("ping")
+    except Exception:  # noqa: BLE001
+        ok = False
+    ping_ms = round((time.perf_counter() - t0) * 1000)
+    files = {"bytes": 0, "count": 0}
+    try:
+        agg = (
+            await db["fs.files"]
+            .aggregate(
+                [{"$group": {"_id": None, "bytes": {"$sum": "$length"}, "count": {"$sum": 1}}}]
+            )
+            .to_list(1)
+        )
+        if agg:
+            files = {"bytes": int(agg[0]["bytes"]), "count": int(agg[0]["count"])}
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "db": {"ok": ok, "pingMs": ping_ms},
+        "ocrLockWedged": ocr_lock_status()["wedged"],
+        "serverStartedAt": _PROCESS_START.isoformat(),
+        "uptimeSeconds": int((now - _PROCESS_START).total_seconds()),
+        "storage": {"documentFiles": files, "workbookFiles": _workbook_storage()},
+        "checkedAt": now.isoformat(),
     }
