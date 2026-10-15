@@ -3,38 +3,39 @@ import { useAdminAuth } from '../context/AdminAuthContext'
 import { validatePassword } from '../utils/validators'
 import PasswordInput from '../components/PasswordInput'
 import BackButton from '../components/BackButton'
-
-const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
-const panelClass = 'rounded-[28px] border border-emerald-300/12 bg-slate-900/68 p-6 shadow-2xl shadow-slate-950/30 backdrop-blur-xl'
+import { Avatar, Badge, Card, PageHeader } from '../components/ui'
 
 function Message({ error, success }) {
   if (!error && !success) return null
   return (
-    <div className={`rounded-xl border px-3.5 py-2.5 text-[13.6px] ${error ? 'border-rose-400/25 bg-rose-500/10 text-rose-200' : 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'}`}>
+    <div role={error ? 'alert' : 'status'} className={`rounded-xl border px-3.5 py-2.5 text-[14px] ${error ? 'border-rose-400/40 bg-rose-400/10 text-rose-200' : 'border-emerald-400/35 bg-emerald-400/10 text-emerald-300'}`}>
       {error || success}
+    </div>
+  )
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--line-soft)] bg-white/[0.03] px-4 py-3">
+      <span className="shrink-0 text-[14px] text-[var(--muted)]">{label}</span>
+      <span className="min-w-0 truncate text-[14px] font-semibold text-white">{children}</span>
     </div>
   )
 }
 
 function ProfileDetailsPanel({ user }) {
   return (
-    <div className={panelClass}>
-      <h2 className="mb-5 text-xl font-black tracking-tight text-white">Profile</h2>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3">
-          <span className="text-[14.7px] text-slate-400">Name</span>
-          <span className="text-[14.7px] font-black text-white">{user.username}</span>
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3">
-          <span className="text-[14.7px] text-slate-400">Email</span>
-          <span className="text-[14.7px] font-black text-white">{user.email}</span>
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3">
-          <span className="text-[14.7px] text-slate-400">Role</span>
-          <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-3 py-1 text-[12.6px] font-black uppercase tracking-wide text-emerald-200">{user.role}</span>
-        </div>
+    <Card className="p-6">
+      <h2 className="mb-5 text-xl font-extrabold tracking-tight text-white">Profile</h2>
+      <div className="mb-5 flex justify-center">
+        <Avatar id={user.id || user.email} name={user.username} size={72} />
       </div>
-    </div>
+      <div className="space-y-3">
+        <DetailRow label="Name"><span title={user.username}>{user.username}</span></DetailRow>
+        <DetailRow label="Email"><span title={user.email}>{user.email}</span></DetailRow>
+        <DetailRow label="Role"><Badge tone="violet" className="uppercase">{user.role}</Badge></DetailRow>
+      </div>
+    </Card>
   )
 }
 
@@ -70,34 +71,30 @@ function ChangePasswordPanel({ changePassword }) {
   }
 
   return (
-    <div className={panelClass}>
-      <h2 className="mb-5 text-xl font-black tracking-tight text-white">Change password</h2>
+    <Card className="p-6">
+      <h2 className="mb-5 text-xl font-extrabold tracking-tight text-white">Change password</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className={labelClass}>Current password</label>
-          <PasswordInput value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" required />
+          <label htmlFor="pw-current" className="ui-label mb-1 block">Current password</label>
+          <PasswordInput id="pw-current" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" required />
         </div>
         <div>
-          <label className={labelClass}>New password</label>
-          <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={64} autoComplete="new-password" required />
-          <p className="mt-1 text-[11.6px] text-slate-600">8-64 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
+          <label htmlFor="pw-new" className="ui-label mb-1 block">New password</label>
+          <PasswordInput id="pw-new" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={64} autoComplete="new-password" required />
+          <p className="mt-1 text-[13px] text-[var(--muted)]">8-64 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
         </div>
         <div>
-          <label className={labelClass}>Confirm new password</label>
-          <PasswordInput value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
+          <label htmlFor="pw-confirm" className="ui-label mb-1 block">Confirm new password</label>
+          <PasswordInput id="pw-confirm" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
         </div>
 
         <Message error={error} success={success} />
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2.5 text-[14.7px] font-black text-white shadow-[0_16px_38px_rgba(16,185,129,0.3)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        <button type="submit" disabled={submitting} className="btn btn-primary">
           {submitting ? 'Changing...' : 'Change password'}
         </button>
       </form>
-    </div>
+    </Card>
   )
 }
 
@@ -106,13 +103,13 @@ export default function AdminProfilePage() {
   if (!user) return null
 
   return (
-    <main className="relative mx-auto max-w-[720px] px-4 py-6 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1000px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/" />
-      <h1 className="mb-6 text-3xl font-black tracking-tight text-white">Account</h1>
-      <div className="space-y-6">
+      <PageHeader title="Account" />
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <ProfileDetailsPanel user={user} />
         <ChangePasswordPanel changePassword={changePassword} />
       </div>
-    </main>
+    </div>
   )
 }

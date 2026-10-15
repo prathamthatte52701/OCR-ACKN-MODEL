@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import api from '../utils/api'
 import Banner from '../components/Banner'
 import BackButton from '../components/BackButton'
+import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../components/ui'
+import { OwnerCell, TableSkeleton } from '../components/pageparts'
 
 async function downloadWorkbook(id, filename) {
   let res
@@ -37,17 +39,21 @@ export default function AdminWorkbooksPage() {
   const [workbooks, setWorkbooks] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
-    api.get('/admin/workbooks')
-      .then((res) => { if (!cancelled) setWorkbooks(res.data.workbooks || []) })
-      .catch((err) => { if (!cancelled) setError(err.userMessage || 'Could not load workbooks.') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [])
+  function load() {
+    setLoading(true)
+    setLoadError('')
+    return api.get('/admin/workbooks')
+      .then((res) => setWorkbooks(res.data.workbooks || []))
+      .catch((err) => setLoadError(err.userMessage || 'Could not load workbooks.'))
+      .finally(() => setLoading(false))
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, [])
 
   async function handleDownload(wb) {
     setBusyId(wb.id)
@@ -64,52 +70,47 @@ export default function AdminWorkbooksPage() {
   }
 
   return (
-    <main className="mx-auto max-w-[1200px] px-4 py-8 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/" />
-      <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Workbooks</h1>
-      <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${workbooks.length} workbook${workbooks.length !== 1 ? 's' : ''} across all users`}</p>
+      <PageHeader
+        title="Workbooks"
+        subtitle={loading ? 'Loading...' : `${workbooks.length} workbook${workbooks.length !== 1 ? 's' : ''} across all users`}
+      />
 
       <Banner error={error} success={success} />
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-emerald-400" />
-        </div>
-      ) : workbooks.length === 0 ? (
-        <div className="rounded-[24px] border border-emerald-300/12 bg-slate-900/60 p-10 text-center text-[14.7px] text-slate-500">
-          No workbooks yet.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-[24px] border border-emerald-300/12 bg-slate-900/60">
-          <table className="w-full text-left text-[13.6px]">
+      <Card className="overflow-hidden">
+        {loading ? (
+          <TableSkeleton />
+        ) : loadError ? (
+          <ErrorState message={loadError} onRetry={load} />
+        ) : workbooks.length === 0 ? (
+          <EmptyState title="No workbooks yet" hint="Excel workbooks created by users will show up here." />
+        ) : (
+          <DataTable minWidth={720}>
             <thead>
-              <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-3">Owner</th>
-                <th className="px-4 py-3">Filename</th>
-                <th className="px-4 py-3">Year</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr>
+                <th>Owner</th>
+                <th>Filename</th>
+                <th>Year</th>
+                <th>Status</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {workbooks.map((wb) => (
-                <tr key={wb.id} className="border-b border-white/5 last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="font-bold text-white">{wb.owner?.username || 'unknown'}</div>
-                    <div className="text-[11.6px] text-slate-500">{wb.owner?.email}</div>
+                <tr key={wb.id}>
+                  <td><OwnerCell owner={wb.owner} /></td>
+                  <td className="max-w-[280px] truncate text-slate-200" title={wb.filename}>{wb.filename}</td>
+                  <td className="whitespace-nowrap text-[var(--muted)]">{wb.year}</td>
+                  <td>
+                    <Badge tone={wb.isActive ? 'green' : 'neutral'} dot>{wb.isActive ? 'Active' : 'Archived'}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-slate-300">{wb.filename}</td>
-                  <td className="px-4 py-3 text-slate-400">{wb.year}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full border px-2.5 py-1 text-[11.6px] font-black uppercase ${wb.isActive ? 'border-emerald-300/25 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-white/5 text-slate-400'}`}>
-                      {wb.isActive ? 'Active' : 'Archived'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="text-right">
                     <button
                       disabled={busyId === wb.id}
                       onClick={() => handleDownload(wb)}
-                      className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30 disabled:opacity-50"
+                      className="btn btn-ghost btn-sm"
                     >
                       {busyId === wb.id ? 'Downloading...' : 'Download'}
                     </button>
@@ -117,9 +118,9 @@ export default function AdminWorkbooksPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
-    </main>
+          </DataTable>
+        )}
+      </Card>
+    </div>
   )
 }

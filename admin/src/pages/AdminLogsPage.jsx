@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
-import Banner from '../components/Banner'
 import { formatIST } from '../utils/formatDate'
 import BackButton from '../components/BackButton'
+import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../components/ui'
+import { OwnerCell, TableSkeleton } from '../components/pageparts'
 
 const PAGE_SIZE = 30
 const ACTIONS = [
@@ -22,6 +23,14 @@ const ACTIONS = [
   'admin_access',
 ]
 
+function actionTone(a = '') {
+  if (/deleted|rejected|purged/.test(a)) return 'red'
+  if (/approved/.test(a)) return 'green'
+  if (a === 'login' || a === 'signup') return 'blue'
+  if (a === 'admin_access' || a === 'password_change') return 'amber'
+  return 'violet'
+}
+
 export default function AdminLogsPage() {
   const [logs, setLogs] = useState([])
   const [page, setPage] = useState(1)
@@ -30,11 +39,11 @@ export default function AdminLogsPage() {
   const [action, setAction] = useState('')
   const [userId, setUserId] = useState('')
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   async function load(pageToLoad = page) {
     setLoading(true)
-    setError('')
+    setLoadError('')
     try {
       const params = { page: pageToLoad, limit: PAGE_SIZE }
       if (action) params.action = action
@@ -44,7 +53,7 @@ export default function AdminLogsPage() {
       setTotalPages(res.data.totalPages || 1)
       setTotalLogs(res.data.totalLogs || 0)
     } catch (err) {
-      setError(err.userMessage || 'Could not load logs.')
+      setLoadError(err.userMessage || 'Could not load logs.')
     } finally {
       setLoading(false)
     }
@@ -60,67 +69,68 @@ export default function AdminLogsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/" />
-      <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Audit logs</h1>
-      <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${totalLogs} entr${totalLogs !== 1 ? 'ies' : 'y'}`}</p>
+      <PageHeader
+        title="Activity"
+        subtitle={loading ? 'Loading...' : `${totalLogs} entr${totalLogs !== 1 ? 'ies' : 'y'}`}
+      />
 
-      <form onSubmit={applyFilters} className="mb-5 flex flex-wrap items-end gap-3">
-        <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">Action</label>
-          <select value={action} onChange={(e) => setAction(e.target.value)} className="rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[13.6px] text-white outline-none focus:border-emerald-300/60">
-            <option value="">All actions</option>
-            {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">User ID</label>
-          <input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="optional" className="rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[13.6px] text-white outline-none focus:border-emerald-300/60" />
-        </div>
-        <button type="submit" className="rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2.5 text-[13.6px] font-black text-white">
-          Filter
-        </button>
-      </form>
+      <Card className="mb-5 p-4">
+        <form onSubmit={applyFilters} className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[180px] flex-1 sm:flex-none">
+            <label htmlFor="log-action" className="ui-label mb-1 block">Action</label>
+            <select id="log-action" value={action} onChange={(e) => setAction(e.target.value)} className="input [color-scheme:dark] sm:w-56">
+              <option value="">All actions</option>
+              {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div className="min-w-[180px] flex-1 sm:flex-none">
+            <label htmlFor="log-user" className="ui-label mb-1 block">User ID</label>
+            <input id="log-user" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="optional" className="input sm:w-64" />
+          </div>
+          <button type="submit" className="btn btn-primary">
+            Filter
+          </button>
+        </form>
+      </Card>
 
-      <Banner error={error} />
-
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-emerald-400" />
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-[24px] border border-emerald-300/12 bg-slate-900/60">
-          <table className="w-full text-left text-[13.6px]">
+      <Card className="overflow-hidden">
+        {loading ? (
+          <TableSkeleton />
+        ) : loadError ? (
+          <ErrorState message={loadError} onRetry={() => load(page)} />
+        ) : logs.length === 0 ? (
+          <EmptyState title="No activity found" hint="Try a different action or user filter." />
+        ) : (
+          <DataTable minWidth={820}>
             <thead>
-              <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Action</th>
-                <th className="px-4 py-3">Context</th>
+              <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Context</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((l) => (
-                <tr key={l.id} className="border-b border-white/5 last:border-0">
-                  <td className="px-4 py-3 whitespace-nowrap text-slate-400">{formatIST(l.createdAt)}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-bold text-white">{l.user?.username || 'unknown'}</div>
-                    <div className="text-[11.6px] text-slate-500">{l.user?.email}</div>
+                <tr key={l.id}>
+                  <td className="whitespace-nowrap text-[var(--muted)]">{formatIST(l.createdAt)}</td>
+                  <td><OwnerCell owner={l.user} /></td>
+                  <td>
+                    <Badge tone={actionTone(l.action)}>{l.action}</Badge>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-2.5 py-1 text-[11.6px] font-black uppercase text-emerald-200">{l.action}</span>
-                  </td>
-                  <td className="px-4 py-3 max-w-[360px] truncate text-slate-500" title={JSON.stringify(l.context)}>
+                  <td className="max-w-[360px] truncate text-[var(--muted)]" title={JSON.stringify(l.context)}>
                     {JSON.stringify(l.context)}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
+          </DataTable>
+        )}
+      </Card>
 
       <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
-    </main>
+    </div>
   )
 }

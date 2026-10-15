@@ -6,6 +6,9 @@ import Banner from '../components/Banner'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import BackButton from '../components/BackButton'
+import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../components/ui'
+import { OwnerCell, TableSkeleton } from '../components/pageparts'
+import { statusTone } from '../utils/status'
 
 const PAGE_SIZE = 30
 
@@ -43,24 +46,25 @@ function EditDocumentModal({ doc, onClose, onSaved }) {
 
   return (
     <Modal onClose={onClose}>
-      <h2 className="mb-1 text-lg font-black text-white">Edit document</h2>
-      <p className="mb-4 text-[12.6px] text-slate-500">{doc.documentType} - owned by {doc.owner?.username || 'unknown'}</p>
+      <h2 className="mb-1 text-lg font-extrabold text-white">Edit document</h2>
+      <p className="mb-4 truncate text-[13px] text-[var(--muted)]" title={`${doc.documentType} - owned by ${doc.owner?.username || 'unknown'}`}>{doc.documentType} - owned by {doc.owner?.username || 'unknown'}</p>
       <div className="space-y-4">
         {fields.map((f, idx) => (
           <div key={f.key}>
-            <label className="mb-1 block text-[12.6px] font-semibold text-slate-400">{f.label}</label>
+            <label htmlFor={`edit-${f.key}`} className="ui-label mb-1 block">{f.label}</label>
             <div className="flex gap-2">
               <input
+                id={`edit-${f.key}`}
                 autoFocus={idx === 0}
                 value={values[f.key]}
                 onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
                 onKeyDown={(e) => e.key === 'Enter' && saveField(f.key)}
-                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none focus:border-emerald-300/60"
+                className="input"
               />
               <button
                 onClick={() => saveField(f.key)}
                 disabled={savingField === f.key}
-                className="shrink-0 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-3.5 py-2.5 text-[13.6px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn btn-primary shrink-0"
               >
                 {savingField === f.key ? 'Saving...' : 'Save'}
               </button>
@@ -69,20 +73,11 @@ function EditDocumentModal({ doc, onClose, onSaved }) {
         ))}
       </div>
       <Banner error={error} />
-      <button type="button" onClick={onClose} className="mt-4 w-full rounded-xl border border-white/10 bg-white/[0.035] px-4 py-2.5 text-[14.7px] font-bold text-slate-300 hover:border-white/20">
+      <button type="button" onClick={onClose} className="btn btn-ghost mt-4 w-full">
         Close
       </button>
     </Modal>
   )
-}
-
-function statusBadge(status) {
-  const map = {
-    processed: 'border-emerald-300/25 bg-emerald-500/10 text-emerald-200',
-    failed: 'border-rose-400/25 bg-rose-500/10 text-rose-200',
-    uploaded: 'border-amber-300/25 bg-amber-500/10 text-amber-200',
-  }
-  return map[status] || 'border-white/10 bg-white/5 text-slate-400'
 }
 
 export default function AdminDocumentsPage() {
@@ -92,6 +87,7 @@ export default function AdminDocumentsPage() {
   const [totalDocuments, setTotalDocuments] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [success, setSuccess] = useState('')
   const [editingDoc, setEditingDoc] = useState(null)
   const [deletingDoc, setDeletingDoc] = useState(null)
@@ -100,14 +96,14 @@ export default function AdminDocumentsPage() {
 
   async function load(pageToLoad = page) {
     setLoading(true)
-    setError('')
+    setLoadError('')
     try {
       const res = await api.get('/admin/documents', { params: { page: pageToLoad, limit: PAGE_SIZE } })
       setDocuments(res.data.documents || [])
       setTotalPages(res.data.totalPages || 1)
       setTotalDocuments(res.data.totalDocuments || 0)
     } catch (err) {
-      setError(err.userMessage || 'Could not load documents.')
+      setLoadError(err.userMessage || 'Could not load documents.')
     } finally {
       setLoading(false)
     }
@@ -164,61 +160,60 @@ export default function AdminDocumentsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
+    <div className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/" />
-      <h1 className="mb-1 text-3xl font-black tracking-tight text-white">Documents</h1>
-      <p className="mb-6 text-[14.7px] text-slate-500">{loading ? 'Loading...' : `${totalDocuments} document${totalDocuments !== 1 ? 's' : ''} across all users`}</p>
+      <PageHeader
+        title="Documents"
+        subtitle={loading ? 'Loading...' : `${totalDocuments} document${totalDocuments !== 1 ? 's' : ''} across all users`}
+      />
 
       <Banner error={error} success={success} />
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-emerald-400" />
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-[24px] border border-emerald-300/12 bg-slate-900/60">
-          <table className="w-full text-left text-[13.6px]">
+      <Card className="overflow-hidden">
+        {loading ? (
+          <TableSkeleton />
+        ) : loadError ? (
+          <ErrorState message={loadError} onRetry={() => load(page)} />
+        ) : documents.length === 0 ? (
+          <EmptyState title="No documents yet" hint="Documents uploaded by users will show up here." />
+        ) : (
+          <DataTable minWidth={900}>
             <thead>
-              <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-                <th className="px-4 py-3">Owner</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              <tr>
+                <th>Owner</th>
+                <th>Type</th>
+                <th>Number</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {documents.map((d) => (
-                <tr key={d._id} className="border-b border-white/5 last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="font-bold text-white">{d.owner?.username || 'unknown'}</div>
-                    <div className="text-[11.6px] text-slate-500">{d.owner?.email}</div>
+                <tr key={d._id}>
+                  <td><OwnerCell owner={d.owner} /></td>
+                  <td>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-slate-200">{d.documentType}</span>
+                      {d.filePurged && <Badge tone="amber">File removed</Badge>}
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-300">
-                    {d.documentType}
-                    {d.filePurged && (
-                      <span className="ml-2 rounded-full border border-amber-300/25 bg-amber-500/10 px-2 py-0.5 text-[10.5px] font-black uppercase text-amber-200">File removed</span>
-                    )}
+                  <td className="max-w-[220px] truncate text-slate-200" title={docNumber(d)}>{docNumber(d)}</td>
+                  <td className="whitespace-nowrap text-[var(--muted)]">{d.date || '-'}</td>
+                  <td>
+                    <Badge tone={statusTone(d.uploadStatus)} dot className="capitalize">{d.uploadStatus}</Badge>
                   </td>
-                  <td className="px-4 py-3 text-slate-300">{docNumber(d)}</td>
-                  <td className="px-4 py-3 text-slate-400">{d.date || '-'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full border px-2.5 py-1 text-[11.6px] font-black uppercase ${statusBadge(d.uploadStatus)}`}>
-                      {d.uploadStatus}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => setEditingDoc(d)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-slate-300 hover:border-emerald-300/30">
+                  <td>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button onClick={() => setEditingDoc(d)} className="btn btn-ghost btn-sm">
                         Edit
                       </button>
                       {!d.filePurged && (
-                        <button disabled={busyId === d._id} onClick={() => setPurgingDoc(d)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-amber-300 hover:border-amber-300/30 hover:bg-amber-500/10 disabled:opacity-50">
+                        <button disabled={busyId === d._id} onClick={() => setPurgingDoc(d)} className="btn btn-ghost btn-sm" style={{ color: 'var(--amber)', borderColor: 'rgba(251,191,36,.45)' }}>
                           File Delete
                         </button>
                       )}
-                      <button disabled={busyId === d._id} onClick={() => setDeletingDoc(d)} className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5 text-[11.6px] font-bold text-rose-300 hover:border-rose-300/30 hover:bg-rose-500/10 disabled:opacity-50">
+                      <button disabled={busyId === d._id} onClick={() => setDeletingDoc(d)} className="btn btn-danger btn-sm">
                         Delete
                       </button>
                     </div>
@@ -226,9 +221,9 @@ export default function AdminDocumentsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
+          </DataTable>
+        )}
+      </Card>
 
       <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
 
@@ -267,6 +262,6 @@ export default function AdminDocumentsPage() {
           />
         )}
       </AnimatePresence>
-    </main>
+    </div>
   )
 }

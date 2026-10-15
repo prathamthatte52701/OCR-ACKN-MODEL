@@ -16,11 +16,13 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
   decision date and reason if rejected/revoked; the first login after approval
   shows the approval date. No email is sent. A wrong password never reveals any
   of this.
-- **New admin panel look** - left sidebar (Users and Orphaned Files show a count badge),
-  a dark "HUD" theme, and a Dashboard that starts with what needs attention (pending
-  approvals with one-click Approve, failed documents, orphaned files), then totals with
-  7-day trends, a status donut, an OCR success gauge and a readable recent-activity feed.
-  Global Nuke moved to its own red **Maintenance** page.
+- **New admin panel design** - dark navy/violet theme with a left sidebar and a top bar (search, a
+  bell with the real pending-approval count, account menu). The Dashboard shows gradient stat
+  cards, a 30-day documents chart, a document-type donut, an OCR success gauge, a readable recent
+  activity feed and one-click Approve for the oldest pending requests. Users, Approvals,
+  Maintenance (real storage, server uptime and a "Danger zone" for the global delete) and every
+  other admin page share the same components. Only real data is shown. Feature map:
+  `docs/admin-ui-feature-map.md`.
 - **Review flag for incomplete numbers** - a Tax Invoice No. that is not
   `G`/`P` + 10 digits, a Reference No. that is not 10 digits, or a Delivery
   Challan No. that is not 9 digits starting `82` (a character was dropped or
