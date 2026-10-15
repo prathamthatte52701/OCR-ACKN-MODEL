@@ -1,16 +1,20 @@
 import { useAdminAuth } from '../context/AdminAuthContext'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
 import Banner from '../components/Banner'
 import ConfirmPurgeModal from '../components/ConfirmPurgeModal'
-import { formatIST } from '../utils/formatDate'
+import { formatIST, formatISTDate } from '../utils/formatDate'
+import { statusTone } from '../utils/status'
 import BackButton from '../components/BackButton'
+import { Avatar, Badge, Card, DataTable, EmptyState, ErrorState, Skeleton, StatCard } from '../components/ui'
+import SkeletonRows from './users/SkeletonRows'
 
 const SECTION_PAGE_SIZE = 10
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
 function WarningIcon({ className = 'h-4 w-4' }) {
   return (
@@ -50,21 +54,21 @@ function NukeUserPanel({ userId, username }) {
   const monthLabel = selectedMonths.map((m) => MONTH_NAMES[m - 1]).join(', ')
 
   return (
-    <section className="mb-8 rounded-[24px] border border-rose-500/25 bg-rose-950/10 p-6">
-      <h2 className="mb-1 text-lg font-black text-rose-300">Nuke This User</h2>
-      <p className="mb-4 text-[13.6px] text-rose-200/70">
+    <Card variant="danger" className="mb-8 p-6" aria-label="Nuke this user">
+      <h2 className="mb-1 text-lg font-bold text-rose-300">Nuke This User</h2>
+      <p className="mb-4 text-[14px] text-rose-100/80">
         Permanently deletes this user&apos;s documents (and their exported Excel rows), scoped
         strictly to {username || 'this user'} - every other user&apos;s data is untouched.
       </p>
 
       <Banner error={banner.error} success={banner.success} />
 
-      <div className="mb-3 flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[12.6px] text-rose-200/80">
+      <div className="mb-3 flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2 text-[14px] text-rose-100">
           <input type="radio" checked={mode === 'age'} onChange={() => setMode('age')} />
           Age-based (oldest first)
         </label>
-        <label className="flex items-center gap-1.5 text-[12.6px] text-rose-200/80">
+        <label className="flex items-center gap-2 text-[14px] text-rose-100">
           <input type="radio" checked={mode === 'months'} onChange={() => setMode('months')} />
           Specific year + month(s)
         </label>
@@ -72,11 +76,12 @@ function NukeUserPanel({ userId, username }) {
 
       {mode === 'age' ? (
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-[12.6px] text-rose-200/80">Delete data older than</label>
+          <label htmlFor="nuke-older-than" className="text-[14px] text-rose-100">Delete data older than</label>
           <select
+            id="nuke-older-than"
             value={months}
             onChange={(e) => setMonths(Number(e.target.value))}
-            className="rounded-lg border border-rose-800/50 bg-slate-950 px-2 py-1.5 text-[12.6px] text-white"
+            className="input !w-auto"
           >
             <option value={1}>1 month</option>
             <option value={2}>2 months</option>
@@ -88,15 +93,16 @@ function NukeUserPanel({ userId, username }) {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-3">
-            <label className="text-[12.6px] text-rose-200/80">Year</label>
+            <label htmlFor="nuke-year" className="text-[14px] text-rose-100">Year</label>
             <input
+              id="nuke-year"
               type="number"
               value={year}
               onChange={(e) => setYear(e.target.value)}
-              className="w-24 rounded-lg border border-rose-800/50 bg-slate-950 px-2 py-1.5 text-[12.6px] text-white"
+              className="input !w-28"
             />
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-2">
             {MONTH_NAMES.map((name, idx) => {
               const monthNum = idx + 1
               const active = selectedMonths.includes(monthNum)
@@ -104,8 +110,9 @@ function NukeUserPanel({ userId, username }) {
                 <button
                   key={name}
                   type="button"
+                  aria-pressed={active}
                   onClick={() => toggleMonth(monthNum)}
-                  className={`rounded-lg border px-2.5 py-1.5 text-[11.6px] font-bold transition-colors ${active ? 'border-rose-500 bg-rose-700 text-white' : 'border-rose-800/50 bg-slate-950 text-rose-200/70 hover:bg-rose-900/30'}`}
+                  className={`btn btn-sm ${active ? '!border-rose-300 !bg-rose-600 !text-white' : 'btn-ghost'}`}
                 >
                   {name.slice(0, 3)}
                 </button>
@@ -119,7 +126,7 @@ function NukeUserPanel({ userId, username }) {
         type="button"
         onClick={() => setConfirmOpen(true)}
         disabled={!canOpenConfirm}
-        className="mt-4 flex items-center gap-2 rounded-xl border-2 border-rose-500 bg-gradient-to-r from-rose-700 to-red-700 px-4 py-2 text-[12.6px] font-black text-white shadow-[0_0_0_3px_rgba(244,63,94,0.15)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40"
+        className="btn mt-4 !border-rose-300 !bg-rose-600 !text-white hover:!bg-rose-500"
       >
         <WarningIcon />
         Nuke This User
@@ -147,17 +154,8 @@ function NukeUserPanel({ userId, username }) {
           />
         )}
       </AnimatePresence>
-    </section>
+    </Card>
   )
-}
-
-function statusBadge(status) {
-  const map = {
-    processed: 'border-emerald-300/25 bg-emerald-500/10 text-emerald-200',
-    failed: 'border-rose-400/25 bg-rose-500/10 text-rose-200',
-    uploaded: 'border-amber-300/25 bg-amber-500/10 text-amber-200',
-  }
-  return map[status] || 'border-white/10 bg-white/5 text-slate-400'
 }
 
 function docNumber(doc) {
@@ -170,17 +168,44 @@ function exportNumber(row) {
   return row.number || '-'
 }
 
-function Section({ title, count, page, totalPages, onPageChange, children }) {
+// One paginated list of a user's records (documents / exports / logs). Fetch state is keyed
+// so a page/user change shows skeleton rows until the matching response lands, and a
+// failure shows a retry instead of silently leaving the table empty.
+function useUserSection(path, userId, page) {
+  const [nonce, setNonce] = useState(0)
+  const key = `${userId}|${page}|${nonce}`
+  const [res, setRes] = useState({ key: '', data: null, error: '' })
+  useEffect(() => {
+    let off = false
+    api.get(path, { params: { userId, page, limit: SECTION_PAGE_SIZE } })
+      .then((r) => { if (!off) setRes({ key, data: r.data, error: '' }) })
+      .catch((err) => { if (!off) setRes({ key, data: null, error: err.userMessage || 'Could not load this section.' }) })
+    return () => { off = true }
+  }, [path, userId, page, key])
+  const retry = useCallback(() => setNonce((n) => n + 1), [])
+  return { data: res.data, error: res.key === key ? res.error : '', loading: res.key !== key, retry }
+}
+
+function Section({ title, count, state, page, onPageChange, cols, emptyTitle, head, children }) {
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-lg font-black text-white">{title}</h2>
-        <span className="text-[12.6px] font-bold text-slate-500">{count} total</span>
-      </div>
-      <div className="overflow-x-auto rounded-[24px] border border-emerald-300/12 bg-slate-900/60">
-        {children}
-      </div>
-      <PaginationControls page={page} totalPages={totalPages} onChange={onPageChange} />
+    <section className="mb-8" aria-label={title}>
+      <Card className="p-5">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="text-[18px] font-bold text-white">{title}</h2>
+          <span className="text-[14px] text-[var(--muted)]">{count} total</span>
+        </div>
+        {state.error ? (
+          <ErrorState message={state.error} onRetry={state.retry} />
+        ) : !state.loading && children.length === 0 ? (
+          <EmptyState title={emptyTitle} />
+        ) : (
+          <DataTable minWidth={620}>
+            <thead><tr>{head}</tr></thead>
+            <tbody>{state.loading ? <SkeletonRows cols={cols} /> : children}</tbody>
+          </DataTable>
+        )}
+      </Card>
+      <PaginationControls page={page} totalPages={state.data?.totalPages || 1} onChange={onPageChange} />
     </section>
   )
 }
@@ -191,184 +216,128 @@ export default function AdminUserDetailPage() {
   const { user: me } = useAdminAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reloadNonce, setReloadNonce] = useState(0)
 
-  const [documents, setDocuments] = useState([])
   const [docPage, setDocPage] = useState(1)
-  const [docTotalPages, setDocTotalPages] = useState(1)
-  const [docTotal, setDocTotal] = useState(0)
-
-  const [exports, setExports] = useState([])
   const [expPage, setExpPage] = useState(1)
-  const [expTotalPages, setExpTotalPages] = useState(1)
-  const [expTotal, setExpTotal] = useState(0)
-
-  const [logs, setLogs] = useState([])
   const [logPage, setLogPage] = useState(1)
-  const [logTotalPages, setLogTotalPages] = useState(1)
-  const [logTotal, setLogTotal] = useState(0)
+  const docs = useUserSection('/admin/documents', id, docPage)
+  const exps = useUserSection('/admin/exports', id, expPage)
+  const logs = useUserSection('/admin/logs', id, logPage)
+  const docTotal = docs.data?.totalDocuments || 0
+  const expTotal = exps.data?.totalExports || 0
+  const logTotal = logs.data?.totalLogs || 0
 
   useEffect(() => {
+    let off = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount pattern
     setLoading(true)
     setError('')
     api.get(`/admin/users/${id}`)
-      .then((res) => setUser(res.data.user))
-      .catch((err) => setError(err.userMessage || 'Could not load user.'))
-      .finally(() => setLoading(false))
-  }, [id])
+      .then((res) => { if (!off) setUser(res.data.user) })
+      .catch((err) => { if (!off) setError(err.userMessage || 'Could not load user.') })
+      .finally(() => { if (!off) setLoading(false) })
+    return () => { off = true }
+  }, [id, reloadNonce])
 
-  useEffect(() => {
-    api.get('/admin/documents', { params: { userId: id, page: docPage, limit: SECTION_PAGE_SIZE } })
-      .then((res) => {
-        setDocuments(res.data.documents || [])
-        setDocTotalPages(res.data.totalPages || 1)
-        setDocTotal(res.data.totalDocuments || 0)
-      })
-      .catch(() => {})
-  }, [id, docPage])
-
-  useEffect(() => {
-    api.get('/admin/exports', { params: { userId: id, page: expPage, limit: SECTION_PAGE_SIZE } })
-      .then((res) => {
-        setExports(res.data.exports || [])
-        setExpTotalPages(res.data.totalPages || 1)
-        setExpTotal(res.data.totalExports || 0)
-      })
-      .catch(() => {})
-  }, [id, expPage])
-
-  useEffect(() => {
-    api.get('/admin/logs', { params: { userId: id, page: logPage, limit: SECTION_PAGE_SIZE } })
-      .then((res) => {
-        setLogs(res.data.logs || [])
-        setLogTotalPages(res.data.totalPages || 1)
-        setLogTotal(res.data.totalLogs || 0)
-      })
-      .catch(() => {})
-  }, [id, logPage])
-
-  if (loading) {
-    return (
-      <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
-        <div className="flex justify-center py-16">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-transparent border-t-emerald-400" />
-        </div>
-      </main>
-    )
-  }
+  const statusIcon = (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="m8 12.5 3 3 5-6" /></svg>
+  )
+  const docIcon = (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+  )
+  const calIcon = (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /></svg>
+  )
 
   return (
-    <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10">
+    <main className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/users" />
 
-      <Banner error={error} />
+      {loading ? (
+        <Card className="mb-6 p-6" aria-busy="true">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-16 w-16 !rounded-full" />
+            <div className="space-y-2"><Skeleton className="h-7 w-48" /><Skeleton className="h-5 w-64" /></div>
+          </div>
+        </Card>
+      ) : error ? (
+        <Card className="mb-6"><ErrorState message={error} onRetry={() => setReloadNonce((n) => n + 1)} /></Card>
+      ) : user && (
+        <>
+          <Card className="mb-6 flex flex-wrap items-center justify-between gap-4 p-6">
+            <div className="flex min-w-0 items-center gap-4">
+              <Avatar id={user.id} name={user.username} size={64} />
+              <div className="min-w-0">
+                <h1 className="truncate text-[28px] font-extrabold leading-tight tracking-tight text-white" title={user.username}>{user.username}</h1>
+                <p className="truncate text-[15px] text-[var(--violet-2)]" title={user.email}>{user.email}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge tone={user.role === 'admin' ? 'violet' : 'neutral'}>{cap(user.role)}</Badge>
+              <Badge tone={statusTone(user.status)} dot>{cap(user.status)}</Badge>
+            </div>
+          </Card>
 
-      {user && (
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-emerald-300/12 bg-slate-900/60 p-6">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight text-white">{user.username}</h1>
-            <p className="mt-1 text-[14.7px] text-slate-500">{user.email}</p>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard label="Documents" value={user.documentCount ?? docTotal} tone="violet" icon={docIcon} />
+            <StatCard label="Joined" value={<span className="text-[24px]">{formatISTDate(user.createdAt)}</span>} tone="blue" icon={calIcon} />
+            <StatCard label="Status" value={<span className="text-[24px]">{cap(user.status)}</span>} tone={user.status === 'approved' ? 'teal' : user.status === 'pending' ? 'amber' : 'pink'} icon={statusIcon} />
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`rounded-full border px-2.5 py-1 text-[11.6px] font-black uppercase ${user.role === 'admin' ? 'border-emerald-300/25 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-white/5 text-slate-400'}`}>
-              {user.role}
-            </span>
-            <span className="text-[12.6px] text-slate-500">Joined {formatIST(user.createdAt)}</span>
-          </div>
-        </div>
+
+          {user.role === 'admin' && user.id !== me?.id ? (
+            <p className="ui-card ui-card-flat mb-6 px-4 py-3 text-[14px] text-[var(--muted)]">
+              Admins can only be changed by themselves.
+            </p>
+          ) : (
+            <NukeUserPanel userId={id} username={user.username} />
+          )}
+        </>
       )}
 
-      {user && (user.role === 'admin' && user.id !== me?.id ? (
-        <p className="mb-6 rounded-[24px] border border-white/10 bg-white/[0.035] px-4 py-3 text-[13.6px] text-slate-400">
-          Admins can only be changed by themselves.
-        </p>
-      ) : (
-        <NukeUserPanel userId={id} username={user.username} />
-      ))}
-
-      <Section title="Documents" count={docTotal} page={docPage} totalPages={docTotalPages} onPageChange={setDocPage}>
-        <table className="w-full text-left text-[13.6px]">
-          <thead>
-            <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Type</th>
-              <th className="px-4 py-3">Number</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Uploaded</th>
-            </tr>
-          </thead>
-          <tbody>
-            {documents.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No documents.</td></tr>
-            ) : documents.map((d) => (
-              <tr key={d._id} className="border-b border-white/5 last:border-0">
-                <td className="px-4 py-3 text-slate-300">{d.documentType}</td>
-                <td className="px-4 py-3 text-slate-300">{docNumber(d)}</td>
-                <td className="px-4 py-3 text-slate-400">{d.date || '-'}</td>
-                <td className="px-4 py-3">
-                  <span className={`rounded-full border px-2.5 py-1 text-[11.6px] font-black uppercase ${statusBadge(d.uploadStatus)}`}>
-                    {d.uploadStatus}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-slate-500">{formatIST(d.createdAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Section
+        title="Documents" count={docTotal} state={docs} page={docPage} onPageChange={setDocPage} cols={5} emptyTitle="No documents."
+        head={<><th>Type</th><th>Number</th><th>Date</th><th>Status</th><th>Uploaded</th></>}
+      >
+        {(docs.data?.documents || []).map((d) => (
+          <tr key={d._id}>
+            <td>{d.documentType}</td>
+            <td>{docNumber(d)}</td>
+            <td className="text-[var(--muted)]">{d.date || '-'}</td>
+            <td><Badge tone={statusTone(d.uploadStatus)}>{cap(d.uploadStatus)}</Badge></td>
+            <td className="whitespace-nowrap text-[var(--muted)]">{formatIST(d.createdAt)}</td>
+          </tr>
+        ))}
       </Section>
 
-      <Section title="Export Activity" count={expTotal} page={expPage} totalPages={expTotalPages} onPageChange={setExpPage}>
-        <table className="w-full text-left text-[13.6px]">
-          <thead>
-            <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Type</th>
-              <th className="px-4 py-3">Number</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Exported At</th>
-              <th className="px-4 py-3">Workbook</th>
-            </tr>
-          </thead>
-          <tbody>
-            {exports.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No exports.</td></tr>
-            ) : exports.map((row) => (
-              <tr key={row.id} className="border-b border-white/5 last:border-0">
-                <td className="px-4 py-3 text-slate-300">{row.documentType}</td>
-                <td className="px-4 py-3 text-slate-300">{exportNumber(row)}</td>
-                <td className="px-4 py-3 text-slate-400">{row.date || '-'}</td>
-                <td className="px-4 py-3 text-slate-500">{formatIST(row.exportedAt)}</td>
-                <td className="px-4 py-3 text-slate-300">{row.workbook?.filename || <span className="text-slate-600">Unknown</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Section
+        title="Export Activity" count={expTotal} state={exps} page={expPage} onPageChange={setExpPage} cols={5} emptyTitle="No exports."
+        head={<><th>Type</th><th>Number</th><th>Date</th><th>Exported At</th><th>Workbook</th></>}
+      >
+        {(exps.data?.exports || []).map((row) => (
+          <tr key={row.id}>
+            <td>{row.documentType}</td>
+            <td>{exportNumber(row)}</td>
+            <td className="text-[var(--muted)]">{row.date || '-'}</td>
+            <td className="whitespace-nowrap text-[var(--muted)]">{formatIST(row.exportedAt)}</td>
+            <td className="max-w-[220px] truncate" title={row.workbook?.filename}>{row.workbook?.filename || <span className="text-[var(--muted)]">Unknown</span>}</td>
+          </tr>
+        ))}
       </Section>
 
-      <Section title="Activity Log" count={logTotal} page={logPage} totalPages={logTotalPages} onPageChange={setLogPage}>
-        <table className="w-full text-left text-[13.6px]">
-          <thead>
-            <tr className="border-b border-white/8 text-[11.6px] font-black uppercase tracking-wide text-slate-500">
-              <th className="px-4 py-3">Time</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Context</th>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-6 text-center text-slate-500">No log entries.</td></tr>
-            ) : logs.map((l) => (
-              <tr key={l.id} className="border-b border-white/5 last:border-0">
-                <td className="px-4 py-3 whitespace-nowrap text-slate-400">{formatIST(l.createdAt)}</td>
-                <td className="px-4 py-3">
-                  <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-2.5 py-1 text-[11.6px] font-black uppercase text-emerald-200">{l.action}</span>
-                </td>
-                <td className="px-4 py-3 max-w-[360px] truncate text-slate-500" title={JSON.stringify(l.context)}>
-                  {JSON.stringify(l.context)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Section
+        title="Activity Log" count={logTotal} state={logs} page={logPage} onPageChange={setLogPage} cols={3} emptyTitle="No log entries."
+        head={<><th>Time</th><th>Action</th><th>Context</th></>}
+      >
+        {(logs.data?.logs || []).map((l) => (
+          <tr key={l.id}>
+            <td className="whitespace-nowrap text-[var(--muted)]">{formatIST(l.createdAt)}</td>
+            <td><Badge tone="violet">{l.action}</Badge></td>
+            <td className="max-w-[360px] truncate text-[var(--muted)]" title={JSON.stringify(l.context)}>
+              {JSON.stringify(l.context)}
+            </td>
+          </tr>
+        ))}
       </Section>
     </main>
   )
