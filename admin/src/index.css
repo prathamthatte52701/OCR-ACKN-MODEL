@@ -1,142 +1,167 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   ACKN admin design tokens. Everything under .theme-admin reads these variables, so the
+   look is tuned HERE and nowhere else. About half the palette is violet; blue/indigo, teal,
+   amber and a little pink are the mixed accents; red is only for danger.
+   --------------------------------------------------------------------------- */
 @layer base {
   html {
-    background-color: #030712;
-    color: #f3f4f6;
-    font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+    background-color: #070a1f;
+    color: #f1f3ff;
+    font-family: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background-color: #030712;
-  }
-  #root {
-    min-height: 100vh;
-    background-color: #030712;
-  }
-  * {
-    box-sizing: border-box;
-  }
+  body { margin: 0; min-height: 100vh; background-color: #070a1f; }
+  #root { min-height: 100vh; background-color: #070a1f; }
+  * { box-sizing: border-box; }
 }
 
-/* ---------------------------------------------------------------------------
-   Admin "HUD" theme. Everything is scoped under .theme-admin (the admin layout wrapper) so
-   the tokens below are the single place to tune colours. Green is the main accent, cyan the
-   secondary, amber = warning, violet only as a chart mix colour, red ONLY for danger.
-   --------------------------------------------------------------------------- */
 .theme-admin {
-  --hud-bg: #04100c;
-  --hud-bg-2: #0a1814;
-  --hud-card: rgba(12, 32, 26, 0.66);
-  --hud-border: rgba(43, 255, 136, 0.2);
-  --hud-text: #e6f4ee;
-  --hud-muted: #93b5a8; /* >= 6:1 on --hud-bg */
-  --hud-green: #2bff88;
-  --hud-cyan: #22d3ee;
-  --hud-amber: #fbbf24;
-  --hud-violet: #a78bfa;
-  --hud-red: #fb7185;
-  --hud-glow: rgba(43, 255, 136, 0.45);
+  --bg: #070a1f;
+  --bg-2: #0b1030;
+  --surface: rgba(19, 22, 62, 0.66);
+  --surface-solid: #11143a;
+  --surface-2: rgba(30, 34, 84, 0.55);
+  --line: rgba(124, 108, 255, 0.26);
+  --line-soft: rgba(148, 156, 230, 0.14);
+  --text: #f1f3ff;
+  --muted: #a3abdc;             /* >= 7:1 on --bg */
+  --violet: #8b5cf6;
+  --violet-2: #a78bfa;
+  --indigo: #6366f1;
+  --blue: #3b82f6;
+  --teal: #2dd4bf;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --orange: #fb923c;
+  --pink: #f472b6;
+  --red: #fb7185;
+  --red-strong: #ef4444;
+  --grad-primary: linear-gradient(135deg, #7c3aed 0%, #6366f1 55%, #4f6bff 100%);
+  --grad-violet: linear-gradient(145deg, rgba(124, 58, 237, 0.55), rgba(79, 70, 229, 0.25));
+  --grad-blue: linear-gradient(145deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.18));
+  --grad-teal: linear-gradient(145deg, rgba(20, 184, 166, 0.5), rgba(13, 148, 136, 0.16));
+  --grad-amber: linear-gradient(145deg, rgba(249, 115, 22, 0.5), rgba(217, 119, 6, 0.16));
+  --grad-pink: linear-gradient(145deg, rgba(236, 72, 153, 0.5), rgba(190, 24, 93, 0.16));
+  --radius: 18px;
+  --radius-sm: 12px;
+  --shadow-card: 0 10px 40px rgba(2, 4, 24, 0.45);
+  --glow-violet: 0 0 28px rgba(124, 92, 255, 0.35);
 
-  color: var(--hud-text);
-  background-color: var(--hud-bg);
+  color: var(--text);
+  font-size: 14px;
+  background-color: var(--bg);
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(43, 255, 136, 0.075) 1px, transparent 0),
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(34, 211, 238, 0.07), transparent 70%);
-  background-size: 28px 28px, 100% 100%;
+    radial-gradient(ellipse 60% 45% at 8% 100%, rgba(124, 58, 237, 0.22), transparent 70%),
+    radial-gradient(ellipse 55% 40% at 100% 0%, rgba(79, 107, 255, 0.16), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 50% 110%, rgba(236, 72, 153, 0.07), transparent 70%);
   background-attachment: fixed;
 }
 
-/* Glass card with a thin green-tinted border. */
-.theme-admin .hud-card {
+/* Component classes live in the components layer so Tailwind utilities (pl-10, !px-2.5 ...) can override them. */
+@layer components {
+/* Card: dark glass with a thin violet border. No blur (cheap on old office PCs). */
+.theme-admin .ui-card {
   position: relative;
-  border: 1px solid var(--hud-border);
-  border-radius: 14px;
-  background: var(--hud-card);
-  backdrop-filter: blur(6px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
-/* Key cards only: small corner brackets + a very soft outer glow. */
-.theme-admin .hud-key {
-  box-shadow: 0 0 0 1px rgba(43, 255, 136, 0.06), 0 0 28px rgba(43, 255, 136, 0.07);
-}
-.theme-admin .hud-key::before,
-.theme-admin .hud-key::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
-  border: 2px solid var(--hud-green);
-  opacity: 0.85;
-}
-.theme-admin .hud-key::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
-.theme-admin .hud-key::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
-
-/* Danger variant (Maintenance). */
-.theme-admin .hud-danger {
-  border-color: rgba(251, 113, 133, 0.4);
-  background: rgba(60, 12, 22, 0.45);
+.theme-admin .ui-card-flat { background: var(--surface-2); border-color: var(--line-soft); box-shadow: none; }
+.theme-admin .ui-card-danger {
+  border-color: rgba(251, 113, 133, 0.5);
+  background: linear-gradient(160deg, rgba(90, 14, 40, 0.5), rgba(40, 8, 28, 0.55));
+  box-shadow: 0 0 36px rgba(244, 63, 94, 0.12);
 }
 
-.theme-admin .hud-glow-text { text-shadow: 0 0 14px var(--hud-glow); }
-.theme-admin .hud-label {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--hud-muted);
+/* Gradient stat tiles */
+.theme-admin .tile-violet { background: var(--grad-violet), var(--surface-solid); }
+.theme-admin .tile-blue { background: var(--grad-blue), var(--surface-solid); }
+.theme-admin .tile-teal { background: var(--grad-teal), var(--surface-solid); }
+.theme-admin .tile-amber { background: var(--grad-amber), var(--surface-solid); }
+.theme-admin .tile-pink { background: var(--grad-pink), var(--surface-solid); }
+
+.theme-admin .ui-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.theme-admin .ui-muted { color: var(--muted); }
+
+/* Buttons */
+.theme-admin .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 36px; padding: 0 16px; border-radius: 12px; border: 1px solid transparent;
+  font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; color: var(--text);
+  transition: background-color .15s, border-color .15s, box-shadow .15s, transform .15s;
 }
+.theme-admin .btn:disabled { opacity: .5; cursor: not-allowed; }
+.theme-admin .btn-primary { background: var(--grad-primary); box-shadow: 0 6px 20px rgba(99, 102, 241, .35); }
+.theme-admin .btn-primary:hover:not(:disabled) { box-shadow: 0 8px 26px rgba(124, 92, 255, .55); }
+.theme-admin .btn-ghost { background: rgba(124, 108, 255, 0.1); border-color: var(--line); }
+.theme-admin .btn-ghost:hover:not(:disabled) { background: rgba(124, 108, 255, 0.2); }
+.theme-admin .btn-success { background: rgba(45, 212, 191, .12); border-color: rgba(45, 212, 191, .55); color: #5eead4; }
+.theme-admin .btn-success:hover:not(:disabled) { background: rgba(45, 212, 191, .24); }
+.theme-admin .btn-danger { background: rgba(251, 113, 133, .1); border-color: rgba(251, 113, 133, .55); color: #fda4af; }
+.theme-admin .btn-danger:hover:not(:disabled) { background: rgba(251, 113, 133, .22); }
+.theme-admin .btn-sm { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
+
+/* Inputs */
+.theme-admin .input {
+  width: 100%; min-height: 40px; padding: 0 14px; border-radius: 12px; font-size: 14px; color: var(--text);
+  background: rgba(10, 13, 44, 0.8); border: 1px solid var(--line); outline: none;
+}
+.theme-admin .input::placeholder { color: #7e87bd; }
+.theme-admin .input:focus { border-color: var(--violet-2); box-shadow: 0 0 0 3px rgba(139, 92, 246, .25); }
 
 /* Sidebar */
-.theme-admin .hud-nav-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  padding: 10px 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--hud-muted);
-  text-decoration: none;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+.theme-admin .nav-link {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px;
+  border: 1px solid transparent; font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none;
+  transition: background-color .15s, color .15s;
 }
-.theme-admin .hud-nav-link:hover { background: rgba(43, 255, 136, 0.06); color: var(--hud-text); }
-.theme-admin .hud-nav-link[aria-current='page'] {
-  color: var(--hud-green);
-  background: rgba(43, 255, 136, 0.1);
-  border-color: rgba(43, 255, 136, 0.35);
-  box-shadow: 0 0 18px rgba(43, 255, 136, 0.16);
-}
-.theme-admin .hud-nav-danger { color: #fda4af; }
-.theme-admin .hud-nav-danger:hover { background: rgba(251, 113, 133, 0.08); color: #fecdd3; }
-.theme-admin .hud-nav-danger[aria-current='page'] {
-  color: #fecdd3;
-  background: rgba(251, 113, 133, 0.12);
-  border-color: rgba(251, 113, 133, 0.45);
-  box-shadow: 0 0 18px rgba(251, 113, 133, 0.16);
-}
-.theme-admin :focus-visible {
-  outline: 2px solid var(--hud-green);
-  outline-offset: 2px;
+.theme-admin .nav-link:hover { background: rgba(124, 108, 255, .1); color: var(--text); }
+.theme-admin .nav-link[aria-current='page'] {
+  color: #fff; background: var(--grad-primary); border-color: rgba(167, 139, 250, .6);
+  box-shadow: 0 6px 22px rgba(99, 102, 241, .4);
 }
 
-/* Readability floor for the pages that are not restyled yet: nothing under 13px. */
+/* Table */
+.theme-admin .ui-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.theme-admin .ui-table th {
+  text-align: left; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); padding: 12px 16px; border-bottom: 1px solid var(--line-soft); white-space: nowrap;
+}
+.theme-admin .ui-table td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+.theme-admin .ui-table tbody tr:last-child td { border-bottom: 0; }
+.theme-admin .ui-table tbody tr:hover { background: rgba(124, 108, 255, .06); }
+.theme-admin .ui-table tbody tr[aria-selected='true'] { background: rgba(124, 108, 255, .14); }
+
+/* Skeleton shimmer */
+@keyframes ui-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.theme-admin .skeleton {
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(124,108,255,.08) 25%, rgba(167,139,250,.2) 50%, rgba(124,108,255,.08) 75%);
+  background-size: 200% 100%;
+  animation: ui-shimmer 1.4s linear infinite;
+}
+
+.theme-admin :focus-visible { outline: 2px solid var(--violet-2); outline-offset: 2px; }
+
+}
+
+/* Readability floor: nothing under 13px inside the admin theme. */
 .theme-admin .text-\[10\.5px\],
 .theme-admin .text-\[11px\],
 .theme-admin .text-\[11\.6px\],
-.theme-admin .text-\[12\.6px\] {
-  font-size: 13px;
-}
+.theme-admin .text-\[12\.6px\] { font-size: 13px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .theme-admin *,
-  .theme-admin *::before,
-  .theme-admin *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
+  .theme-admin *, .theme-admin *::before, .theme-admin *::after {
+    animation: none !important; transition: none !important; scroll-behavior: auto !important;
   }
+  .theme-admin .skeleton { background: rgba(124,108,255,.14); }
 }

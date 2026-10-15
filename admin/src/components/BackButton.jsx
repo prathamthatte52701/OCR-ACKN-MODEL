@@ -36,7 +36,7 @@ export default function BackButton({ fallback = '/', to, className = '' }) {
       type="button"
       onClick={handleClick}
       aria-label="Go back"
-      className={`mb-4 inline-flex min-h-[40px] min-w-[40px] shrink-0 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.045] px-3.5 text-[14.7px] font-bold text-slate-200 transition-colors hover:border-emerald-300/30 hover:bg-emerald-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#04070d] ${className}`}
+      className={`btn btn-ghost mb-4 ${className}`}
     >
       <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
