@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # "changeme" / "test123"-style values outright instead of trusting deploy-time
 # discipline alone.
 MIN_JWT_SECRET_LENGTH = 32
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 class Settings(BaseSettings):
@@ -19,6 +20,9 @@ class Settings(BaseSettings):
     mongo_db_name: str = Field(default="docintel_transport", alias="MONGO_DB_NAME")
     jwt_secret: str = Field(alias="JWT_SECRET")
     groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
+    # Groq has already retired a model once; the model name must be changeable without a deploy.
+    # Blank = the default. A bad name is NOT replaced by another model: the failure is reported.
+    groq_model: str = Field(default=DEFAULT_GROQ_MODEL, alias="GROQ_MODEL")
     frontend_origin: str = Field(default="http://localhost:5174", alias="FRONTEND_ORIGIN")
     admin_origin: str = Field(default="http://localhost:5175", alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
@@ -40,6 +44,18 @@ class Settings(BaseSettings):
         # .env.example ships `ENABLE_DOCS=` blank; that must mean "off", not a
         # boot-time bool-parsing crash.
         return False if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("groq_model", mode="before")
+    @classmethod
+    def _clean_groq_model(cls, value: object) -> object:
+        if not isinstance(value, str) or not value.strip():
+            return DEFAULT_GROQ_MODEL
+        value = value.strip()
+        if len(value) > 100 or any(ch.isspace() for ch in value):
+            raise ValueError(
+                "GROQ_MODEL must be a model name without spaces (at most 100 characters)."
+            )
+        return value
 
     @field_validator("jwt_secret")
     @classmethod

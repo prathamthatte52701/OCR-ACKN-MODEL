@@ -121,6 +121,7 @@ Required env vars (`backend/.env`):
 | `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
 | `MONGO_DB_NAME` | no (default `docintel_transport`) | |
 | `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
+| `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and the server log |
 | `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |

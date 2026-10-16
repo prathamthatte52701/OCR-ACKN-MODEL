@@ -788,6 +788,7 @@ async def reprocess_document(
             "$set": {
                 "uploadStatus": "uploaded",
                 "processingError": None,
+                "processingErrorCode": None,
                 "recoveryAttempts": 0,
                 "taxInvoiceNo": None,
                 "referenceNo": None,

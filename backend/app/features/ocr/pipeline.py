@@ -7,6 +7,7 @@ from bson import ObjectId
 from loguru import logger
 
 from app.core.audit_log import safe_log_action
+from app.core.config import settings
 from app.core.database import get_database
 from app.core.image_limits import ImageTooLarge, check_upload
 from app.features.ocr.ai_extraction import extract_header
@@ -26,6 +27,12 @@ from app.features.ocr.preprocessing import (
     assess_and_preprocess,
     crop_header,
     get_pdf_header_text_or_image,
+)
+from app.features.ocr.providers.errors import (
+    AIExtractionError,
+    classify_exception,
+    error_detail,
+    user_message,
 )
 
 _ocr_lock = asyncio.Lock()  # only 1 OCR job runs at a time - mirrors old app's single-slot queue
@@ -232,16 +239,23 @@ async def process_document(
         try:
             result = await extract_header(document_type, header_text)
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"AI extraction error: {exc}")
+            code, status = classify_exception(exc)
+            model = (
+                exc.model if isinstance(exc, AIExtractionError) else None
+            ) or settings.groq_model
+            # Only the code, the model name and the HTTP status: never a key, the prompt, a request
+            # body or the OCR text (an SDK exception message can echo some of those).
+            detail = error_detail(exc)
+            logger.error(
+                f"AI extraction failed: code={code} model={model} status={status} detail={detail}"
+            )
             await _update_active_document(
                 doc_id,
                 {
                     "uploadStatus": "failed",
                     "ocrTextHidden": header_text,
-                    "processingError": (
-                        "AI analysis is unavailable. Please check the Groq API key "
-                        "or try again later."
-                    ),
+                    "processingError": user_message(code),
+                    "processingErrorCode": code,
                 },
             )
             return
@@ -250,6 +264,7 @@ async def process_document(
             "uploadStatus": "processed",
             "ocrTextHidden": header_text,
             "processingError": None,
+            "processingErrorCode": None,
             "processedAt": datetime.now(UTC),
         }
         for key in (

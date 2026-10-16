@@ -4,6 +4,13 @@ from groq import Groq
 
 from app.core.config import settings
 from app.features.ocr.providers.base import AIProvider
+from app.features.ocr.providers.errors import (
+    NO_KEYS,
+    AIExtractionError,
+    classify_exception,
+    combine_failures,
+    error_detail,
+)
 
 _RETRYABLE_STATUSES = {401, 403, 429}
 # No timeout was configured on the underlying HTTP call (true in the old
@@ -31,13 +38,15 @@ class GroqProvider(AIProvider):
         self._next_start_index = 0
 
     async def extract(self, system_prompt: str, user_prompt: str) -> str:
+        model = settings.groq_model
         if not self._key_pool:
-            raise RuntimeError("GROQ_API_KEYS is not set")
+            raise AIExtractionError(NO_KEYS, None, model)
 
         start_index = self._next_start_index % len(self._key_pool)
         self._next_start_index += 1
 
-        last_error: Exception | None = None
+        failures: list[tuple[str, int | None]] = []
+        details: list[str | None] = []
         for i in range(len(self._key_pool)):
             key_index = (start_index + i) % len(self._key_pool)
             client = Groq(api_key=self._key_pool[key_index])
@@ -47,7 +56,8 @@ class GroqProvider(AIProvider):
                     timeout=CALL_TIMEOUT_SECONDS,
                 )
             except Exception as exc:  # noqa: BLE001
-                last_error = exc
+                failures.append(classify_exception(exc))
+                details.append(error_detail(exc))
                 status = getattr(exc, "status_code", None)
                 should_failover = (
                     status is None
@@ -55,19 +65,26 @@ class GroqProvider(AIProvider):
                     or (isinstance(status, int) and 500 <= status < 600)
                 )
                 if not should_failover:
-                    raise
-        assert last_error is not None
-        raise last_error
+                    break
+        # The FINAL cause across every key tried, classified - never just the last message.
+        code, status = combine_failures(failures)
+        detail = next(
+            (
+                d
+                for (c, s), d in zip(failures, details, strict=True)
+                if (c, s) == (code, status) and d
+            ),
+            None,
+        )
+        raise AIExtractionError(code, status, model, detail)
 
     @staticmethod
     def _call(client: Groq, system_prompt: str, user_prompt: str) -> str:
         response = client.chat.completions.create(
-            # llama-3.3-70b-versatile is no longer available on these Groq
-            # keys (404 model_not_found) - every extraction was failing.
-            # gpt-oss-120b is the closest drop-in; "low" reasoning effort
-            # keeps latency down and leaves the 300-token budget for the
-            # JSON answer itself (verified: ~90 completion tokens).
-            model="openai/gpt-oss-120b",
+            # The model comes from GROQ_MODEL (default openai/gpt-oss-120b): Groq has retired a
+            # model before (404 model_not_found) and every extraction failed. "low" reasoning
+            # effort keeps latency down and leaves the 300-token budget for the JSON answer.
+            model=settings.groq_model,
             reasoning_effort="low",
             messages=[
                 {"role": "system", "content": system_prompt},
