@@ -11,6 +11,16 @@ import CorrectionModal from '../components/CorrectionModal'
 import LazyDocumentViewer from '../components/LazyDocumentViewer'
 import { confirmAction } from '../store/dialogStore'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
+import {
+  BULK_WAIT_LIMIT_MS,
+  SINGLE_WAIT_LIMIT_MS,
+  SLOW_BATCH_NOTE,
+  SLOW_MESSAGE,
+  UPLOAD_UNCONFIRMED_MESSAGE,
+  isTimedOut,
+  pollDelayMs,
+  pollOutcome,
+} from '../utils/uploadPolling'
 import BackButton from '../components/BackButton'
 
 // Per-documentType editable field list for the bulk review view - mirrors
@@ -33,16 +43,8 @@ function reviewFieldsFor(f) {
 
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
 const MAX_BULK_FILES = 10
-// Bulk files process strictly sequentially on the server, but every file's
-// poll timer starts at upload time regardless of queue position - a flat
-// single-upload-sized budget (90 attempts/180s) meant a file queued behind
-// 3-4 others could still be legitimately processing when its own clock ran
-// out, showing as "failed" client-side even though the backend kept going
-// and finished it correctly moments later. Matches the 500s backend OCR
-// budget so a file's poll window comfortably covers realistic worst-case
-// queue wait + its own processing time.
-const BULK_POLL_MAX_ATTEMPTS = 250
-
+// Polling waits are wall-clock limits (see utils/uploadPolling.js): only the SERVER can mark a file
+// 'failed'. When our own wait runs out the row becomes 'slow' (still processing), never 'failed'.
 function LogisticsUploadIllustration() {
   return (
     <div className="relative mt-10 hidden min-h-[310px] overflow-hidden rounded-[30px] border border-blue-300/10 bg-slate-950/20 lg:block">
@@ -109,8 +111,9 @@ function StatusChip({ status }) {
     processing: 'border-blue-300/30 bg-blue-500/10 text-blue-200',
     done: 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
     failed: 'border-rose-400/30 bg-rose-500/10 text-rose-200',
+    slow: 'border-amber-300/30 bg-amber-400/10 text-amber-200',
   }
-  const labels = { waiting: 'Waiting', processing: 'Processing', done: 'Done', failed: 'Failed' }
+  const labels = { waiting: 'Waiting', processing: 'Processing', done: 'Done', failed: 'Failed', slow: 'Still processing' }
   return (
     <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.6px] font-bold uppercase tracking-[0.1em] ${styles[status]}`}>
       {status === 'processing' && (
@@ -124,9 +127,13 @@ function StatusChip({ status }) {
 export default function UploadPage() {
   const [file, setFile] = useState(null)
   const [documentType, setDocumentType] = useState(DOCUMENT_TYPES[0])
-  const [status, setStatus] = useState('idle') // idle | uploading | processing | done | error
+  const [status, setStatus] = useState('idle') // idle | uploading | processing | slow | done | error
   const [error, setError] = useState('')
-  const pollRef = useRef(null)
+  const pollRef = useRef(null) // pending setTimeout of the single-upload poll loop
+  const pollRunRef = useRef(0) // bumping it cancels a running loop (unmount, reset, new upload)
+  const doneNavRef = useRef(null) // pending 'go to the document' timeout after a finished upload
+  const mountedRef = useRef(false) // an upload request that resolves after unmount must not start a loop
+  const [slowText, setSlowText] = useState(SLOW_MESSAGE)
   const navigate = useNavigate()
 
   // Bulk upload - a separate, additive flow alongside the single-file one
@@ -140,7 +147,8 @@ export default function UploadPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [reviewIndex, setReviewIndex] = useState(0)
   const [reviewEditingField, setReviewEditingField] = useState(null) // { docId, key, label, value }
-  const bulkPollRef = useRef(null)
+  const bulkPollRef = useRef(null) // pending setTimeout of the bulk poll loop
+  const bulkRunRef = useRef(0) // bumping it cancels a running loop
   // setInterval's closure would otherwise see bulkFiles as it was when the
   // interval was created - this ref is kept in sync so each tick reads the
   // current list instead of a stale one.
@@ -148,9 +156,14 @@ export default function UploadPage() {
   useEffect(() => { bulkFilesRef.current = bulkFiles }, [bulkFiles])
 
   useEffect(() => {
+    mountedRef.current = true
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-      if (bulkPollRef.current) clearInterval(bulkPollRef.current)
+      mountedRef.current = false
+      pollRunRef.current += 1
+      bulkRunRef.current += 1
+      if (pollRef.current) clearTimeout(pollRef.current)
+      if (bulkPollRef.current) clearTimeout(bulkPollRef.current)
+      if (doneNavRef.current) clearTimeout(doneNavRef.current)
     }
   }, [])
 
@@ -161,54 +174,72 @@ export default function UploadPage() {
 
     try {
       const doc = await uploadDocument(file, documentType)
+      if (!mountedRef.current) return // left the page while uploading: do not start a poll loop
       const docId = doc?._id
       if (!docId) throw new Error('Upload failed: no document ID returned.')
 
       setStatus('processing')
 
-      if (pollRef.current) clearInterval(pollRef.current)
-      let attempts = 0
-      pollRef.current = setInterval(async () => {
-        attempts++
-        let shouldTimeout = false
+      // Self-scheduling loop: one poll in flight at a time, 2 s then 5 s steps, wall-clock limit.
+      if (pollRef.current) clearTimeout(pollRef.current)
+      const run = ++pollRunRef.current
+      const startedAt = Date.now()
+      const tick = async () => {
+        if (run !== pollRunRef.current) return
+        let outcome = 'pending'
+        let polled = null
         try {
-          const polled = await getDocument(docId)
-
-          if (polled?.uploadStatus === 'processed') {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-            setStatus('done')
-            setTimeout(() => navigate(`/documents/${docId}`), 800)
-          } else if (polled?.uploadStatus === 'failed') {
-            clearInterval(pollRef.current)
-            pollRef.current = null
-            setStatus('error')
-            setError(polled.processingError || 'We could not process this document. Please try uploading it again.')
-          } else if (attempts > 90) {
-            shouldTimeout = true
-          }
+          polled = await getDocument(docId)
+          outcome = pollOutcome(polled)
         } catch {
-          shouldTimeout = attempts > 90
+          // network error / 5xx: never a failure by itself, just try again on the next tick
         }
-
-        if (shouldTimeout) {
-          clearInterval(pollRef.current)
+        if (run !== pollRunRef.current) return
+        if (outcome === 'done') {
+          pollRef.current = null
+          setStatus('done')
+          doneNavRef.current = setTimeout(() => navigate(`/documents/${docId}`), 800)
+          return
+        }
+        if (outcome === 'failed') {
           pollRef.current = null
           setStatus('error')
-          // Processing may still finish on the server even after we stop
-          // waiting here - say that explicitly instead of implying it failed.
-          setError('This is taking longer than expected. It may still finish processing in the background - check My Documents in a minute before uploading again.')
+          setError(polled.processingError || 'We could not process this document. Please try uploading it again.')
+          return
         }
-      }, 2000)
+        const elapsed = Date.now() - startedAt
+        if (isTimedOut(elapsed, SINGLE_WAIT_LIMIT_MS)) {
+          // Our wait is over, not the server's: it may well finish. Neutral state, polling stops.
+          pollRef.current = null
+          setSlowText(SLOW_MESSAGE)
+          setStatus('slow')
+          return
+        }
+        pollRef.current = setTimeout(tick, pollDelayMs(elapsed))
+      }
+      pollRef.current = setTimeout(tick, pollDelayMs(0))
     } catch (err) {
+      if (!mountedRef.current) return
+      if (!err.response) {
+        // The request got no answer (timeout / dropped connection): the server may well have stored
+        // the file, so this is NOT a failure - say so instead of inviting a duplicate upload.
+        setSlowText(UPLOAD_UNCONFIRMED_MESSAGE)
+        setStatus('slow')
+        return
+      }
       setStatus('error')
       setError(err.userMessage || 'Could not upload this document. Please try again.')
     }
   }
 
   function handleReset() {
+    pollRunRef.current += 1
+    if (doneNavRef.current) {
+      clearTimeout(doneNavRef.current)
+      doneNavRef.current = null
+    }
     if (pollRef.current) {
-      clearInterval(pollRef.current)
+      clearTimeout(pollRef.current)
       pollRef.current = null
     }
     setFile(null)
@@ -264,30 +295,39 @@ export default function UploadPage() {
       ? bulkFiles[0].documentType
       : 'mixed'
 
+  function stopBulkPolling() {
+    bulkRunRef.current += 1
+    if (bulkPollRef.current) {
+      clearTimeout(bulkPollRef.current)
+      bulkPollRef.current = null
+    }
+  }
+
+  // Self-scheduling loop (never two rounds at once, 2 s then 5 s steps). The wait limit is wall-clock
+  // time for the whole batch. A poll that throws (network error / 5xx) is just retried next round;
+  // only a server 'failed' makes a row failed. When the limit passes, rows still processing become
+  // 'slow' and polling stops for good.
   function startBulkPolling() {
-    if (bulkPollRef.current) clearInterval(bulkPollRef.current)
-    let attempts = 0
+    stopBulkPolling()
+    const run = bulkRunRef.current
+    const startedAt = Date.now()
 
-    bulkPollRef.current = setInterval(async () => {
-      attempts++
-      const current = bulkFilesRef.current
-      const pending = current.filter((f) => f.status === 'processing' && f.docId)
-
+    const tick = async () => {
+      if (run !== bulkRunRef.current) return
+      const pending = bulkFilesRef.current.filter((f) => f.status === 'processing' && f.docId)
       if (pending.length === 0) {
-        clearInterval(bulkPollRef.current)
         bulkPollRef.current = null
         setBulkSubmitting(false)
         return
       }
 
-      // Polling is just a status read per file, not processing - running
-      // these checks together doesn't run OCR concurrently, the server's
-      // own single-slot queue already guarantees only one file is actually
-      // being worked on at any moment.
+      // Polling is just a status read per file, not processing - running these checks together
+      // doesn't run OCR concurrently, the server's own single-slot queue guarantees that.
       const updates = await Promise.all(pending.map(async (f) => {
         try {
           const polled = await getDocument(f.docId)
-          if (polled?.uploadStatus === 'processed') {
+          const outcome = pollOutcome(polled)
+          if (outcome === 'done') {
             return {
               docId: f.docId,
               status: 'done',
@@ -301,40 +341,55 @@ export default function UploadPage() {
               exported: polled.exported,
             }
           }
-          if (polled?.uploadStatus === 'failed') return { docId: f.docId, status: 'failed', error: polled.processingError || 'Processing failed.' }
-          if (attempts > BULK_POLL_MAX_ATTEMPTS) return { docId: f.docId, status: 'failed', error: 'This is taking longer than expected. Check My Documents shortly.' }
+          if (outcome === 'failed') return { docId: f.docId, status: 'failed', error: polled.processingError || 'Processing failed.' }
           return null
         } catch {
-          if (attempts > BULK_POLL_MAX_ATTEMPTS) return { docId: f.docId, status: 'failed', error: 'Could not check status. Check My Documents shortly.' }
           return null
         }
       }))
+      if (run !== bulkRunRef.current) return
 
       const changed = updates.filter(Boolean)
-      if (changed.length > 0) {
+      const settledIds = new Set(changed.map((c) => c.docId))
+      const elapsed = Date.now() - startedAt
+      const timedOut = isTimedOut(elapsed, BULK_WAIT_LIMIT_MS)
+      const stillWaiting = pending.filter((f) => !settledIds.has(f.docId))
+
+      if (changed.length > 0 || (timedOut && stillWaiting.length > 0)) {
         setBulkFiles((prev) => prev.map((f) => {
           const u = changed.find((c) => c.docId === f.docId)
-          if (!u) return f
-          return {
-            ...f,
-            status: u.status,
-            error: u.error || '',
-            taxInvoiceNo: u.taxInvoiceNo,
-            referenceNo: u.referenceNo,
-            number: u.number,
-            date: u.date,
-            numberNeedsReview: u.numberNeedsReview,
-            taxInvoiceNoNeedsReview: u.taxInvoiceNoNeedsReview,
-            referenceNoNeedsReview: u.referenceNoNeedsReview,
-            exported: u.exported,
+          if (u) {
+            return {
+              ...f,
+              status: u.status,
+              error: u.error || '',
+              taxInvoiceNo: u.taxInvoiceNo,
+              referenceNo: u.referenceNo,
+              number: u.number,
+              date: u.date,
+              numberNeedsReview: u.numberNeedsReview,
+              taxInvoiceNoNeedsReview: u.taxInvoiceNoNeedsReview,
+              referenceNoNeedsReview: u.referenceNoNeedsReview,
+              exported: u.exported,
+            }
           }
+          if (timedOut && f.status === 'processing' && f.docId) return { ...f, status: 'slow', error: '' }
+          return f
         }))
       }
-    }, 2000)
+
+      if (stillWaiting.length === 0 || timedOut) {
+        bulkPollRef.current = null
+        setBulkSubmitting(false)
+        return
+      }
+      bulkPollRef.current = setTimeout(tick, pollDelayMs(elapsed))
+    }
+    bulkPollRef.current = setTimeout(tick, pollDelayMs(0))
   }
 
   async function handleBulkUpload() {
-    if (bulkFiles.length === 0) return
+    if (bulkFiles.length === 0 || bulkSubmitting) return
     setBulkSubmitting(true)
     setBulkError('')
     setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'processing' })))
@@ -344,6 +399,7 @@ export default function UploadPage() {
         bulkFiles.map((f) => f.file),
         bulkFiles.map((f) => f.documentType)
       )
+      if (!mountedRef.current) return // left the page while uploading: do not start a poll loop
 
       setBulkFiles((prev) => prev.map((f, i) => {
         const r = results[i]
@@ -353,17 +409,21 @@ export default function UploadPage() {
       }))
       startBulkPolling()
     } catch (err) {
+      if (!mountedRef.current) return
       setBulkSubmitting(false)
+      if (!err.response) {
+        // No answer to the upload request (timeout / dropped connection): the server may have stored
+        // the files, so show the neutral state, never 'failed'.
+        setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'slow', error: UPLOAD_UNCONFIRMED_MESSAGE })))
+        return
+      }
       const message = err.userMessage || 'Upload failed. Please try again.'
       setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'failed', error: message })))
     }
   }
 
   function handleBulkReset() {
-    if (bulkPollRef.current) {
-      clearInterval(bulkPollRef.current)
-      bulkPollRef.current = null
-    }
+    stopBulkPolling()
     setBulkFiles([])
     setBulkError('')
     setBulkSubmitting(false)
@@ -431,8 +491,10 @@ export default function UploadPage() {
 
   const bulkDoneCount = bulkFiles.filter((f) => f.status === 'done').length
   const bulkFailedCount = bulkFiles.filter((f) => f.status === 'failed').length
+  const bulkSlowCount = bulkFiles.filter((f) => f.status === 'slow').length
   const bulkTotal = bulkFiles.length
-  const bulkAllSettled = bulkTotal > 0 && bulkDoneCount + bulkFailedCount === bulkTotal
+  // 'slow' rows are out of our hands (the server may still finish them), so the batch counts as settled.
+  const bulkAllSettled = bulkTotal > 0 && bulkDoneCount + bulkFailedCount + bulkSlowCount === bulkTotal
 
   const reviewTotal = bulkFiles.length
   const reviewItem = bulkFiles[reviewIndex] || null
@@ -505,9 +567,7 @@ export default function UploadPage() {
                   </div>
                   <p className="text-xl font-black text-white">Review Results</p>
                   <p className="text-[14.7px] text-slate-400">
-                    {bulkFailedCount === 0
-                      ? `${bulkDoneCount}/${bulkTotal} processed successfully`
-                      : `${bulkDoneCount}/${bulkTotal} processed, ${bulkFailedCount} failed`}
+                    {`${bulkDoneCount}/${bulkTotal} processed${bulkFailedCount > 0 ? `, ${bulkFailedCount} failed` : ''}${bulkSlowCount > 0 ? `, ${bulkSlowCount} still processing` : ''}`}
                   </p>
                 </div>
 
@@ -557,6 +617,13 @@ export default function UploadPage() {
                           Open full document detail
                         </Link>
                       </div>
+                    ) : reviewItem.status === 'slow' ? (
+                      <div className="space-y-3 rounded-xl border border-amber-300/30 bg-amber-400/10 px-4 py-3 text-[13.6px] text-amber-100">
+                        <p>{reviewItem.error || SLOW_MESSAGE}</p>
+                        <button onClick={() => navigate('/documents')} className="rounded-lg border border-amber-300/40 px-3 py-1.5 text-[12.6px] font-bold text-amber-100 hover:bg-amber-400/15">
+                          Open My Documents
+                        </button>
+                      </div>
                     ) : (
                       <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-[13.6px] text-rose-200">
                         Failed: {reviewItem.error || 'Processing failed.'}
@@ -588,6 +655,12 @@ export default function UploadPage() {
                   {/* original file of the item being reviewed - shown for failed items too */}
                   <LazyDocumentViewer file={reviewItem.file} index={reviewIndex} testId="review-preview" />
                   </div>
+                )}
+
+                {bulkSlowCount > 0 && (
+                  <p data-testid="bulk-slow-note" className="rounded-xl border border-amber-300/25 bg-amber-400/10 px-4 py-2.5 text-center text-[13.6px] text-amber-100">
+                    {SLOW_BATCH_NOTE}
+                  </p>
                 )}
 
                 <button
@@ -701,6 +774,24 @@ export default function UploadPage() {
             <UploadProcessingState
               message={status === 'uploading' ? 'Uploading document...' : 'Running OCR + AI analysis...'}
             />
+          ) : status === 'slow' ? (
+            <div data-testid="single-slow" className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-[26px] border border-amber-300/25 bg-amber-400/8 px-5 py-16 text-center">
+              <div className="grid h-16 w-16 place-items-center rounded-full border border-amber-300/30 bg-amber-400/15">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-transparent border-r-amber-200 border-t-amber-200" />
+              </div>
+              <div>
+                <p className="text-xl font-black text-white">Taking longer than usual</p>
+                <p className="mt-2 max-w-sm text-[14.7px] text-slate-300">{slowText}</p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-3">
+                <button onClick={() => navigate('/documents')} className="rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-3 text-[14.7px] font-black text-white">
+                  Open My Documents
+                </button>
+                <button onClick={handleReset} className="rounded-2xl border border-white/10 bg-white/[0.045] px-5 py-3 text-[14.7px] font-bold text-slate-300 hover:bg-blue-500/10">
+                  Upload another
+                </button>
+              </div>
+            </div>
           ) : status === 'done' ? (
             <div className="flex min-h-[460px] flex-col items-center justify-center gap-4 rounded-[26px] border border-emerald-300/18 bg-emerald-400/8 px-5 py-16 text-center">
               <div className="grid h-20 w-20 place-items-center rounded-full border border-emerald-300/25 bg-emerald-400/15 text-[14.7px] font-black text-emerald-200 shadow-[0_0_45px_rgba(16,185,129,0.22)]">Done</div>
