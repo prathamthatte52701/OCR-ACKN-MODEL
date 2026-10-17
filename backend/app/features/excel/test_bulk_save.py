@@ -145,6 +145,9 @@ async def test_year_mismatch_blocks_with_need_new_workbook(
 ) -> None:
     u = await make_user()
     await _workbook(client, u)
+    # A real year rollover: the user's only workbook belongs to last year. (The workbook YEAR now
+    # follows each paper's own date, so changing settings.activeYear alone no longer blocks a save.)
+    await db.workbooks.update_many({"userId": u.id}, {"$set": {"year": YEAR - 1}})
     await db.settings.update_one(
         {"userId": u.id, "key": "excelState"}, {"$set": {"activeYear": YEAR - 1}}
     )

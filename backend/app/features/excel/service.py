@@ -3,7 +3,7 @@ import os
 import re
 import threading
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import openpyxl
@@ -31,6 +31,11 @@ MONTHS = [
 ]
 
 _DATE_RE = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+
+# A paper's own date is trusted for the workbook year/month only inside this window (IST today):
+# a misread year (2052, 2005) must never create a stray workbook for the wrong year.
+MAX_FUTURE_DAYS = 1
+MAX_PAST_YEARS = 5
 
 # Workbook writes are serialized per physical filename, two-layer:
 #   1. An asyncio.Lock keyed by filename - cheap, sub-millisecond, handles the
@@ -94,6 +99,39 @@ def current_period(now: datetime | None = None) -> tuple[int, str]:
     return now.year, MONTHS[now.month - 1]
 
 
+def _parse_ddmmyyyy(date_str: str | None) -> date | None:
+    match = _DATE_RE.match(date_str) if isinstance(date_str, str) else None
+    if not match:
+        return None
+    try:
+        return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+    except ValueError:  # 32/12/2025, 31/02/2026, year 0
+        return None
+
+
+def document_period(date_str: str | None, today: datetime | None = None) -> tuple[int, str, bool]:
+    """(year, month name, used_document_date): the ONE place that decides which workbook year and
+    worksheet a document belongs to. The paper's own DD/MM/YYYY date decides both, so a paper dated
+    Dec 2025 saved in Jan 2026 still goes to the 2025 workbook. A missing, unreal or implausible
+    date (outside MAX_PAST_YEARS back .. MAX_FUTURE_DAYS ahead of today in IST) falls back to the
+    save date in IST and reports used_document_date=False."""
+    today_date = (today or now_ist()).date()
+    parsed = _parse_ddmmyyyy(date_str)
+    if parsed is not None:
+        try:
+            oldest = today_date.replace(year=today_date.year - MAX_PAST_YEARS)
+        except ValueError:  # 29 Feb minus N years
+            oldest = today_date.replace(year=today_date.year - MAX_PAST_YEARS, day=28)
+        # never a future YEAR (a 1 Jan paper on 31 Dec): the next year's workbook is only ever
+        # created by the user's own rollover prompt, so such a paper takes the save-date fallback
+        if (
+            oldest <= parsed <= today_date + timedelta(days=MAX_FUTURE_DAYS)
+            and parsed.year <= today_date.year
+        ):
+            return parsed.year, MONTHS[parsed.month - 1], True
+    return today_date.year, MONTHS[today_date.month - 1], False
+
+
 def month_from_date(date_str: str | None, fallback_now: datetime | None = None) -> str:
     """Worksheet month comes from the DOCUMENT'S OWN extracted date, not
     today's date - a document dated 30/06 always lands in the June sheet
@@ -105,14 +143,6 @@ def month_from_date(date_str: str | None, fallback_now: datetime | None = None) 
             if 1 <= mm <= 12:
                 return MONTHS[mm - 1]
     return current_period(fallback_now)[1]
-
-
-def date_has_month(date_str: str | None) -> bool:
-    """True when month_from_date can read a real month out of `date_str`; False means the
-    row would be filed under the CURRENT month's sheet only because the date is missing or
-    unreadable (callers use this to tell the user, not to change where the row goes)."""
-    match = _DATE_RE.match(date_str) if date_str else None
-    return match is not None and 1 <= int(match.group(2)) <= 12
 
 
 def _add_header_row(sheet: Worksheet) -> None:
@@ -272,7 +302,9 @@ def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, b
 
     by_sheet: dict[str, Counter] = defaultdict(Counter)
     for row in rows_to_remove:
-        sheet_name = month_from_date(row.get("date"))
+        # the sheet the row was actually filed under (stored on the export record at save time);
+        # older records fall back to the date's own month
+        sheet_name = row.get("worksheet") or month_from_date(row.get("date"))
         key = (row["documentType"], _format_number_cell(row), row.get("date"))
         by_sheet[sheet_name][key] += 1
 

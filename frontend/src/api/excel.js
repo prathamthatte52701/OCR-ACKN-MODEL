@@ -23,7 +23,7 @@ export function newExcelFile(filename) {
 // (styled Dialog, not window.prompt()) and retry once, rather than failing
 // with a message that sends the user off to find "Start New Excel File"
 // themselves:
-//   - NEED_NEW_WORKBOOK: year rollover, the active workbook is for a past year
+//   - NEED_NEW_WORKBOOK: a document dated in the current year has no workbook yet (year rollover)
 //   - NO_ACTIVE_WORKBOOK: this user has never exported before, so there's no
 //     workbook yet at all - this is the first-export flow
 export async function saveDocument(docId) {

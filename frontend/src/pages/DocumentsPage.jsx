@@ -234,7 +234,7 @@ export default function DocumentsPage() {
       parts.push(`${failed.length} failed - ${[...reasons].map(([reason, n]) => `${reason} (${n})`).join('; ')}`)
     }
     if (dateFallback > 0) {
-      parts.push(`${dateFallback} had no readable date and went to the current month's sheet`)
+      parts.push(`${dateFallback} had no usable date and went to the sheet of the save date`)
     }
     ;(failed.length > 0 ? toast.error : toast.warning)(`${parts.join('. ')}.`)
   }
@@ -279,7 +279,7 @@ export default function DocumentsPage() {
     if (!filename) return
     try {
       const result = await newExcelFileMutation.mutateAsync(filename)
-      toast.success(`New workbook "${result.filename}.xlsx" is ready. Future saves will go into this file.`)
+      toast.success(`New workbook "${result.filename}.xlsx" is ready.`)
     } catch (err) {
       toast.error(err.userMessage || 'Could not start a new Excel file. Please try again.')
     }

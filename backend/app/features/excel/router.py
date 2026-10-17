@@ -1,5 +1,7 @@
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -24,6 +26,47 @@ FILE_BUSY_MESSAGE = "The Excel file is busy or open. Close it in Excel and try a
 DEFAULT_EXPORT_PAGE_SIZE = 30
 MAX_EXPORT_PAGE_SIZE = 100
 MAX_EXPORT_PAGE_NUMBER = 100_000
+
+
+# One lock per (user, year): two saves that both need the same missing old-year workbook must not
+# both create it (in-process only; the app runs as a single process).
+_period_locks: dict[tuple[ObjectId, int], asyncio.Lock] = {}
+
+
+async def _workbook_for_year(db: Any, user_id: ObjectId, year: int) -> dict | None:
+    """The user's workbook for `year`: the active one if there is one, else the newest."""
+    return await db.workbooks.find_one(
+        {"userId": user_id, "year": year}, sort=[("isActive", -1), ("createdAt", -1)]
+    )
+
+
+async def _create_year_workbook(db: Any, user_id: ObjectId, year: int, month: str) -> dict:
+    """Creates the workbook for a year that is not the current one (a late paper dated in an
+    earlier year) with the same file structure as any new workbook. It is born archived and does
+    NOT touch settings.excelState: activeYear/activeWorkbookName keep meaning "the workbook the
+    dashboard shows by default" and never flip because one late paper was saved."""
+    async with _period_locks.setdefault((user_id, year), asyncio.Lock()):
+        existing = await _workbook_for_year(db, user_id, year)
+        if existing:
+            return existing
+        taken = {w["filename"] async for w in db.workbooks.find({"userId": user_id})}
+        name, n = f"Excel {year}", 1
+        while name in taken:
+            n += 1
+            name = f"Excel {year} ({n})"
+        await excel_service.create_workbook(_physical_workbook_filename(user_id, name), month)
+        now = datetime.now(UTC)
+        record = {
+            "userId": user_id,
+            "year": year,
+            "filename": name,
+            "isActive": False,
+            "archivedAt": now,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        record["_id"] = (await db.workbooks.insert_one(record)).inserted_id
+        return record
 
 
 def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
@@ -286,7 +329,9 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
     if doc["uploadStatus"] != "processed":
         raise HTTPException(status_code=400, detail="Document has not been processed yet.")
 
-    year, _ = excel_service.current_period()
+    now_local = excel_service.now_ist()  # one clock read for both decisions
+    current_year, _ = excel_service.current_period(now_local)
+    year, sheet_month, date_used = excel_service.document_period(doc.get("date"), now_local)
     settings = await _get_settings(current_user.id)
     if not settings or not settings.get("activeWorkbookName"):
         # Structured the same way as the year-rollover 409 below (error code +
@@ -298,20 +343,27 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
             status_code=400,
             detail={
                 "error": "NO_ACTIVE_WORKBOOK",
-                "year": year,
+                "year": current_year,
                 "message": "No active Excel workbook yet. Name your first workbook to continue.",
             },
         )
 
     now = datetime.now(UTC)
-    # Year rollover: archive the old workbook and ask the frontend to create a
-    # new one for the new year (prompts the user once for its name, then
-    # retries this save). Previous year's file stays on disk, untouched.
-    if settings.get("activeYear") != year:
-        await db.workbooks.update_many(
-            {"userId": current_user.id, "isActive": True, "year": settings.get("activeYear")},
-            {"$set": {"isActive": False, "archivedAt": now, "updatedAt": now}},
-        )
+    # The PAPER's date picks the workbook year (not the save date): a paper dated Dec 2025
+    # saved in Jan 2026 goes to the 2025 workbook, December sheet.
+    workbook_doc = await _workbook_for_year(db, current_user.id, year)
+    if workbook_doc is None and year == settings.get("activeYear"):
+        # settings point at a workbook whose record is missing: keep appending to it by name
+        workbook_doc = {"_id": None, "filename": settings["activeWorkbookName"], "year": year}
+    if workbook_doc is None and year == current_year:
+        # Year rollover: archive the old workbook and ask the frontend to create a new one for
+        # the new year (prompts the user once for its name, then retries this save). Previous
+        # year's file stays on disk, untouched.
+        if settings.get("activeYear") != year:
+            await db.workbooks.update_many(
+                {"userId": current_user.id, "isActive": True, "year": settings.get("activeYear")},
+                {"$set": {"isActive": False, "archivedAt": now, "updatedAt": now}},
+            )
         raise HTTPException(
             status_code=409,
             detail={
@@ -322,6 +374,11 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
                 ),
             },
         )
+    if workbook_doc is None:
+        try:
+            workbook_doc = await _create_year_workbook(db, current_user.id, year, sheet_month)
+        except excel_service.FileLockedError as exc:
+            raise HTTPException(status_code=409, detail=FILE_BUSY_MESSAGE) from exc
 
     row = {
         "documentType": doc["documentType"],
@@ -332,10 +389,7 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
         "timestamp": now.isoformat(),
     }
 
-    # Worksheet = the document's OWN date, not today's date - a document dated
-    # 30/06 always lands in the June sheet even if saved in July.
-    sheet_month = excel_service.month_from_date(doc.get("date"))
-    active_filename = settings["activeWorkbookName"]
+    active_filename = workbook_doc["filename"]
     try:
         await excel_service.append_row(
             _physical_workbook_filename(current_user.id, active_filename), sheet_month, row
@@ -343,15 +397,12 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
     except excel_service.FileLockedError as exc:
         raise HTTPException(status_code=409, detail=FILE_BUSY_MESSAGE) from exc
 
-    workbook_doc = await db.workbooks.find_one(
-        {"userId": current_user.id, "filename": active_filename, "isActive": True}
-    )
-
     await db.exportedrows.insert_one(
         {
             "documentId": doc["_id"],
             "userId": current_user.id,
-            "workbookId": workbook_doc["_id"] if workbook_doc else None,
+            "workbookId": workbook_doc["_id"],
+            "worksheet": sheet_month,
             "documentType": row["documentType"],
             "taxInvoiceNo": row["taxInvoiceNo"],
             "referenceNo": row["referenceNo"],
@@ -379,8 +430,10 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
         "message": "Excel file appended successfully.",
         "worksheet": sheet_month,
         "workbook": active_filename,
-        # True when the date was missing/unreadable and the row went to the current month's sheet
-        "dateFallback": not excel_service.date_has_month(doc.get("date")),
+        "year": year,
+        # True when the date was missing/unreal/implausible and the row went to the SAVE date's
+        # year and month instead
+        "dateFallback": not date_used,
     }
 
 
