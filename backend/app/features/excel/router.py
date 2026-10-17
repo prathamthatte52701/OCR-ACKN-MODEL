@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,12 @@ async def _create_year_workbook(db: Any, user_id: ObjectId, year: int, month: st
         }
         record["_id"] = (await db.workbooks.insert_one(record)).inserted_id
         return record
+
+
+# One lock per document: Save Again appends the new row, then removes the old ones. Two concurrent
+# saves of the SAME document (two tabs) would each remove the other's fresh row, so the whole save
+# of one document is serialized (in-process only; the app runs as a single process).
+_doc_locks: dict[ObjectId, asyncio.Lock] = {}
 
 
 def _physical_workbook_filename(user_id: ObjectId, filename: str) -> str:
@@ -312,7 +319,95 @@ async def new_excel_file(
     return {"message": "New Excel workbook started.", "filename": trimmed, "year": year}
 
 
+async def _replace_old_rows(
+    db: Any,
+    user_id: ObjectId,
+    doc_id: ObjectId,
+    new_record_id: ObjectId,
+    new_file: str,
+    new_sheet: str,
+    new_key: tuple,
+    new_file_existed: bool,
+) -> tuple[int, str | None]:
+    """Save Again REPLACES: removes this document's earlier rows from their workbooks and deletes
+    their exportedrows records. Runs only AFTER the new row is appended and its record inserted, so
+    a failure here can never lose the new row. Uses each old record's STORED values (type, number,
+    date, sheet), never the document's current ones.
+    Known limit: rows have no ID, so matching is by (document type, number, date). Two DIFFERENT
+    documents with identical type+number+date can have the wrong physical row removed; at most as
+    many rows as this document has old records are ever removed.
+    Returns (rows removed, warning text or None). A locked/unwritable file keeps its old records
+    so the next Save Again retries."""
+    old = (
+        await db.exportedrows.find(
+            {"documentId": doc_id, "userId": user_id, "_id": {"$ne": new_record_id}}
+        )
+        .sort("exportedAt", 1)
+        .to_list(None)
+    )
+    by_workbook: dict[Any, list[dict]] = defaultdict(list)
+    for rec in old:
+        by_workbook[(rec.get("workbookId"), rec.get("workbookFilename"))].append(rec)
+
+    replaced = 0
+    warnings: list[str] = []
+    for (workbook_id, workbook_filename), recs in by_workbook.items():
+        record_ids = [r["_id"] for r in recs]
+        workbook = (
+            await db.workbooks.find_one({"_id": workbook_id, "userId": user_id})
+            if workbook_id
+            else None
+        )
+        if not workbook and workbook_id is None and workbook_filename:
+            # saved while the workbook record was missing: the file is found by its stored name
+            workbook = {"filename": workbook_filename}
+        if not workbook:
+            await db.exportedrows.delete_many({"_id": {"$in": record_ids}})
+            continue
+        physical = _physical_workbook_filename(user_id, workbook["filename"])
+        if not excel_service.file_path(physical).exists() or (
+            physical == new_file and not new_file_existed
+        ):
+            # the file is gone (or this very save re-created it empty): nothing to remove or warn
+            await db.exportedrows.delete_many({"_id": {"$in": record_ids}})
+            continue
+        name = workbook["filename"]
+        try:
+            # the row just appended looks exactly like an unchanged old row: never remove it
+            protect = (new_sheet, new_key) if physical == new_file else None
+            removed, _ = await excel_service.remove_rows(
+                physical, recs, keep_file=True, protect=protect
+            )
+        except excel_service.FileLockedError:
+            warnings.append(
+                f"The new row was saved, but the old row could not be removed from {name} "
+                "because it is open in Excel. Close it and press Save Again to finish."
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - the new row is in; never fail the save over this
+            logger.error(f"Removing the old Excel row of document {doc_id} failed: {exc}")
+            warnings.append(
+                f"The new row was saved, but the old row could not be removed from {name}. "
+                "Press Save Again to try again."
+            )
+            continue
+        replaced += removed
+        await db.exportedrows.delete_many({"_id": {"$in": record_ids}})
+        if removed < len(recs):
+            sheet = recs[0].get("worksheet") or excel_service.month_from_date(recs[0].get("date"))
+            warnings.append(
+                f"The old row for this document was not found in {name} ({sheet}). "
+                "Please check that file by hand."
+            )
+    return replaced, (" ".join(warnings) or None)
+
+
 async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -> dict:
+    async with _doc_locks.setdefault(doc_id, asyncio.Lock()):
+        return await _save_document_locked(doc_id, current_user)
+
+
+async def _save_document_locked(doc_id: ObjectId, current_user: CurrentUser) -> dict:
     """Core of a single document's save-to-Excel, shared by the individual
     Save/Save Again endpoint below and the bulk "Save All" endpoint - same
     lookup, same year-rollover/no-workbook handling, same locked
@@ -390,6 +485,9 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
     }
 
     active_filename = workbook_doc["filename"]
+    new_file_existed = excel_service.file_path(
+        _physical_workbook_filename(current_user.id, active_filename)
+    ).exists()
     try:
         await excel_service.append_row(
             _physical_workbook_filename(current_user.id, active_filename), sheet_month, row
@@ -397,11 +495,13 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
     except excel_service.FileLockedError as exc:
         raise HTTPException(status_code=409, detail=FILE_BUSY_MESSAGE) from exc
 
-    await db.exportedrows.insert_one(
+    new_record = await db.exportedrows.insert_one(
         {
             "documentId": doc["_id"],
             "userId": current_user.id,
             "workbookId": workbook_doc["_id"],
+            # kept so Save Again can still find the file if the workbook record is missing
+            "workbookFilename": active_filename,
             "worksheet": sheet_month,
             "documentType": row["documentType"],
             "taxInvoiceNo": row["taxInvoiceNo"],
@@ -413,10 +513,25 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
             "updatedAt": now,
         }
     )
-    # No limit on Save Again - this just flips the flag so the frontend can
-    # show a "you've already saved this one" confirmation before a repeat
-    # save, not a block. Every save still logs its own ExportedRow above and
-    # its own audit_log entry below, repeats included, by design.
+    # Save Again replaces: the old rows of this document are removed AFTER the new one is safely in.
+    try:
+        replaced, stale_warning = await _replace_old_rows(
+            db,
+            current_user.id,
+            doc["_id"],
+            new_record.inserted_id,
+            _physical_workbook_filename(current_user.id, active_filename),
+            sheet_month,
+            excel_service.row_key(row),
+            new_file_existed,
+        )
+    except Exception as exc:  # noqa: BLE001 - the new row is in; a DB hiccup must not fail the save
+        logger.error(f"Replacing the old Excel rows of document {doc_id} failed: {exc}")
+        replaced = 0
+        stale_warning = (
+            "The new row was saved, but the old row could not be checked. "
+            "Press Save Again to try again."
+        )
     await db.documents.update_one({"_id": doc["_id"]}, {"$set": {"exported": True}})
 
     from app.core.audit_log import log_action
@@ -424,9 +539,14 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
     await log_action(
         current_user.id,
         "document_exported",
-        {"documentId": str(doc["_id"]), "worksheet": sheet_month, "workbook": active_filename},
+        {
+            "documentId": str(doc["_id"]),
+            "worksheet": sheet_month,
+            "workbook": active_filename,
+            "replaced": replaced,
+        },
     )
-    return {
+    result: dict = {
         "message": "Excel file appended successfully.",
         "worksheet": sheet_month,
         "workbook": active_filename,
@@ -434,7 +554,11 @@ async def _save_document_to_excel(doc_id: ObjectId, current_user: CurrentUser) -
         # True when the date was missing/unreal/implausible and the row went to the SAVE date's
         # year and month instead
         "dateFallback": not date_used,
+        "replaced": replaced,
     }
+    if stale_warning:
+        result["staleRowWarning"] = stale_warning
+    return result
 
 
 @router.post("/{doc_id}/save")
@@ -472,10 +596,17 @@ async def bulk_save_documents_to_excel(
     date_fallback: list[str] = []
     blocked: dict | None = None
     not_attempted: list[str] = []
+    replaced_total = 0
+    stale_warnings: list[dict] = []
     for index, doc_id in enumerate(ids):
         try:
             result = await _save_document_to_excel(doc_id, current_user)
             succeeded.append(str(doc_id))
+            replaced_total += result.get("replaced", 0)
+            if result.get("staleRowWarning"):
+                stale_warnings.append(
+                    {"documentId": str(doc_id), "message": result["staleRowWarning"]}
+                )
             if result.get("dateFallback"):
                 date_fallback.append(str(doc_id))
         except HTTPException as exc:
@@ -503,4 +634,6 @@ async def bulk_save_documents_to_excel(
         "blocked": blocked,
         "notAttempted": not_attempted,
         "dateFallback": date_fallback,
+        "replaced": replaced_total,
+        "staleWarnings": stale_warnings,
     }

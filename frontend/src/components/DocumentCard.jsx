@@ -33,7 +33,7 @@ export default function DocumentCard({ doc, serialNumber }) {
     if (doc.exported) {
       const ok = await confirmAction({
         title: 'Save again?',
-        message: 'This document has already been saved to Excel. Save again?',
+        message: 'This document is already in Excel. Saving again will replace the old row.',
         confirmLabel: 'Yes, Save Again',
       })
       if (!ok) return

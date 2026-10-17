@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import api from './client'
 import { downloadBlob } from './download'
 import { promptText } from '../store/dialogStore'
@@ -26,10 +27,18 @@ export function newExcelFile(filename) {
 //   - NEED_NEW_WORKBOOK: a document dated in the current year has no workbook yet (year rollover)
 //   - NO_ACTIVE_WORKBOOK: this user has never exported before, so there's no
 //     workbook yet at all - this is the first-export flow
+// Success text for a save; also shows the server's stale-row warning (if any) as a warning toast.
+function saveResultMessage(data) {
+  if (data?.staleRowWarning) toast.warning(data.staleRowWarning)
+  const n = data?.replaced || 0
+  const base = data?.message || 'Excel file appended successfully.'
+  return n > 0 ? `${base} (${n} old ${n === 1 ? 'row' : 'rows'} replaced)` : base
+}
+
 export async function saveDocument(docId) {
   try {
     const res = await api.post(`/documents/${docId}/save`)
-    return res.data?.message || 'Excel file appended successfully.'
+    return saveResultMessage(res.data)
   } catch (err) {
     if (err.errorCode === 'NEED_NEW_WORKBOOK' || err.errorCode === 'NO_ACTIVE_WORKBOOK') {
       const year = err.response.data.detail.year
@@ -44,7 +53,7 @@ export async function saveDocument(docId) {
       if (!filename) return null
       await newExcelFile(filename)
       const res = await api.post(`/documents/${docId}/save`)
-      return res.data?.message || 'Excel file appended successfully.'
+      return saveResultMessage(res.data)
     }
     throw err
   }
@@ -62,6 +71,8 @@ function mergeBulk(first, retry) {
     succeeded: [...(first.succeeded || []), ...(retry?.succeeded || [])],
     failed: [...(first.failed || []), ...(retry?.failed || [])],
     dateFallback: [...(first.dateFallback || []), ...(retry?.dateFallback || [])],
+    replaced: (first.replaced || 0) + (retry?.replaced || 0),
+    staleWarnings: [...(first.staleWarnings || []), ...(retry?.staleWarnings || [])],
     blocked: retry ? retry.blocked : first.blocked,
   }
 }

@@ -285,7 +285,21 @@ async def append_row(filename: str, month: str, row: dict) -> Path:
         return await asyncio.to_thread(_append_row_sync, filename, month, row)
 
 
-def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, bool]:
+def row_key(row: dict) -> tuple[object, object, object]:
+    """The (Document Type, Number, Date) tuple a worksheet row is matched by."""
+    return (
+        _clean_cell(row["documentType"]),
+        _clean_cell(_format_number_cell(row)),
+        _clean_cell(row.get("date")),
+    )
+
+
+def _remove_rows_sync(
+    filename: str,
+    rows_to_remove: list[dict],
+    keep_file: bool = False,
+    protect: tuple[str, tuple] | None = None,
+) -> tuple[int, bool]:
     """Surgically deletes specific rows rather than rewriting the whole file.
     Rows have no stable ID (see _append_row_sync), so matching is by the same
     (Document Type, Number, Date) tuple _format_number_cell already produces
@@ -295,7 +309,11 @@ def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, b
     purged should come out, not every row that happens to match. Within a
     sheet, matched rows are deleted bottom-most-index-first so an earlier
     delete_rows() call never shifts the index of a row still pending
-    deletion. Returns (rows_removed, workbook_is_now_fully_empty)."""
+    deletion. Returns (rows_removed, workbook_is_now_fully_empty). keep_file=True (Save Again
+    replacing a row) never deletes the file even when it ends up without data rows.
+    protect=(sheet, key): the LAST row of that sheet matching `key` is never removed - it is
+    the row that was just appended, identical to the old one, and must survive even when the
+    old row is gone."""
     target = file_path(filename)
     if not target.exists() or not rows_to_remove:
         return 0, False
@@ -305,8 +323,7 @@ def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, b
         # the sheet the row was actually filed under (stored on the export record at save time);
         # older records fall back to the date's own month
         sheet_name = row.get("worksheet") or month_from_date(row.get("date"))
-        key = (row["documentType"], _format_number_cell(row), row.get("date"))
-        by_sheet[sheet_name][key] += 1
+        by_sheet[sheet_name][row_key(row)] += 1
 
     removed = 0
     fully_empty = False
@@ -323,17 +340,23 @@ def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, b
             sheet = workbook[sheet_name]
             remaining = Counter(counter)
             rows_to_delete: list[int] = []
+            protect_key = protect[1] if protect and protect[0] == sheet_name else None
+            last_protected_row = None
             for row_cells in sheet.iter_rows(min_row=2):
                 key = (row_cells[0].value, row_cells[1].value, row_cells[2].value)
+                if key == protect_key:
+                    last_protected_row = row_cells[0].row
                 if remaining.get(key, 0) > 0:
                     rows_to_delete.append(row_cells[0].row)
                     remaining[key] -= 1
+            if last_protected_row in rows_to_delete:
+                rows_to_delete.remove(last_protected_row)
             for idx in sorted(rows_to_delete, reverse=True):
                 sheet.delete_rows(idx)
             removed += len(rows_to_delete)
 
         fully_empty = all(sheet.max_row <= 1 for sheet in workbook.worksheets)
-        if not fully_empty:
+        if not fully_empty or keep_file:
             tmp_target = target.with_suffix(f".tmp{os.getpid()}.xlsx")
             try:
                 workbook.save(tmp_target)
@@ -351,13 +374,20 @@ def _remove_rows_sync(filename: str, rows_to_remove: list[dict]) -> tuple[int, b
     # file with an open handle (the lock file itself, held by this same
     # process for the `with` block above) cannot be deleted while that
     # handle is still open.
-    if fully_empty:
+    if fully_empty and not keep_file:
         target.unlink(missing_ok=True)
         _lock_path(target).unlink(missing_ok=True)
 
     return removed, fully_empty
 
 
-async def remove_rows(filename: str, rows_to_remove: list[dict]) -> tuple[int, bool]:
+async def remove_rows(
+    filename: str,
+    rows_to_remove: list[dict],
+    keep_file: bool = False,
+    protect: tuple[str, tuple] | None = None,
+) -> tuple[int, bool]:
     async with _get_write_lock(filename):
-        return await asyncio.to_thread(_remove_rows_sync, filename, rows_to_remove)
+        return await asyncio.to_thread(
+            _remove_rows_sync, filename, rows_to_remove, keep_file, protect
+        )

@@ -193,7 +193,7 @@ export default function DocumentsPage() {
     try {
       const ok = await confirmAction({
         title: 'Save all documents on this page?',
-        message: `${processed.length} will be saved${skipped > 0 ? `, ${skipped} skipped (not processed yet)` : ''}. Documents already saved before are saved again. Continue?`,
+        message: `${processed.length} will be saved${skipped > 0 ? `, ${skipped} skipped (not processed yet)` : ''}. Documents already in Excel will have their old row replaced. Continue?`,
         confirmLabel: 'Yes, Save All',
       })
       if (!ok) return
@@ -222,14 +222,19 @@ export default function DocumentsPage() {
       return
     }
     const failed = result.failed
+    if (result.staleWarnings?.length) {
+      const more = result.staleWarnings.length - 1
+      toast.warning(`${result.staleWarnings[0].message}${more > 0 ? ` (+${more} more documents need a second look)` : ''}`)
+    }
+    const replacedNote = result.replaced > 0 ? ` (${result.replaced} old ${result.replaced === 1 ? 'row' : 'rows'} replaced)` : ''
     const dateFallback = result.dateFallback.length
     if (failed.length === 0 && dateFallback === 0) {
-      toast.success(`${saved} saved successfully.`)
+      toast.success(`${saved} saved successfully.${replacedNote}`)
       return
     }
     const reasons = new Map()
     failed.forEach((f) => reasons.set(f.reason, (reasons.get(f.reason) || 0) + 1))
-    const parts = [`${saved} saved`]
+    const parts = [`${saved} saved${replacedNote}`]
     if (failed.length > 0) {
       parts.push(`${failed.length} failed - ${[...reasons].map(([reason, n]) => `${reason} (${n})`).join('; ')}`)
     }
