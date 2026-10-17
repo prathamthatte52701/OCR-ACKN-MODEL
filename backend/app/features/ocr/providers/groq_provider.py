@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 from groq import Groq
 
@@ -80,17 +81,26 @@ class GroqProvider(AIProvider):
 
     @staticmethod
     def _call(client: Groq, system_prompt: str, user_prompt: str) -> str:
-        response = client.chat.completions.create(
-            # The model comes from GROQ_MODEL (default openai/gpt-oss-120b): Groq has retired a
-            # model before (404 model_not_found) and every extraction failed. "low" reasoning
-            # effort keeps latency down and leaves the 300-token budget for the JSON answer.
-            model=settings.groq_model,
-            reasoning_effort="low",
-            messages=[
+        # Model, reasoning effort and max tokens come from settings: Groq has retired a model
+        # before, and models without a reasoning mode reject reasoning_effort (blank = not sent).
+        kwargs: dict[str, Any] = {
+            "model": settings.groq_model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.1,
-            max_tokens=300,
-        )
+            "temperature": 0.1,
+            "max_tokens": settings.groq_max_tokens,
+        }
+        if settings.groq_reasoning_effort is not None:
+            kwargs["reasoning_effort"] = settings.groq_reasoning_effort
+        response = client.chat.completions.create(**kwargs)
         return response.choices[0].message.content or ""
+
+
+def describe_config() -> str:
+    effort = settings.groq_reasoning_effort or "off"
+    return (
+        f"Groq config: model={settings.groq_model} reasoning_effort={effort} "
+        f"max_tokens={settings.groq_max_tokens} keys={len(_get_key_pool())}"
+    )

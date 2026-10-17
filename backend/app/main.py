@@ -23,6 +23,7 @@ from app.features.documents.router import MAX_BULK_FILES, MAX_FILE_SIZE, recover
 from app.features.documents.router import router as documents_router
 from app.features.excel.router import router as excel_router
 from app.features.ocr.pipeline import ocr_lock_status
+from app.features.ocr.providers.groq_provider import describe_config
 
 
 async def _recover_interrupted_uploads_in_background() -> None:
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     await connect_to_mongo()
     logger.info("MongoDB connected successfully")
+    logger.info(describe_config())
     # Fire-and-forget, started AFTER Mongo connects but BEFORE yield returns
     # control - the app starts serving traffic immediately while recovery
     # runs in the background. Task is pinned to app.state so it isn't
