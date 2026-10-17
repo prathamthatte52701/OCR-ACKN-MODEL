@@ -124,13 +124,13 @@ Required env vars (`backend/.env`):
 | `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and the server log |
 | `GROQ_REASONING_EFFORT` | no (unset = `low`) | `low`, `medium` or `high`. Set but blank = the parameter is not sent (use this for models without a reasoning mode). Anything else stops the app at start |
 | `GROQ_MAX_TOKENS` | no (default `300`) | whole number 50-4000; blank = 300; anything else stops the app at start |
-
-After changing `GROQ_MODEL`: (1) set `GROQ_REASONING_EFFORT` blank if the new model has no reasoning mode, (2) restart the backend, (3) upload ONE test document and check it is processed.
 | `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app |
 | `ADMIN_1_NAME` / `ADMIN_1_EMAIL` / `ADMIN_1_PASSWORD` and the same three for `ADMIN_2_` | only for seeding | the seed script reads the admin identities from here (none are in source); the password plaintext is used once, then only the bcrypt hash is stored |
 | `GOOGLE_CLIENT_ID` | only for Google Sign-In | verifies Google ID tokens server-side; frontend needs the matching `VITE_GOOGLE_CLIENT_ID` in its own `.env`. Without it, Google Sign-In simply doesn't render — email/password login is unaffected |
+
+After changing `GROQ_MODEL`: (1) set `GROQ_REASONING_EFFORT` blank if the new model has no reasoning mode, (2) restart the backend, (3) upload ONE test document and check it is processed.
 
 Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
 the app refuse to start with a clear error — it will never silently boot
