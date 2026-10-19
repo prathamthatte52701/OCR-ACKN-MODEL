@@ -34,7 +34,7 @@ export default function AdminLayout() {
       .then((res) => {
         const s = res.data
         if (!s.db?.ok) setSystem({ tone: 'bad', text: 'Database not reachable' })
-        else if (s.ocrLockWedged) setSystem({ tone: 'warn', text: 'OCR engine looks stuck' })
+        else if (s.ocrLockWedged) setSystem({ tone: 'warn', text: 'OCR engine stuck - restart the app' })
         else setSystem({ tone: 'ok', text: 'All services running' })
       })
       .catch(() => setSystem(null))

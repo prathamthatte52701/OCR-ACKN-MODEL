@@ -1,7 +1,10 @@
 import asyncio
 import os
 import tempfile
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 from bson import ObjectId
 from loguru import logger
@@ -29,6 +32,7 @@ from app.features.ocr.preprocessing import (
     get_pdf_header_text_or_image,
 )
 from app.features.ocr.providers.errors import (
+    OCR_STUCK,
     AIExtractionError,
     classify_exception,
     error_detail,
@@ -37,25 +41,171 @@ from app.features.ocr.providers.errors import (
 
 _ocr_lock = asyncio.Lock()  # only 1 OCR job runs at a time - mirrors old app's single-slot queue
 
-# Timestamp the lock was last acquired, or None while free. asyncio.Lock can't
-# itself deadlock from a hard thread crash (asyncio.wait_for's timeout still
-# fires and the `async with` block still exits), but a wedge is still
-# possible if something upstream hangs holding it without going through
-# run_ocr's timeout path. Tracking this lets /health tell "OCR subsystem
-# stuck" apart from "app fine, just mid-job."
-_lock_held_since: datetime | None = None
-# Generous ceiling above the longest legitimate hold (OCR_TIMEOUT_SECONDS_IMAGE)
-# to absorb scheduling jitter before flagging a false positive.
-_LOCK_WEDGED_THRESHOLD_SECONDS = OCR_TIMEOUT_SECONDS_IMAGE + 60
+# The slot belongs to the OCR THREAD, not to the await that started it. A Python thread cannot be
+# killed or cancelled: when the awaiting job times out (or is cancelled) the thread keeps running on
+# the one shared PaddleOCR model. Releasing the lock then let the next document start a second
+# run_ocr on the same model (double memory, mixed results, crashes). So on a timeout the lock is
+# handed to a small background task that releases it only after the thread has really ended.
+# REAL LIMIT: if the thread never ends, nothing but restarting the app clears it. The mitigation is
+# the "wedged" state below: waiting and new jobs fail fast with a clear message instead of hanging.
+_lock_held_since: datetime | None = None  # set while the slot is held (by a job or an orphan)
+_orphan_since: datetime | None = None  # set while the holder timed out but its thread still runs
+_orphan_tasks: set[asyncio.Task] = set()  # keeps the release tasks referenced (not GC'd)
+
+# A hold longer than the longest legitimate OCR call (the image timeout) plus this grace means an
+# orphaned thread has outlived its timeout: the slot is "wedged".
+OCR_WEDGE_GRACE_SECONDS = 60
+_LOCK_WEDGED_THRESHOLD_SECONDS = OCR_TIMEOUT_SECONDS_IMAGE + OCR_WEDGE_GRACE_SECONDS
+# How often a job waiting for the slot re-checks whether the slot is wedged. Waiters are NOT
+# timed out in general: a legitimate bulk queue of dozens of documents may wait a long time.
+_WAIT_SLICE_SECONDS = 3.0
+
+
+class OcrStuckError(Exception):
+    """The OCR slot is wedged (an orphaned OCR thread never ended): fail fast instead of waiting."""
 
 
 def ocr_lock_status() -> dict:
-    """Used by /health. wedged=True only if the lock has been held longer
-    than any legitimate single-document OCR call should ever take."""
+    """Used by /health and /admin/system. wedged=True only if the slot has been held longer than
+    any legitimate single-document OCR call should ever take. orphan=True means the current holder
+    already timed out and only its thread is still running."""
     if _lock_held_since is None:
-        return {"held": False, "wedged": False}
-    held_seconds = (datetime.now(UTC) - _lock_held_since).total_seconds()
-    return {"held": True, "wedged": held_seconds > _LOCK_WEDGED_THRESHOLD_SECONDS}
+        return {"held": False, "wedged": False, "orphan": False, "orphanSeconds": None}
+    now = datetime.now(UTC)
+    held_seconds = (now - _lock_held_since).total_seconds()
+    orphan = _orphan_since is not None
+    return {
+        "held": True,
+        "wedged": held_seconds > _LOCK_WEDGED_THRESHOLD_SECONDS,
+        "orphan": orphan,
+        "orphanSeconds": (now - _orphan_since).total_seconds() if _orphan_since else None,
+    }
+
+
+def _reset_slot_for_tests() -> None:
+    """Fresh lock and cleared state (tests run on a new event loop each time)."""
+    global _ocr_lock, _lock_held_since, _orphan_since
+    for task in list(_orphan_tasks):
+        try:
+            task.cancel()
+        except RuntimeError:  # its loop is already closed
+            pass
+    _orphan_tasks.clear()
+    _ocr_lock = asyncio.Lock()
+    _lock_held_since = None
+    _orphan_since = None
+
+
+def _release_slot() -> None:
+    global _lock_held_since, _orphan_since
+    _lock_held_since = None
+    _orphan_since = None
+    _ocr_lock.release()
+
+
+async def _acquire_slot() -> None:
+    """Waits for the slot in short slices so a wedged slot is noticed. The SAME acquire is kept for
+    the whole wait (cancelling and re-queueing every slice would lose the waiter's place in the
+    FIFO queue). Never returns holding nothing and never leaks the lock: on any exit other than a
+    successful acquire the pending acquire is cancelled, and if it had just succeeded it is given
+    back."""
+    global _lock_held_since
+    if ocr_lock_status()["wedged"]:
+        raise OcrStuckError()
+    acquire = asyncio.ensure_future(_ocr_lock.acquire())
+    try:
+        while True:
+            finished, _ = await asyncio.wait({acquire}, timeout=_WAIT_SLICE_SECONDS)
+            if finished:
+                acquire.result()
+                break
+            if ocr_lock_status()["wedged"]:
+                raise OcrStuckError()
+    except BaseException:
+        if acquire.done():
+            if not acquire.cancelled() and acquire.exception() is None:
+                _ocr_lock.release()  # we had just got it: give it back
+        else:
+            acquire.cancel()
+        raise
+    _lock_held_since = datetime.now(UTC)
+
+
+def _resolve(done: asyncio.Future, outcome: tuple[bool, Any]) -> None:
+    if not done.done():
+        done.set_result(outcome)
+
+
+async def _release_when_done(done: asyncio.Future, started: datetime | None) -> None:
+    try:
+        await done
+    finally:
+        _release_slot()
+        if done.done() and started is not None:
+            seconds = (datetime.now(UTC) - started).total_seconds()
+            logger.info(
+                f"Orphaned OCR thread ended after {seconds:.0f}s; the OCR slot is free again"
+            )
+
+
+def _hand_slot_to_thread(done: asyncio.Future, why: str) -> None:
+    """The awaiting job gave up (timeout or cancellation) but its thread may still run: keep the
+    slot locked until the thread really ends."""
+    global _orphan_since
+    if done.done():  # the thread finished right at the boundary: nothing is orphaned
+        _release_slot()
+        return
+    started = _lock_held_since
+    _orphan_since = datetime.now(UTC)
+    logger.warning(
+        f"OCR {why}; its thread is still running, so the OCR slot stays locked until it ends"
+    )
+    task = asyncio.get_running_loop().create_task(_release_when_done(done, started))
+    _orphan_tasks.add(task)
+    task.add_done_callback(_orphan_tasks.discard)
+
+
+async def _run_in_slot[T](fn: Callable[[], T], timeout: float) -> T:
+    """Runs fn in its own daemon thread while holding the OCR slot. Returns fn's result, re-raises
+    its exception, raises TimeoutError when it takes longer than `timeout` (the job stops waiting at
+    once, but the slot is only released when the thread ends) and OcrStuckError when the slot is
+    wedged. A daemon thread (not the default executor) so a thread that never ends cannot block the
+    process from exiting."""
+    await _acquire_slot()
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[tuple[bool, Any]] = loop.create_future()
+
+    def work() -> None:
+        try:
+            outcome: tuple[bool, Any] = (True, fn())
+        except BaseException as exc:  # noqa: BLE001 - handed back to the awaiting job
+            outcome = (False, exc)
+        try:
+            loop.call_soon_threadsafe(_resolve, done, outcome)
+        except RuntimeError:  # the loop is closed (app shutdown)
+            pass
+
+    try:
+        threading.Thread(target=work, name="ocr-worker", daemon=True).start()
+    except BaseException:
+        _release_slot()
+        raise
+    try:
+        ok, value = await asyncio.wait_for(asyncio.shield(done), timeout)
+    except TimeoutError:
+        if not done.done():
+            _hand_slot_to_thread(done, f"timed out after {timeout:.0f}s")
+            raise
+        ok, value = done.result()  # it finished at the very boundary: use the result
+        _release_slot()
+    except asyncio.CancelledError:
+        _hand_slot_to_thread(done, "job was cancelled")
+        raise
+    else:
+        _release_slot()
+    if ok:
+        return value
+    raise value
 
 
 # One normalization at a time: each decodes and warps a full-size photo, and
@@ -91,8 +241,9 @@ async def _normalize_photo_page(buffer: bytes) -> bytes:
 
 
 async def _classify_under_lock(png: bytes) -> tuple[int, float]:
-    async with _ocr_lock:
-        return await asyncio.to_thread(classify_page_orientation, png)
+    # Same slot and the same hand-off rule as OCR: a classifier that times out keeps the slot until
+    # its thread ends. The caller (normalize_photo) fails open on any exception.
+    return await _run_in_slot(lambda: classify_page_orientation(png), OCR_TIMEOUT_SECONDS_IMAGE)
 
 
 async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
@@ -149,29 +300,25 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(image_bytes)
-            global _lock_held_since
-            async with _ocr_lock:
-                _lock_held_since = datetime.now(UTC)
-                try:
-                    text = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            run_ocr,
-                            tmp_path,
-                            use_doc_orientation_classify=use_doc_orientation_classify,
-                            text_det_limit_side_len=text_det_limit_side_len,
-                        ),
-                        timeout=timeout,
-                    )
-                except TimeoutError:
-                    text = None
-                finally:
-                    _lock_held_since = None
+            try:
+                text = await _run_in_slot(
+                    lambda: run_ocr(
+                        tmp_path,
+                        use_doc_orientation_classify=use_doc_orientation_classify,
+                        text_det_limit_side_len=text_det_limit_side_len,
+                    ),
+                    timeout,
+                )
+            except TimeoutError:
+                text = None
             return text
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+    except OcrStuckError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error(f"Header OCR error: {exc}")
         return None
@@ -222,7 +369,19 @@ async def process_document(
                 doc_id, {"uploadStatus": "failed", "processingError": str(exc)}
             )
             return
-        header_text = await _extract_header_text(buffer, mime_type)
+        try:
+            header_text = await _extract_header_text(buffer, mime_type)
+        except OcrStuckError:
+            logger.error("OCR slot is wedged: failing the document fast")
+            await _update_active_document(
+                doc_id,
+                {
+                    "uploadStatus": "failed",
+                    "processingError": user_message(OCR_STUCK),
+                    "processingErrorCode": OCR_STUCK,
+                },
+            )
+            return
         if not header_text or not header_text.strip():
             await _update_active_document(
                 doc_id,

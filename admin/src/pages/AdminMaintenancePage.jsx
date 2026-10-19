@@ -54,7 +54,7 @@ function StatusPill({ sys }) {
       text = 'Database not reachable'
     } else if (sys.data.ocrLockWedged) {
       tone = 'amber'
-      text = 'OCR engine looks stuck'
+      text = 'OCR engine stuck - restart the app'
     } else {
       tone = 'green'
       text = 'System healthy'

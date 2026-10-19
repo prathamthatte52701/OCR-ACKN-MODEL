@@ -1,7 +1,7 @@
 """Why did AI extraction fail? A small closed set of codes instead of a catch-all "check the key".
 
 Public names (used by groq_provider.py, ai_extraction.py, pipeline.py):
-  CODES                         - the seven code strings below
+  CODES                         - the eight code strings below
   AIExtractionError(code, status=None, model=None)
   classify_exception(exc)       -> (code, status)   for any exception the SDK/asyncio can raise
   combine_failures(failures)    -> (code, status)   final cause after failing over across keys
@@ -20,7 +20,9 @@ MODEL_GONE = "MODEL_GONE"
 TIMEOUT_NETWORK = "TIMEOUT_NETWORK"
 BAD_REPLY = "BAD_REPLY"
 UNKNOWN = "UNKNOWN"
-CODES = (NO_KEYS, AUTH, RATE_LIMIT, MODEL_GONE, TIMEOUT_NETWORK, BAD_REPLY, UNKNOWN)
+# Not an AI failure: the OCR slot is held by a timed-out OCR thread that never ended (pipeline.py)
+OCR_STUCK = "OCR_STUCK"
+CODES = (NO_KEYS, AUTH, RATE_LIMIT, MODEL_GONE, TIMEOUT_NETWORK, BAD_REPLY, UNKNOWN, OCR_STUCK)
 
 _USER_MESSAGES = {
     NO_KEYS: "The AI service is not set up correctly. Please contact the administrator.",
@@ -32,6 +34,10 @@ _USER_MESSAGES = {
     ),
     BAD_REPLY: "The AI gave an unreadable answer. Please try again.",
     UNKNOWN: "Something went wrong while reading this document. Please try again.",
+    OCR_STUCK: (
+        "The text reader is stuck. Please tell the administrator to restart the app, "
+        "then press Reprocess."
+    ),
 }
 
 _MODEL_GONE_BODY_CODES = {"model_not_found", "model_decommissioned", "model_not_active"}
