@@ -248,3 +248,49 @@ def empty_extraction_result(document_type: str) -> dict:
         "numberAutoCorrected": False,
         "dateAutoCorrected": False,
     }
+
+
+# ---- Every document field an extraction (a read of the paper) can write or leave behind. ----
+# ONE list used by Reprocess (to wipe them all) and by process_document (to write them all), so the
+# two cannot drift apart. A drift-guard test checks every key the pipeline writes is in here.
+EXTRACTION_VALUE_FIELDS = ("taxInvoiceNo", "referenceNo", "number", "date")
+EXTRACTION_FLAG_FIELDS = (
+    "taxInvoiceNoNeedsReview",
+    "referenceNoNeedsReview",
+    "numberNeedsReview",
+    "taxInvoiceNoAutoCorrected",
+    "numberAutoCorrected",
+    "dateAutoCorrected",
+)
+# The retired AI-confidence fields: old rows may still carry them (the API hides them).
+LEGACY_CONFIDENCE_FIELDS = (
+    "taxInvoiceNoConfidence",
+    "referenceNoConfidence",
+    "numberConfidence",
+    "dateConfidence",
+)
+EXTRACTION_DERIVED_FIELDS = (
+    *EXTRACTION_VALUE_FIELDS,
+    *EXTRACTION_FLAG_FIELDS,
+    "ocrTextHidden",
+    "processedAt",
+    *LEGACY_CONFIDENCE_FIELDS,
+)
+
+
+def extraction_reset_ops() -> dict:
+    """Mongo update operators that wipe everything a previous read left behind: values None, flags
+    False, the old OCR text and processedAt None, legacy confidence fields removed."""
+    to_set: dict = {field: None for field in EXTRACTION_VALUE_FIELDS}
+    to_set.update({field: False for field in EXTRACTION_FLAG_FIELDS})
+    to_set["ocrTextHidden"] = None
+    to_set["processedAt"] = None
+    return {"$set": to_set, "$unset": {field: "" for field in LEGACY_CONFIDENCE_FIELDS}}
+
+
+def extraction_success_fields(result: dict) -> dict:
+    """What a successful read writes: the four values (None when the result lacks one) and ALL six
+    flags explicitly True/False - a flag missing from the result is False, never an old value."""
+    fields: dict = {field: result.get(field) for field in EXTRACTION_VALUE_FIELDS}
+    fields.update({field: bool(result.get(field, False)) for field in EXTRACTION_FLAG_FIELDS})
+    return fields

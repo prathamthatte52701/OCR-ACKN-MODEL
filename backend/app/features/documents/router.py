@@ -42,7 +42,7 @@ from app.features.documents.schemas import (
     MessageResponse,
     PurgeFileResponse,
 )
-from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
+from app.features.ocr.extraction import extraction_reset_ops, normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
 
@@ -783,22 +783,24 @@ async def reprocess_document(
     buffer = await download_buffer(doc["gridFsFileId"])
 
     db = get_database()
+    # Wipe EVERYTHING the previous read left behind (values, the six flags, the old OCR text,
+    # processedAt, legacy confidence fields) in the same update, so a failed or partial re-read
+    # can never leave old "needs review"/"auto-corrected" badges or stale text.
+    reset = extraction_reset_ops()
     await db.documents.update_one(
         {"_id": doc["_id"]},
         {
             "$set": {
+                **reset["$set"],
                 "uploadStatus": "uploaded",
                 "processingError": None,
                 "processingErrorCode": None,
                 "recoveryAttempts": 0,
-                "taxInvoiceNo": None,
-                "referenceNo": None,
-                "number": None,
-                "date": None,
                 "edited": False,
                 "exported": False,
                 "updatedAt": datetime.now(UTC),
-            }
+            },
+            "$unset": reset["$unset"],
         },
     )
 

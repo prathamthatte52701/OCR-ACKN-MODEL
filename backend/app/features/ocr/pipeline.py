@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.database import get_database
 from app.core.image_limits import ImageTooLarge, check_upload
 from app.features.ocr.ai_extraction import extract_header
+from app.features.ocr.extraction import extraction_success_fields
 from app.features.ocr.paddle_runner import (
     OCR_TIMEOUT_SECONDS_IMAGE,
     OCR_TIMEOUT_SECONDS_PDF,
@@ -520,20 +521,7 @@ async def process_document(
             "processingErrorCode": None,
             "processedAt": datetime.now(UTC),
         }
-        for key in (
-            "taxInvoiceNo",
-            "referenceNo",
-            "number",
-            "date",
-            "taxInvoiceNoNeedsReview",
-            "referenceNoNeedsReview",
-            "numberNeedsReview",
-            "taxInvoiceNoAutoCorrected",
-            "numberAutoCorrected",
-            "dateAutoCorrected",
-        ):
-            if key in result:
-                update[key] = result[key]
+        update.update(extraction_success_fields(result))
         if await _update_active_document(doc_id, update):
             await _log_processed(doc_id)
     except Exception as exc:  # noqa: BLE001
