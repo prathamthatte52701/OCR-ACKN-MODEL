@@ -71,7 +71,12 @@ api.interceptors.response.use(
     const fallback = !err.response
       ? 'Could not connect to the server. Check your internet connection and try again.'
       : 'Something went wrong. Please try again.'
-    err.userMessage = extractMessage(err.response?.data) || fallback
+    let message = extractMessage(err.response?.data)
+    // slowapi's raw "Rate limit exceeded: 120 per 1 hour" is not for users; real sentences pass through.
+    if (err.response?.status === 429 && /^Rate limit exceeded/i.test(message || '')) {
+      message = 'Too many requests. Please wait a few minutes and try again.'
+    }
+    err.userMessage = message || fallback
     // The structured 409 detail (e.g. NEED_NEW_WORKBOOK) - callers that need
     // the machine-readable code read this instead of re-parsing userMessage.
     err.errorCode =

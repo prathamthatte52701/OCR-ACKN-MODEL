@@ -32,7 +32,7 @@ from app.core.database import get_database
 from app.core.image_limits import ImageTooLarge, check_upload
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
-from app.core.rate_limit import limiter
+from app.core.rate_limit import UPLOAD_LIMIT, limiter
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
 from app.features.documents.schemas import (
@@ -268,7 +268,7 @@ async def _validate_and_store(
 
 
 @router.post("/upload", status_code=201)
-@limiter.limit("60/hour")
+@limiter.limit(UPLOAD_LIMIT)
 async def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -279,8 +279,9 @@ async def upload_document(
     """Rate limited - every upload triggers real PaddleOCR + Groq work
     serialized through a single process-wide lock (see ocr/pipeline.py), so
     unthrottled uploads are a DoS vector against every OTHER user's queue,
-    not just this account's own storage. 60/hour is well above genuine
-    single-document use while making scripted spam impractical."""
+    not just this account's own storage. UPLOAD_LIMIT (per IP, shared by
+    several staff) is well above genuine single-document use while making
+    scripted spam impractical."""
     if not document:
         raise HTTPException(status_code=400, detail="No file uploaded.")
     buffer = await read_limited(document)

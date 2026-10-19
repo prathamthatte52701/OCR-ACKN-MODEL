@@ -417,6 +417,12 @@ export default function UploadPage() {
         setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'slow', error: UPLOAD_UNCONFIRMED_MESSAGE })))
         return
       }
+      if (err.response.status === 429) {
+        // Rejected before anything was created: put every row back so the form is usable again.
+        setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'waiting', error: '' })))
+        setBulkError(err.userMessage)
+        return
+      }
       const message = err.userMessage || 'Upload failed. Please try again.'
       setBulkFiles((prev) => prev.map((f) => ({ ...f, status: 'failed', error: message })))
     }

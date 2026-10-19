@@ -17,13 +17,19 @@ export function getDocument(id) {
   return api.get(`/documents/${id}`).then((res) => res.data.document)
 }
 
+const UPLOAD_LIMIT_MESSAGE = 'Too many uploads. Please wait a few minutes and try again.'
+function uploadLimitMessage(err) {
+  if (err.response?.status === 429) err.userMessage = UPLOAD_LIMIT_MESSAGE
+  throw err
+}
+
 export function uploadDocument(file, documentType) {
   const formData = new FormData()
   formData.append('document', file)
   formData.append('documentType', documentType)
   return api
     .post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-    .then((res) => res.data.document)
+    .then((res) => res.data.document, uploadLimitMessage)
 }
 
 export function bulkUploadDocuments(files, documentTypes) {
@@ -32,7 +38,7 @@ export function bulkUploadDocuments(files, documentTypes) {
   documentTypes.forEach((type) => formData.append('documentTypes', type))
   return api
     .post('/documents/bulk-upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
-    .then((res) => res.data.results)
+    .then((res) => res.data.results, uploadLimitMessage)
 }
 
 export function correctDocument(id, field, value) {

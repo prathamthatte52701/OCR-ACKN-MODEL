@@ -9,6 +9,10 @@ from app.core.security import decode_token
 
 limiter = Limiter(key_func=get_remote_address)
 
+# Single-document uploads per IP. The limit is per IP and several staff share one office IP, so it
+# is well above what one person uploads; it only has to make scripted spam impractical.
+UPLOAD_LIMIT = "120/hour"
+
 
 def user_or_ip_key(request: Request) -> str:
     """Per-account key for endpoints where the risk is a single authenticated
