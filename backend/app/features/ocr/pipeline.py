@@ -42,6 +42,7 @@ from app.features.ocr.providers.errors import (
     OCR_ENGINE_ERROR,
     OCR_STUCK,
     OCR_TIMEOUT,
+    PROCESSING_ERROR,
     AIExtractionError,
     classify_exception,
     error_detail,
@@ -389,13 +390,23 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         return None
 
 
-async def _update_active_document(doc_id: ObjectId, update: dict) -> bool:
-    """Returns False when no active document matched (e.g. deleted meanwhile)."""
+async def _update_active_document(doc_id: ObjectId, update: dict, run_id: str | None) -> bool:
+    """Every write of a processing job goes through here and is conditional on the job's run id:
+    the document must still belong to THIS job (processingRunId == run_id; None matches a
+    document that has no id, i.e. one from before run ids existed). Returns False when nothing
+    matched: the document was deleted meanwhile, or a newer run owns it (the job is stale and
+    writes nothing)."""
     db = get_database()
     update["updatedAt"] = datetime.now(UTC)
     res = await db.documents.update_one(
-        {"_id": doc_id, "isDeleted": {"$ne": True}}, {"$set": update}
+        {"_id": doc_id, "isDeleted": {"$ne": True}, "processingRunId": run_id}, {"$set": update}
     )
+    if res.matched_count == 0:
+        still_there = await db.documents.find_one(
+            {"_id": doc_id, "isDeleted": {"$ne": True}}, {"_id": 1}
+        )
+        if still_there:
+            logger.warning("Stale processing job ignored: a newer run owns this document")
     return res.matched_count > 0
 
 
@@ -427,6 +438,7 @@ async def _fail_ocr(
     document_type: str,
     mime_type: str,
     started: float,
+    run_id: str | None,
 ) -> None:
     """Marks the document failed with the code and its plain user message. Logs the code, the
     exception class, a short message, the document type, the mime type and the elapsed seconds:
@@ -442,14 +454,20 @@ async def _fail_ocr(
             "processingError": user_message(code),
             "processingErrorCode": code,
         },
+        run_id,
     )
 
 
 async def process_document(
-    doc_id: ObjectId, buffer: bytes, mime_type: str, document_type: str
+    doc_id: ObjectId,
+    buffer: bytes,
+    mime_type: str,
+    document_type: str,
+    run_id: str | None = None,
 ) -> None:
     """Full OCR -> AI extraction -> validation pipeline for one document -
-    mirrors the old app's processDocument()."""
+    mirrors the old app's processDocument(). run_id is the identity of this job: every write is
+    conditional on the document still carrying it (see _update_active_document)."""
     try:
         # Defense in depth: covers reprocess, startup recovery and files stored before the
         # upload-time check existed. Must run before any decode.
@@ -457,7 +475,7 @@ async def process_document(
             await check_upload(buffer, mime_type)
         except ImageTooLarge as exc:
             await _update_active_document(
-                doc_id, {"uploadStatus": "failed", "processingError": str(exc)}
+                doc_id, {"uploadStatus": "failed", "processingError": str(exc)}, run_id
             )
             return
         started = time.monotonic()
@@ -465,12 +483,26 @@ async def process_document(
             header_text = await _extract_header_text(buffer, mime_type)
         except OcrEngineError as exc:
             await _fail_ocr(
-                doc_id, OCR_ENGINE_ERROR, exc.cls_name, exc.short, document_type, mime_type, started
+                doc_id,
+                OCR_ENGINE_ERROR,
+                exc.cls_name,
+                exc.short,
+                document_type,
+                mime_type,
+                started,
+                run_id,
             )
             return
         except OcrTimeoutError as exc:
             await _fail_ocr(
-                doc_id, OCR_TIMEOUT, "TimeoutError", str(exc), document_type, mime_type, started
+                doc_id,
+                OCR_TIMEOUT,
+                "TimeoutError",
+                str(exc),
+                document_type,
+                mime_type,
+                started,
+                run_id,
             )
             return
         except OcrStuckError:
@@ -482,11 +514,12 @@ async def process_document(
                     "processingError": user_message(OCR_STUCK),
                     "processingErrorCode": OCR_STUCK,
                 },
+                run_id,
             )
             return
         if not header_text or not header_text.strip():
             await _fail_ocr(
-                doc_id, NO_TEXT, None, "no text found", document_type, mime_type, started
+                doc_id, NO_TEXT, None, "no text found", document_type, mime_type, started, run_id
             )
             return
 
@@ -511,6 +544,7 @@ async def process_document(
                     "processingError": user_message(code),
                     "processingErrorCode": code,
                 },
+                run_id,
             )
             return
 
@@ -522,7 +556,7 @@ async def process_document(
             "processedAt": datetime.now(UTC),
         }
         update.update(extraction_success_fields(result))
-        if await _update_active_document(doc_id, update):
+        if await _update_active_document(doc_id, update, run_id):
             await _log_processed(doc_id)
     except Exception as exc:  # noqa: BLE001
         logger.error(f"process_document error: {exc}")
@@ -530,6 +564,8 @@ async def process_document(
             doc_id,
             {
                 "uploadStatus": "failed",
-                "processingError": "Something went wrong while processing this document.",
+                "processingError": user_message(PROCESSING_ERROR),
+                "processingErrorCode": PROCESSING_ERROR,
             },
+            run_id,
         )

@@ -23,7 +23,9 @@ export function useReprocessDocument(id) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => reprocessDocument(id),
-    onSuccess: () => {
+    // onSettled, not onSuccess: after a 409 (already processing) the cached doc
+    // may be stale ('failed'), so refetch to resume polling the running job.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: documentKeys.detail(id) })
     },
   })

@@ -48,7 +48,7 @@ def _actions(body: dict) -> list[str]:
 
 
 async def test_user_actions_each_log_one_entry_only_for_owner(
-    client: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     a = await make_user()
     b = await make_user()
@@ -65,7 +65,11 @@ async def test_user_actions_each_log_one_entry_only_for_owner(
 
     monkeypatch.setattr(pipeline, "_extract_header_text", fake_text)
     monkeypatch.setattr(pipeline, "extract_header", fake_extract)
-    await pipeline.process_document(ObjectId(doc_id), PDF, "application/pdf", "Delivery Challan")
+    # a real job always carries the run id its document was given when it was started
+    run_id = (await db.documents.find_one({"_id": ObjectId(doc_id)}))["processingRunId"]
+    await pipeline.process_document(
+        ObjectId(doc_id), PDF, "application/pdf", "Delivery Challan", run_id
+    )
     assert _actions(await _activity(client, a)).count("document_processed") == 1
 
     res = await client.patch(

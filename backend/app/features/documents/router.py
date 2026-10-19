@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 from bson import ObjectId
 from fastapi import (
@@ -34,6 +35,7 @@ from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import UPLOAD_LIMIT, limiter
 from app.features.auth.dependencies import CurrentUser, get_current_user
+from app.features.documents.correction import correction_set_fields
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
 from app.features.documents.schemas import (
     CorrectRequest,
@@ -45,6 +47,7 @@ from app.features.documents.schemas import (
 from app.features.ocr.extraction import extraction_reset_ops, normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
+from app.features.ocr.providers.errors import PROCESSING_ERROR, user_message
 
 MONTH_RE = re.compile(r"^(20\d{2}|2100)-(0[1-9]|1[0-2])$")
 
@@ -236,6 +239,8 @@ async def _validate_and_store(
             "size": len(buffer),
             "gridFsFileId": grid_fs_file_id,
             "uploadStatus": "uploaded",
+            # identity of the processing job that owns this document: only that job may write
+            "processingRunId": uuid4().hex,
             "documentType": document_type,
             "taxInvoiceNo": None,
             "referenceNo": None,
@@ -295,7 +300,12 @@ async def upload_document(
         current_user.id,
     )
     background_tasks.add_task(
-        process_document, doc["_id"], buffer, doc["mimeType"], doc["documentType"]
+        process_document,
+        doc["_id"],
+        buffer,
+        doc["mimeType"],
+        doc["documentType"],
+        doc["processingRunId"],
     )
     return {"document": _serialize_document(doc)}
 
@@ -319,7 +329,7 @@ async def bulk_upload_documents(
         raise HTTPException(status_code=400, detail="Each file needs a document type.")
 
     results: list[dict[str, object]] = []
-    created: list[tuple[ObjectId, bytes, str, str]] = []
+    created: list[tuple[ObjectId, bytes, str, str, str]] = []
     for upload_file, doc_type in zip(documents, document_types, strict=True):
         buffer = await read_limited(upload_file)
         if buffer is None:
@@ -338,7 +348,9 @@ async def bulk_upload_documents(
         except HTTPException as exc:
             results.append({"originalFilename": upload_file.filename, "error": exc.detail})
             continue
-        created.append((doc["_id"], buffer, doc["mimeType"], doc["documentType"]))
+        created.append(
+            (doc["_id"], buffer, doc["mimeType"], doc["documentType"], doc["processingRunId"])
+        )
         results.append({"document": _serialize_document(doc)})
 
     # Strictly sequential - one file's full OCR->AI->save pipeline completes
@@ -351,21 +363,20 @@ async def bulk_upload_documents(
     # at whichever file triggered it, silently leaving every later file in
     # the batch stuck at "uploaded" forever.
     async def _run_sequentially() -> None:
-        for doc_id, buffer, mime_type, doc_type in created:
+        for doc_id, buffer, mime_type, doc_type, run_id in created:
             try:
-                await process_document(doc_id, buffer, mime_type, doc_type)
+                await process_document(doc_id, buffer, mime_type, doc_type, run_id)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Bulk-upload file {doc_id} crashed the pipeline: {exc}")
                 db = get_database()
                 try:
                     await db.documents.update_one(
-                        {"_id": doc_id},
+                        {"_id": doc_id, "processingRunId": run_id},
                         {
                             "$set": {
                                 "uploadStatus": "failed",
-                                "processingError": (
-                                    "Something went wrong while processing this document."
-                                ),
+                                "processingError": user_message(PROCESSING_ERROR),
+                                "processingErrorCode": PROCESSING_ERROR,
                                 "updatedAt": datetime.now(UTC),
                             }
                         },
@@ -757,38 +768,28 @@ async def reprocess_document(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> MessageResponse:
-    doc = await _get_owned_document(doc_id, current_user.id)
-    if doc.get("filePurged"):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "The original file was removed to save space, so this document "
-                "can no longer be reprocessed."
-            ),
-        )
-    # Already queued/processing (and not stuck): a second reprocess used to
-    # queue a duplicate OCR job whose late result then overwrote the user's
-    # manual correction. A document stuck for > REPROCESS_STUCK_AFTER (crash)
-    # can still be reprocessed.
-    updated_at = doc.get("updatedAt")
-    if (
-        doc.get("uploadStatus") == "uploaded"
-        and updated_at is not None
-        and datetime.now(UTC) - updated_at.replace(tzinfo=updated_at.tzinfo or UTC)
-        < REPROCESS_STUCK_AFTER
-    ):
-        raise HTTPException(
-            status_code=409, detail="This document is already being processed. Please wait."
-        )
-    buffer = await download_buffer(doc["gridFsFileId"])
-
     db = get_database()
-    # Wipe EVERYTHING the previous read left behind (values, the six flags, the old OCR text,
-    # processedAt, legacy confidence fields) in the same update, so a failed or partial re-read
-    # can never leave old "needs review"/"auto-corrected" badges or stale text.
+    now = datetime.now(UTC)
+    run_id = uuid4().hex
     reset = extraction_reset_ops()
-    await db.documents.update_one(
-        {"_id": doc["_id"]},
+    # ONE atomic claim: the check ("not already being processed") and the reset are the same
+    # update, so two quick clicks can never both win. The guard is exactly: the user's own,
+    # not deleted, original file still there, and NOT (status 'uploaded' and touched less than
+    # REPROCESS_STUCK_AFTER ago) - a document stuck longer (crash) can still be reprocessed.
+    # The new processingRunId makes any older job for this document stale (it writes nothing).
+    # Wipe EVERYTHING the previous read left behind in the same update (issue 8).
+    doc = await db.documents.find_one_and_update(
+        {
+            "_id": doc_id,
+            "userId": current_user.id,
+            "isDeleted": {"$ne": True},
+            "filePurged": {"$ne": True},
+            "$or": [
+                {"uploadStatus": {"$ne": "uploaded"}},
+                {"updatedAt": {"$lte": now - REPROCESS_STUCK_AFTER}},
+                {"updatedAt": None},
+            ],
+        },
         {
             "$set": {
                 **reset["$set"],
@@ -798,16 +799,62 @@ async def reprocess_document(
                 "recoveryAttempts": 0,
                 "edited": False,
                 "exported": False,
-                "updatedAt": datetime.now(UTC),
+                "processingRunId": run_id,
+                "updatedAt": now,
             },
             "$unset": reset["$unset"],
         },
+        # BEFORE: if the original file cannot be read afterwards, the document goes back exactly
+        # as it was (its values, flags and manual corrections must never be lost to a failed read).
+        return_document=ReturnDocument.BEFORE,
     )
+    if doc is None:
+        existing = await _get_owned_document(doc_id, current_user.id)  # 404: missing/other user
+        if existing.get("filePurged"):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The original file was removed to save space, so this document "
+                    "can no longer be reprocessed."
+                ),
+            )
+        raise HTTPException(
+            status_code=409, detail="This document is already being processed. Please wait."
+        )
+    try:
+        buffer = await download_buffer(doc["gridFsFileId"])
+    except Exception as exc:  # noqa: BLE001
+        # The claim already moved the document to 'uploaded' and wiped its values: put it back
+        # EXACTLY as it was before (never stuck in 'uploaded', nothing lost), conditional on our run
+        # id so a newer run is left alone.
+        logger.error(f"Reprocess could not read the original file: class={type(exc).__name__}")
+        touched = [
+            *reset["$set"],
+            *reset["$unset"],
+            "uploadStatus",
+            "processingError",
+            "processingErrorCode",
+            "recoveryAttempts",
+            "edited",
+            "exported",
+            "processingRunId",
+            "updatedAt",
+        ]
+        restore: dict = {}
+        if to_set := {k: doc[k] for k in touched if k in doc}:
+            restore["$set"] = to_set
+        if to_unset := {k: "" for k in touched if k not in doc}:
+            restore["$unset"] = to_unset
+        await db.documents.update_one({"_id": doc["_id"], "processingRunId": run_id}, restore)
+        raise HTTPException(
+            status_code=500, detail="Could not read the original file. Please try again."
+        ) from None
 
     async def _reprocess_then_stamp() -> None:
-        await process_document(doc["_id"], buffer, doc["mimeType"], doc["documentType"])
+        await process_document(doc["_id"], buffer, doc["mimeType"], doc["documentType"], run_id)
         await db.documents.update_one(
-            {"_id": doc["_id"]}, {"$set": {"reprocessedAt": datetime.now(UTC)}}
+            {"_id": doc["_id"], "processingRunId": run_id},
+            {"$set": {"reprocessedAt": datetime.now(UTC)}},
         )
 
     await safe_log_action(
@@ -984,21 +1031,7 @@ async def correct_document(
     old_value = doc.get(body.field)
     db = get_database()
     now = datetime.now(UTC)
-    set_fields = {
-        body.field: value,
-        "edited": True,
-        # A correction changes what would be written to Excel - the previous
-        # export (if any) no longer reflects this document's current values.
-        "exported": False,
-        "updatedAt": now,
-    }
-    if body.field in ("taxInvoiceNo", "number", "date"):
-        # Manual entry supersedes the auto-correction pass - no longer
-        # something the OCR correction layer touched.
-        set_fields[f"{body.field}AutoCorrected"] = False
-    if body.field in ("taxInvoiceNo", "referenceNo", "number"):
-        # The user typed this value - the "looks incomplete" flag no longer applies.
-        set_fields[f"{body.field}NeedsReview"] = False
+    set_fields = correction_set_fields(body.field, value, now)
     await db.documents.update_one({"_id": doc["_id"]}, {"$set": set_fields})
     await db.corrections.insert_one(
         {
@@ -1046,7 +1079,8 @@ async def _claim_for_recovery(doc: dict) -> dict | None:
             "uploadStatus": "uploaded",
             "recoveryAttempts": {"$in": [None, 0]} if seen == 0 else seen,
         },
-        {"$inc": {"recoveryAttempts": 1}},
+        # a fresh run id: any older job for this document is stale from now on
+        {"$inc": {"recoveryAttempts": 1}, "$set": {"processingRunId": uuid4().hex}},
         return_document=ReturnDocument.AFTER,
     )
 
@@ -1065,7 +1099,7 @@ async def recover_interrupted_uploads() -> int:
             continue
         if claimed["recoveryAttempts"] > MAX_RECOVERY_ATTEMPTS:
             await db.documents.update_one(
-                {"_id": doc["_id"]},
+                {"_id": doc["_id"], "processingRunId": claimed["processingRunId"]},
                 {
                     "$set": {
                         "uploadStatus": "failed",
@@ -1077,10 +1111,16 @@ async def recover_interrupted_uploads() -> int:
             continue
         try:
             buffer = await download_buffer(doc["gridFsFileId"])
-            await process_document(doc["_id"], buffer, doc["mimeType"], doc["documentType"])
+            await process_document(
+                doc["_id"],
+                buffer,
+                doc["mimeType"],
+                doc["documentType"],
+                claimed["processingRunId"],
+            )
         except Exception:  # noqa: BLE001
             await db.documents.update_one(
-                {"_id": doc["_id"]},
+                {"_id": doc["_id"], "processingRunId": claimed["processingRunId"]},
                 {
                     "$set": {
                         "uploadStatus": "failed",

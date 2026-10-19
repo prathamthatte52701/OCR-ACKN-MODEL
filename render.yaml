@@ -9,6 +9,9 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # the app needs Python 3.12+ (Render reads the full version from PYTHON_VERSION)
+      - key: PYTHON_VERSION
+        value: 3.12.10
       - key: MONGO_URI
         sync: false
       - key: JWT_SECRET

@@ -56,6 +56,20 @@ OCR_TIMEOUT_SECONDS_IMAGE = 500
 _ocr_instance: Any = None
 _init_lock = threading.Lock()
 
+# A model that failed to load is remembered for this long, so a broken engine fails fast instead of
+# being reloaded for every single document; after it the load is tried again, so a repaired engine
+# recovers by itself (a failure is never permanent).
+MODEL_LOAD_RETRY_COOLDOWN_SECONDS = 60.0
+_monotonic = time.monotonic  # patchable clock
+_load_failure: tuple[float, str, str] | None = None  # (when, exception class, short message)
+
+
+def _reset_engine_for_tests() -> None:
+    global _ocr_instance, _load_failure
+    _ocr_instance = None
+    _load_failure = None
+
+
 MAX_ERROR_MESSAGE_CHARS = 200
 # The profile folder name can contain spaces ("John Smith"), so match up to the next separator.
 _USER_PATH_RE = re.compile(
@@ -102,6 +116,23 @@ class OcrEngineError(Exception):
 
 
 def _get_ocr() -> Any:
+    """The engine, or an OcrEngineError. A failed load is cached for the cooldown."""
+    global _load_failure
+    if _ocr_instance is not None:
+        return _ocr_instance
+    failure = _load_failure
+    if failure is not None and _monotonic() - failure[0] < MODEL_LOAD_RETRY_COOLDOWN_SECONDS:
+        raise OcrEngineError(failure[1], failure[2])
+    try:
+        engine = _load_ocr()
+    except Exception as exc:  # noqa: BLE001
+        _load_failure = (_monotonic(), type(exc).__name__, short_error_message(exc))
+        raise
+    _load_failure = None
+    return engine
+
+
+def _load_ocr() -> Any:
     global _ocr_instance
     if _ocr_instance is None:
         with _init_lock:
@@ -187,6 +218,8 @@ def run_ocr(
             row_lines.extend(assemble_rows(texts, boxes))
         text = "\n".join(row_lines) or None
         return text
+    except OcrEngineError:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise OcrEngineError.from_exception(exc) from exc
 

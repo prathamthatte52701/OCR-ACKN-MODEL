@@ -1,7 +1,7 @@
 """Why did AI extraction fail? A small closed set of codes instead of a catch-all "check the key".
 
 Public names (used by groq_provider.py, ai_extraction.py, pipeline.py):
-  CODES                         - the eleven code strings below
+  CODES                         - the twelve code strings below
   AIExtractionError(code, status=None, model=None)
   classify_exception(exc)       -> (code, status)   for any exception the SDK/asyncio can raise
   combine_failures(failures)    -> (code, status)   final cause after failing over across keys
@@ -26,6 +26,8 @@ OCR_STUCK = "OCR_STUCK"
 OCR_ENGINE_ERROR = "OCR_ENGINE_ERROR"  # the engine itself failed (model, memory, crash)
 OCR_TIMEOUT = "OCR_TIMEOUT"  # the engine took longer than its time limit
 NO_TEXT = "NO_TEXT"  # the engine ran fine but found no text (blank or unreadable paper)
+# The catch-all of process_document: something unexpected failed after the upload
+PROCESSING_ERROR = "PROCESSING_ERROR"
 CODES = (
     NO_KEYS,
     AUTH,
@@ -38,6 +40,7 @@ CODES = (
     OCR_ENGINE_ERROR,
     OCR_TIMEOUT,
     NO_TEXT,
+    PROCESSING_ERROR,
 )
 
 _USER_MESSAGES = {
@@ -63,6 +66,7 @@ _USER_MESSAGES = {
         "We could not read any text from this document. Try a clearer photo or scan, or a "
         "higher-quality PDF."
     ),
+    PROCESSING_ERROR: "Something went wrong while processing this document.",
 }
 
 _MODEL_GONE_BODY_CODES = {"model_not_found", "model_decommissioned", "model_not_active"}

@@ -30,6 +30,7 @@ from app.features.admin.schemas import (
     RejectRequest,
 )
 from app.features.auth.dependencies import CurrentUser, require_admin
+from app.features.documents.correction import correction_set_fields
 from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
 from app.features.excel import service as excel_service
@@ -773,8 +774,7 @@ async def correct_document_as_admin(
     old_value = doc.get(field)
     now = datetime.now(UTC)
     await db.documents.update_one(
-        {"_id": doc_id},
-        {"$set": {field: value, "edited": True, "updatedAt": now}},
+        {"_id": doc_id}, {"$set": correction_set_fields(field, value, now)}
     )
     await db.corrections.insert_one(
         {
