@@ -17,15 +17,15 @@ from loguru import logger
 from PIL import Image
 
 from app.features.ocr import pipeline
+from app.features.ocr.paddle_runner import OcrEngineError
 
 SECRET = "SECRET-OCR-TEXT-9f3a"
 STUCK_MSG = (
     "The text reader is stuck. Please tell the administrator to restart the app, "
     "then press Reprocess."
 )
-NO_TEXT_MSG = (
-    "We could not read any text from this document. Try a clearer photo or scan, "
-    "or a higher-quality PDF."
+TIMEOUT_MSG = (
+    "Reading this document took too long. Please try again, or upload a smaller or clearer file."
 )
 
 
@@ -116,8 +116,17 @@ async def until(cond: Callable[[], bool], timeout: float = 5.0) -> None:
         await asyncio.sleep(0.01)
 
 
+async def _job() -> str | None:
+    """These tests are about the SLOT, not about why OCR failed: a timeout or an engine failure
+    (typed errors since the failure kinds are told apart) counts as 'no text' here."""
+    try:
+        return await pipeline._extract_header_text(PNG, "image/png")
+    except (pipeline.OcrTimeoutError, OcrEngineError):
+        return None
+
+
 def job() -> Any:
-    return pipeline._extract_header_text(PNG, "image/png")
+    return _job()
 
 
 def st() -> dict[str, Any]:
@@ -233,8 +242,8 @@ async def test_process_document_plain_timeout(
     await asyncio.wait_for(pipeline.process_document(did, PNG, "image/png", "x"), 3)
     d = await db.documents.find_one({"_id": did})
     assert d["uploadStatus"] == "failed"
-    assert d["processingError"] == NO_TEXT_MSG
-    assert not d.get("processingErrorCode")
+    assert d["processingError"] == TIMEOUT_MSG
+    assert d["processingErrorCode"] == "OCR_TIMEOUT"
 
 
 # ---------------- 5 queue ----------------

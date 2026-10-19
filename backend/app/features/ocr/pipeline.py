@@ -2,10 +2,13 @@ import asyncio
 import os
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+import cv2
+import numpy as np
 from bson import ObjectId
 from loguru import logger
 
@@ -17,8 +20,10 @@ from app.features.ocr.ai_extraction import extract_header
 from app.features.ocr.paddle_runner import (
     OCR_TIMEOUT_SECONDS_IMAGE,
     OCR_TIMEOUT_SECONDS_PDF,
+    OcrEngineError,
     classify_page_orientation,
     run_ocr,
+    short_error_message,
 )
 from app.features.ocr.page_normalize import normalize_photo
 from app.features.ocr.preprocessing import (
@@ -32,7 +37,10 @@ from app.features.ocr.preprocessing import (
     get_pdf_header_text_or_image,
 )
 from app.features.ocr.providers.errors import (
+    NO_TEXT,
+    OCR_ENGINE_ERROR,
     OCR_STUCK,
+    OCR_TIMEOUT,
     AIExtractionError,
     classify_exception,
     error_detail,
@@ -65,6 +73,35 @@ class OcrStuckError(Exception):
     """The OCR slot is wedged (an orphaned OCR thread never ended): fail fast instead of waiting."""
 
 
+class OcrTimeoutError(Exception):
+    """The OCR engine took longer than its time limit (the slot is still kept until it ends)."""
+
+
+# Consecutive OCR ENGINE failures (not timeouts, not blank or bad files), for the admin warning.
+# Reset by any engine call that completes without raising, including an empty result.
+_engine_failures = 0
+_last_engine_error: tuple[str, datetime] | None = None
+
+
+def ocr_engine_status() -> dict:
+    return {
+        "consecutiveFailures": _engine_failures,
+        "lastErrorClass": _last_engine_error[0] if _last_engine_error else None,
+        "lastErrorAt": _last_engine_error[1].isoformat() if _last_engine_error else None,
+    }
+
+
+def _note_engine_ok() -> None:
+    global _engine_failures
+    _engine_failures = 0
+
+
+def _note_engine_failure(cls_name: str) -> None:
+    global _engine_failures, _last_engine_error
+    _engine_failures += 1
+    _last_engine_error = (cls_name, datetime.now(UTC))
+
+
 def ocr_lock_status() -> dict:
     """Used by /health and /admin/system. wedged=True only if the slot has been held longer than
     any legitimate single-document OCR call should ever take. orphan=True means the current holder
@@ -84,7 +121,9 @@ def ocr_lock_status() -> dict:
 
 def _reset_slot_for_tests() -> None:
     """Fresh lock and cleared state (tests run on a new event loop each time)."""
-    global _ocr_lock, _lock_held_since, _orphan_since
+    global _ocr_lock, _lock_held_since, _orphan_since, _engine_failures, _last_engine_error
+    _engine_failures = 0
+    _last_engine_error = None
     for task in list(_orphan_tasks):
         try:
             task.cancel()
@@ -179,7 +218,11 @@ async def _run_in_slot[T](fn: Callable[[], T], timeout: float) -> T:
         try:
             outcome: tuple[bool, Any] = (True, fn())
         except BaseException as exc:  # noqa: BLE001 - handed back to the awaiting job
-            outcome = (False, exc)
+            # SystemExit/KeyboardInterrupt from inside the engine must not escape the batch task
+            outcome = (
+                False,
+                exc if isinstance(exc, Exception) else RuntimeError(type(exc).__name__),
+            )
         try:
             loop.call_soon_threadsafe(_resolve, done, outcome)
         except RuntimeError:  # the loop is closed (app shutdown)
@@ -300,6 +343,10 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(image_bytes)
+            # Bad INPUT is not an engine failure: an undecodable image never reaches the engine
+            # (it decodes pictures with OpenCV, so check with OpenCV).
+            if cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR) is None:
+                raise ValueError("the image could not be decoded")
             try:
                 text = await _run_in_slot(
                     lambda: run_ocr(
@@ -310,17 +357,34 @@ async def _extract_header_text(buffer: bytes, mime_type: str) -> str | None:
                     timeout,
                 )
             except TimeoutError:
-                text = None
+                raise OcrTimeoutError(f"timed out after {timeout:.0f}s") from None
+            except OcrStuckError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                engine_error = (
+                    exc if isinstance(exc, OcrEngineError) else OcrEngineError.from_exception(exc)
+                )
+                if engine_error.file_caused:  # the engine could not read THIS file: no text
+                    logger.error(
+                        f"OCR input problem: class={engine_error.cls_name} msg={engine_error.short}"
+                    )
+                    return None
+                _note_engine_failure(engine_error.cls_name)
+                raise engine_error from None
+            _note_engine_ok()
             return text
         finally:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
-    except OcrStuckError:
+    except (OcrStuckError, OcrEngineError, OcrTimeoutError):
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Header OCR error: {exc}")
+        # Before the engine: an unreadable file or PDF (no text, not an engine failure).
+        logger.error(
+            f"OCR input problem: class={type(exc).__name__} msg={short_error_message(exc)}"
+        )
         return None
 
 
@@ -354,6 +418,32 @@ async def _log_processed(doc_id: ObjectId) -> None:
         logger.error(f"Audit log 'document_processed' failed: {exc}")
 
 
+async def _fail_ocr(
+    doc_id: ObjectId,
+    code: str,
+    error_class: str | None,
+    message: str,
+    document_type: str,
+    mime_type: str,
+    started: float,
+) -> None:
+    """Marks the document failed with the code and its plain user message. Logs the code, the
+    exception class, a short message, the document type, the mime type and the elapsed seconds:
+    never the OCR text, a file name, a key or a prompt."""
+    logger.error(
+        f"OCR failed: code={code} class={error_class or '-'} msg={message[:200]} "
+        f"doctype={document_type} mime={mime_type} elapsed={time.monotonic() - started:.1f}s"
+    )
+    await _update_active_document(
+        doc_id,
+        {
+            "uploadStatus": "failed",
+            "processingError": user_message(code),
+            "processingErrorCode": code,
+        },
+    )
+
+
 async def process_document(
     doc_id: ObjectId, buffer: bytes, mime_type: str, document_type: str
 ) -> None:
@@ -369,8 +459,19 @@ async def process_document(
                 doc_id, {"uploadStatus": "failed", "processingError": str(exc)}
             )
             return
+        started = time.monotonic()
         try:
             header_text = await _extract_header_text(buffer, mime_type)
+        except OcrEngineError as exc:
+            await _fail_ocr(
+                doc_id, OCR_ENGINE_ERROR, exc.cls_name, exc.short, document_type, mime_type, started
+            )
+            return
+        except OcrTimeoutError as exc:
+            await _fail_ocr(
+                doc_id, OCR_TIMEOUT, "TimeoutError", str(exc), document_type, mime_type, started
+            )
+            return
         except OcrStuckError:
             logger.error("OCR slot is wedged: failing the document fast")
             await _update_active_document(
@@ -383,15 +484,8 @@ async def process_document(
             )
             return
         if not header_text or not header_text.strip():
-            await _update_active_document(
-                doc_id,
-                {
-                    "uploadStatus": "failed",
-                    "processingError": (
-                        "We could not read any text from this document. Try a clearer "
-                        "photo or scan, or a higher-quality PDF."
-                    ),
-                },
+            await _fail_ocr(
+                doc_id, NO_TEXT, None, "no text found", document_type, mime_type, started
             )
             return
 

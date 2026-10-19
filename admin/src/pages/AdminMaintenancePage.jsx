@@ -55,6 +55,9 @@ function StatusPill({ sys }) {
     } else if (sys.data.ocrLockWedged) {
       tone = 'amber'
       text = 'OCR engine stuck - restart the app'
+    } else if (sys.data.ocrEngine?.consecutiveFailures >= 3) {
+      tone = 'amber'
+      text = `OCR engine failing (last: ${sys.data.ocrEngine.lastErrorClass || 'unknown'}) - check the server log`
     } else {
       tone = 'green'
       text = 'System healthy'

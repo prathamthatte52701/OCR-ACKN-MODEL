@@ -22,8 +22,13 @@ an empty result_queue, handled the same way here).
 """
 
 import os
+import re
+import tempfile
 import threading
+import time
 from typing import Any
+
+from loguru import logger
 
 from app.features.ocr.row_assembly import assemble_rows
 
@@ -50,6 +55,50 @@ OCR_TIMEOUT_SECONDS_IMAGE = 500
 
 _ocr_instance: Any = None
 _init_lock = threading.Lock()
+
+MAX_ERROR_MESSAGE_CHARS = 200
+# The profile folder name can contain spaces ("John Smith"), so match up to the next separator.
+_USER_PATH_RE = re.compile(
+    r"[A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+[^\\/'\"]+", re.IGNORECASE
+)
+_HOME_PATH_RE = re.compile(r"/(?:home|Users)/[^/'\"]+")
+
+
+def short_error_message(exc: BaseException) -> str:
+    """A short, safe-to-log version of an exception message: no user name from a temp/home path,
+    one line, at most MAX_ERROR_MESSAGE_CHARS characters. Never contains OCR text (engine errors
+    do not carry it)."""
+    text = str(exc)
+    text = text.replace(tempfile.gettempdir(), "<tmp>")
+    text = _USER_PATH_RE.sub("<user>", text)
+    text = _HOME_PATH_RE.sub("<user>", text)
+    return " ".join(text.split())[:MAX_ERROR_MESSAGE_CHARS]
+
+
+def _is_file_error(exc: BaseException) -> bool:
+    """True only for the engine's own 'could not read this file' failure. The pipeline already
+    decodes the image with OpenCV before the engine call, so a cv2 or Pillow error raised INSIDE
+    the engine is the engine's problem, not the file's. (Probed against the real engine: a
+    truncated or non-image file raises a plain Exception('Image read Error: ...'); blank and tiny
+    but valid images simply return an empty result.)"""
+    return type(exc) is Exception and str(exc).startswith("Image read Error")
+
+
+class OcrEngineError(Exception):
+    """The OCR engine failed on a call (model load, predictor, memory...). cls_name is the original
+    exception class, short a sanitized message (at most 200 characters), file_caused is True when
+    the failure is clearly the image file's fault (then the document is 'no text', not an engine
+    failure)."""
+
+    def __init__(self, cls_name: str, short: str, file_caused: bool = False) -> None:
+        super().__init__(f"{cls_name}: {short}")
+        self.cls_name = cls_name
+        self.short = short
+        self.file_caused = file_caused
+
+    @classmethod
+    def from_exception(cls, exc: BaseException) -> "OcrEngineError":
+        return cls(type(exc).__name__, short_error_message(exc), _is_file_error(exc))
 
 
 def _get_ocr() -> Any:
@@ -120,7 +169,9 @@ def run_ocr(
     detector limit falls back to the singleton's init-time 960).
 
     Returns the assembled text, row-grouped (see row_assembly.assemble_rows)
-    rather than one raw text box per line, or None on failure/empty."""
+    rather than one raw text box per line, or None ONLY for a genuinely empty
+    result. Any engine failure (model load, predictor, memory...) raises
+    OcrEngineError so the caller can tell "engine broken" from "no text"."""
     try:
         ocr = _get_ocr()
         results = ocr.predict(
@@ -136,12 +187,14 @@ def run_ocr(
             row_lines.extend(assemble_rows(texts, boxes))
         text = "\n".join(row_lines) or None
         return text
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception as exc:  # noqa: BLE001
+        raise OcrEngineError.from_exception(exc) from exc
 
 
 _orientation_model: Any = None
 _orientation_init_lock = threading.Lock()
+_ORIENTATION_LOG_EVERY_SECONDS = 60.0
+_last_orientation_log = 0.0
 
 
 def classify_page_orientation(png_bytes: bytes) -> tuple[int, float]:
@@ -168,5 +221,13 @@ def classify_page_orientation(png_bytes: bytes) -> tuple[int, float]:
         label = int(res["label_names"][0])
         score = float(res["scores"][0])
         return (360 - label) % 360, score
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        global _last_orientation_log
+        now = time.monotonic()
+        if now - _last_orientation_log >= _ORIENTATION_LOG_EVERY_SECONDS:  # no log spam
+            _last_orientation_log = now
+            logger.warning(
+                f"Orientation classifier failed, page left as is: class={type(exc).__name__} "
+                f"msg={short_error_message(exc)}"
+            )
         return 0, 0.0

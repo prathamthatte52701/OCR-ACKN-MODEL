@@ -1,7 +1,7 @@
 """Why did AI extraction fail? A small closed set of codes instead of a catch-all "check the key".
 
 Public names (used by groq_provider.py, ai_extraction.py, pipeline.py):
-  CODES                         - the eight code strings below
+  CODES                         - the eleven code strings below
   AIExtractionError(code, status=None, model=None)
   classify_exception(exc)       -> (code, status)   for any exception the SDK/asyncio can raise
   combine_failures(failures)    -> (code, status)   final cause after failing over across keys
@@ -22,7 +22,23 @@ BAD_REPLY = "BAD_REPLY"
 UNKNOWN = "UNKNOWN"
 # Not an AI failure: the OCR slot is held by a timed-out OCR thread that never ended (pipeline.py)
 OCR_STUCK = "OCR_STUCK"
-CODES = (NO_KEYS, AUTH, RATE_LIMIT, MODEL_GONE, TIMEOUT_NETWORK, BAD_REPLY, UNKNOWN, OCR_STUCK)
+# Also not AI failures: why the text reader (OCR) could not give text (pipeline.py)
+OCR_ENGINE_ERROR = "OCR_ENGINE_ERROR"  # the engine itself failed (model, memory, crash)
+OCR_TIMEOUT = "OCR_TIMEOUT"  # the engine took longer than its time limit
+NO_TEXT = "NO_TEXT"  # the engine ran fine but found no text (blank or unreadable paper)
+CODES = (
+    NO_KEYS,
+    AUTH,
+    RATE_LIMIT,
+    MODEL_GONE,
+    TIMEOUT_NETWORK,
+    BAD_REPLY,
+    UNKNOWN,
+    OCR_STUCK,
+    OCR_ENGINE_ERROR,
+    OCR_TIMEOUT,
+    NO_TEXT,
+)
 
 _USER_MESSAGES = {
     NO_KEYS: "The AI service is not set up correctly. Please contact the administrator.",
@@ -37,6 +53,15 @@ _USER_MESSAGES = {
     OCR_STUCK: (
         "The text reader is stuck. Please tell the administrator to restart the app, "
         "then press Reprocess."
+    ),
+    OCR_ENGINE_ERROR: "The text reader failed. Please tell the administrator.",
+    OCR_TIMEOUT: (
+        "Reading this document took too long. Please try again, or upload a smaller or "
+        "clearer file."
+    ),
+    NO_TEXT: (
+        "We could not read any text from this document. Try a clearer photo or scan, or a "
+        "higher-quality PDF."
     ),
 }
 

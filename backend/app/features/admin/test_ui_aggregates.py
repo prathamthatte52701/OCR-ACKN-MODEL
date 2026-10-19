@@ -224,6 +224,7 @@ async def test_system_shape_and_storage(
         "uptimeSeconds",
         "storage",
         "checkedAt",
+        "ocrEngine",
     }
     assert body["db"]["ok"] is True and isinstance(body["db"]["pingMs"], int)
     assert body["ocrLockWedged"] is False

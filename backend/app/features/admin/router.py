@@ -34,7 +34,7 @@ from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
 from app.features.excel import service as excel_service
 from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
-from app.features.ocr.pipeline import ocr_lock_status
+from app.features.ocr.pipeline import ocr_engine_status, ocr_lock_status
 
 router = APIRouter()
 
@@ -1453,6 +1453,7 @@ async def system_status(current_user: CurrentUser = Depends(require_admin)) -> d
     return {
         "db": {"ok": ok, "pingMs": ping_ms},
         "ocrLockWedged": ocr_lock_status()["wedged"],
+        "ocrEngine": ocr_engine_status(),
         "serverStartedAt": _PROCESS_START.isoformat(),
         "uptimeSeconds": int((now - _PROCESS_START).total_seconds()),
         "storage": {"documentFiles": files, "workbookFiles": _workbook_storage()},
