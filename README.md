@@ -100,6 +100,9 @@ admin/      Admin panel React app
 
 ## Setup
 
+Prerequisites: Python 3.12+ (see `backend/.python-version`), Node.js 18+ and npm, a MongoDB
+connection string, and (optional) Groq API keys. Everything runs locally on Windows.
+
 ### Backend
 
 ```bash
@@ -107,7 +110,6 @@ cd backend
 python -m venv ../venv          # or use the existing venv/ at repo root
 ../venv/Scripts/activate         # Windows
 pip install -r requirements-dev.txt   # exact runtime pins + ruff/black/isort/mypy/pytest
-                                       # (production installs requirements.txt only)
 # OpenCV: keep exactly one opencv-* package (opencv-contrib-python, pinned by paddlex).
 # A second one (e.g. opencv-python-headless) overwrites the same cv2/ dir; `pip list | grep opencv` must show one row.
 cp .env.example .env             # fill in real values, see below
@@ -136,7 +138,7 @@ Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
 the app refuse to start with a clear error — it will never silently boot
 with a broken config.
 
-Run the API:
+Run the API (stop it with Ctrl+C in that terminal):
 
 ```bash
 cd backend
@@ -191,21 +193,11 @@ Browser regression scripts for the PDF/image viewer live in `frontend/tests/`
 and run `BASE=http://localhost:5174 node frontend/tests/test_viewer_cleanup.cjs`
 or `node frontend/tests/test_viewer_break.cjs` (optional `SHOTS_DIR` for screenshots).
 
-## Docker
+## Wiping data (fresh start)
 
-```bash
-cp backend/.env.example backend/.env   # fill JWT_SECRET, GROQ_API_KEYS, admin vars
-docker compose up --build              # MongoDB + backend on http://localhost:8000
-```
-
-The frontend and admin apps run separately (`npm run dev`) and proxy `/api` to
-the backend. First start takes a minute while PaddleOCR loads its models.
-
-## Continuous integration
-
-`.github/workflows/ci.yml` runs on every push and pull request: backend
-`ruff`, `black`, `isort`, `mypy` and `pytest` (against a throwaway MongoDB),
-and `lint` + `build` for both React apps.
+`python -m app.scripts.wipe_all_except_admins --db <name>` is a dry run that only reports what would go.
+Adding `--apply --i-have-a-backup` deletes ALL non-admin users, documents, GridFS files and workbook
+files and keeps the admin accounts. Stop the backend first and take a `mongodump` backup before applying.
 
 ## Known limitations
 
@@ -223,8 +215,7 @@ and `lint` + `build` for both React apps.
   are rejected (a tiny file can decode to gigabytes of RAM).
 - **Forgot password**: username+email match, not an emailed reset link —
   no possession-of-inbox proof. Inherited from the original app's design.
-- **Deployment**: `render.yaml` starts uvicorn on `0.0.0.0` for Render, and a
-  `backend/Dockerfile` + `docker-compose.yml` are provided (see Docker above).
+- **Hosting**: local-only on one PC.
   Swagger/ReDoc/openapi.json are off everywhere unless `ENABLE_DOCS=true`.
 - **Google linking**: an existing password account that signs in with Google
   is linked automatically (Google verified the email).

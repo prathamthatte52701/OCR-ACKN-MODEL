@@ -1,4 +1,4 @@
-# Developer / CI tools - NOT installed in production (render.yaml installs requirements.txt only).
+# Developer tools (lint, types, tests) on top of the runtime pins.
 -r requirements.txt
 ruff==0.15.22
 black==26.5.1
