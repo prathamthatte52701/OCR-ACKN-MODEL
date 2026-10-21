@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 // Pages where the notice must never appear: the login response sets the flag a moment
 // BEFORE the post-login navigation, and the dialog lives at app level precisely so it
 // survives that navigation and shows on the page the user lands on.
-const HIDDEN_ON = ['/login', '/signup', '/forgot-password']
+const HIDDEN_ON = ['/login', '/signup', '/forgot-password', '/set-new-password']
 
 // Mounted once in App.jsx. Shown a single time, on the first login after an admin approved
 // the account (the server sends justApproved: true exactly once). The button, Esc and a click

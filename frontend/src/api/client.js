@@ -1,10 +1,18 @@
 import axios from 'axios'
+import { toast } from 'sonner'
 import { useAuthStore } from '../store/authStore'
 
 // Backend serializes camelCase on the wire (Phase 1 CamelModel alias_generator,
 // plus raw Mongo dicts that already store camelCase keys) - the same shape the
 // old Node/Express API used. Decision: keep the frontend camelCase end-to-end,
 // zero request/response transform layer.
+
+// While the forced-password-change flag is set the user can only use the "Set a new password"
+// page (it shows its errors inline), so error toasts from pages that fail with
+// PASSWORD_CHANGE_REQUIRED are dropped at the source instead of flashing by.
+const rawToastError = toast.error
+toast.error = (...args) =>
+  useAuthStore.getState().user?.mustChangePassword ? undefined : rawToastError(...args)
 
 const api = axios.create({
   baseURL: '/api',
@@ -111,6 +119,15 @@ api.interceptors.response.use(
       if (!window.location.pathname.startsWith('/login')) {
         window.location.replace(`/login?notice=${encodeURIComponent(detail.message || '')}`)
       }
+    }
+
+    // Admin set a temporary password while this session was open: flag the user in the store
+    // and RequireAuth redirects to /set-new-password. Setting the flag is idempotent, so a burst
+    // of 403s causes one redirect, no loop; toasts the failing requests raise are cleared.
+    if (err.response?.status === 403 && detail?.code === 'PASSWORD_CHANGE_REQUIRED') {
+      const { user, setUser } = useAuthStore.getState()
+      if (user && !user.mustChangePassword) setUser({ ...user, mustChangePassword: true })
+      err.passwordChangeRequired = true
     }
 
     return Promise.reject(err)

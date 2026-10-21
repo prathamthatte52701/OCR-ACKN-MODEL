@@ -92,7 +92,7 @@ export default function LoginPage() {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="block text-[12.6px] font-semibold text-slate-400">Password</label>
-              <Link to="/forgot-password" className="text-[12.6px] font-semibold text-blue-300 no-underline hover:text-blue-200">Forgot password?</Link>
+              <Link to="/forgot-password" className="text-[12.6px] font-semibold text-blue-300 no-underline hover:text-blue-200">Request password reset</Link>
             </div>
             <PasswordInput
               value={password}

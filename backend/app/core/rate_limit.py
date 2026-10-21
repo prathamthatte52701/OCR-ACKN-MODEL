@@ -1,5 +1,5 @@
 from fastapi import HTTPException, Request
-from limits import RateLimitItemPerMinute
+from limits import RateLimitItemPerHour, RateLimitItemPerMinute
 from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from slowapi import Limiter
@@ -48,3 +48,14 @@ async def enforce_login_email_limit(request: Request, email: str) -> None:
             status_code=429,
             detail="Too many login attempts for this account. Please try again in a few minutes.",
         )
+
+
+# Password-reset-request per-email limiter: its OWN storage and limiter, so spamming reset
+# requests for someone's address can never eat that person's login attempts. Returns a bool
+# (never raises) - the public route answers identically either way.
+_reset_limiter = MovingWindowRateLimiter(MemoryStorage())
+_reset_email_limit = RateLimitItemPerHour(3)
+
+
+def allow_password_reset_for_email(email: str) -> bool:
+    return _reset_limiter.hit(_reset_email_limit, f"pwreset:{email.strip().lower()}")

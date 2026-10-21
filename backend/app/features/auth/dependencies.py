@@ -53,14 +53,19 @@ def raise_if_not_approved(user: dict) -> None:
 
 
 class CurrentUser:
-    def __init__(self, id: ObjectId, role: str):
+    def __init__(self, id: ObjectId, role: str, must_change_password: bool = False):
         self.id = id
         self.role = role
+        self.must_change_password = must_change_password
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> CurrentUser:
+PASSWORD_CHANGE_REQUIRED = {
+    "code": "PASSWORD_CHANGE_REQUIRED",
+    "message": "You must set a new password before continuing.",
+}
+
+
+async def _authenticate(credentials: HTTPAuthorizationCredentials | None) -> CurrentUser:
     """FastAPI equivalent of the old requireAuth middleware: verifies the JWT,
     then re-reads tokenVersion from the DB and rejects if it no longer
     matches - this is the session-revocation check (password change /
@@ -95,6 +100,7 @@ async def get_current_user(
             "decidedAt": 1,
             "decisionReason": 1,
             "createdAt": 1,
+            "mustChangePassword": 1,
         },
     )
     if user is None or user.get("tokenVersion") != payload.get("tokenVersion"):
@@ -106,7 +112,29 @@ async def get_current_user(
     # means a pre-approval-era account, which stays approved.
     raise_if_not_approved(user)
 
-    return CurrentUser(id=user_id, role=user["role"])
+    return CurrentUser(
+        id=user_id, role=user["role"], must_change_password=user.get("mustChangePassword") is True
+    )
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> CurrentUser:
+    """Every protected route. Also the single enforcement point of the forced password
+    change: a user holding an admin-set temporary password gets 403 PASSWORD_CHANGE_REQUIRED
+    everywhere (require_admin included) except the two routes that use the variant below."""
+    user = await _authenticate(credentials)
+    if user.must_change_password:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+    return user
+
+
+async def get_current_user_allow_password_change(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> CurrentUser:
+    """Same checks, but lets a flagged user through. ONLY GET /auth/me and
+    POST /auth/change-password may depend on this."""
+    return await _authenticate(credentials)
 
 
 async def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:

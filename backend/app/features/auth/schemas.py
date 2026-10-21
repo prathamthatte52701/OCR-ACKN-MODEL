@@ -1,6 +1,7 @@
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.core.base_model import CamelModel
+from app.core.validators import validate_email
 
 # Hard ceilings on every request field. The real rules live in validators.py
 # (username 3-8, email RFC 254, password 8-64 / 72 bytes) and give friendly
@@ -11,6 +12,7 @@ MAX_USERNAME = 64
 MAX_EMAIL = 254
 MAX_PASSWORD = 128
 MAX_ID_TOKEN = 4096
+MAX_NOTE = 200
 
 Username = Field(max_length=MAX_USERNAME)
 Email = Field(max_length=MAX_EMAIL)
@@ -43,16 +45,21 @@ class ChangePasswordRequest(CamelModel):
     confirm_new_password: str | None = Field(default=None, max_length=MAX_PASSWORD)
 
 
-class ForgotPasswordVerifyRequest(CamelModel):
-    username: str = Username
+class PasswordResetRequestBody(CamelModel):
     email: str = Email
+    note: str | None = Field(default=None, max_length=MAX_NOTE)
+
+    @field_validator("email")
+    @classmethod
+    def _valid_email(cls, v: str) -> str:
+        # Malformed email is a 422 (parse-time), not the 400 signup uses.
+        if err := validate_email(v):
+            raise ValueError(err)
+        return v
 
 
-class ForgotPasswordResetRequest(CamelModel):
-    username: str = Username
-    email: str = Email
-    new_password: str = Password
-    confirm_new_password: str | None = Field(default=None, max_length=MAX_PASSWORD)
+class TempPasswordRequest(CamelModel):
+    password: str = Password
 
 
 class UserOut(CamelModel):
@@ -60,6 +67,8 @@ class UserOut(CamelModel):
     username: str
     email: str
     role: str
+    # True while an admin-set temporary password is still in force (missing in DB = false).
+    must_change_password: bool = False
 
 
 class TokenResponse(CamelModel):

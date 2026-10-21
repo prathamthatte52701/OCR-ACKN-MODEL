@@ -8,17 +8,20 @@ from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
 from app.core.audit_log import log_action, log_admin_access
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import limiter, user_or_ip_key
+from app.core.security import hash_password
 from app.core.timezones import IST_OFFSET_STRING, ist_midnight_utc, now_ist
 from app.core.validators import (
     normalize_email,
     normalize_username,
     validate_email,
+    validate_password,
     validate_username,
 )
 from app.features.admin import purge_service
@@ -30,6 +33,7 @@ from app.features.admin.schemas import (
     RejectRequest,
 )
 from app.features.auth.dependencies import CurrentUser, require_admin
+from app.features.auth.schemas import TempPasswordRequest
 from app.features.documents.correction import correction_set_fields
 from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
@@ -154,6 +158,7 @@ async def list_users(
         db.users.count_documents(_status_query("rejected")),
     )
     counts = await _document_counts(db, [u["_id"] for u in raw])
+    password_request_count = await db.passwordresetrequests.count_documents({"status": "open"})
     users = [{**_serialize_user(u), "documentCount": counts.get(u["_id"], 0)} for u in raw]
     return {
         "users": users,
@@ -162,6 +167,8 @@ async def list_users(
         "currentPage": pg,
         # Drives the badge on the admin panel's Pending tab.
         "pendingCount": pending,
+        # Open password-reset requests (badge on the Password requests tab).
+        "passwordRequestCount": password_request_count,
         # Whole-collection tallies, unaffected by q/role/status.
         "statusCounts": {
             "total": all_users,
@@ -442,9 +449,11 @@ async def delete_user(
                 pass
     await db.workbooks.delete_many({"userId": user_id})
     await db.settings.delete_many({"userId": user_id})
+    await db.passwordresetrequests.delete_many({"userId": user_id})
 
     deleted_email = user["email"]
     await db.users.delete_one({"_id": user_id})
+    await db.passwordresetrequests.delete_many({"userId": user_id})  # one that raced the delete
 
     await log_action(
         current_user.id,
@@ -457,6 +466,157 @@ async def delete_user(
         },
     )
     return {"message": "User and all associated data deleted successfully."}
+
+
+# ---------------------------------------------------------------------------
+# Password-reset requests (admin-handled; admins themselves use reset_admin_password.py)
+# ---------------------------------------------------------------------------
+
+
+def _serialize_password_request(r: dict) -> dict:
+    return {
+        "id": str(r["_id"]),
+        "userId": str(r["userId"]),
+        "username": r.get("username"),
+        "email": r.get("email"),
+        "note": r.get("note") or "",
+        "status": r["status"],
+        "createdAt": r.get("createdAt"),
+        "updatedAt": r.get("updatedAt"),
+        "resolvedAt": r.get("resolvedAt"),
+        "resolution": r.get("resolution"),
+    }
+
+
+@router.get("/password-requests")
+async def list_password_requests(
+    status: Literal["open", "all"] = Query(default="open"),
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    db = get_database()
+    query = {"status": "open"} if status == "open" else {}
+    rows = await db.passwordresetrequests.find(query).sort("createdAt", -1).limit(500).to_list(500)
+    rows.sort(key=lambda r: r["status"] != "open")  # stable: open first, newest first inside
+    open_count = await db.passwordresetrequests.count_documents({"status": "open"})
+    return {"requests": [_serialize_password_request(r) for r in rows], "openCount": open_count}
+
+
+async def _open_request_or_error(db: AsyncIOMotorDatabase, request_id: ObjectId) -> dict:
+    req = await db.passwordresetrequests.find_one({"_id": request_id})
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    if req["status"] != "open":
+        raise HTTPException(status_code=409, detail="This request has already been handled.")
+    return req
+
+
+@router.post("/password-requests/{request_id}/temp-password")
+async def set_temp_password(
+    request_id: PyObjectId,
+    body: TempPasswordRequest,
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    db = get_database()
+    req = await _open_request_or_error(db, request_id)
+    user = await db.users.find_one({"_id": req["userId"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    _guard_other_admin(user, current_user)
+    if user.get("role") == "admin" or user.get("status", "approved") != "approved":
+        raise HTTPException(
+            status_code=403, detail="A temporary password can only be set for an approved user."
+        )
+    if err := validate_password(body.password, user.get("username"), user.get("email")):
+        raise HTTPException(status_code=422, detail=err)
+
+    new_hash = hash_password(body.password)  # slow: before claiming anything
+    now = datetime.now(UTC)
+    # 1) claim the request atomically (a second admin loses with 409)
+    claimed = await db.passwordresetrequests.find_one_and_update(
+        {"_id": request_id, "status": "open"},
+        {
+            "$set": {
+                "status": "done",
+                "resolution": "temp_password",
+                "resolvedAt": now,
+                "resolvedBy": current_user.id,
+                "updatedAt": now,
+            }
+        },
+    )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="This request has already been handled.")
+
+    async def roll_back() -> None:
+        try:
+            await db.passwordresetrequests.update_one(
+                {"_id": request_id, "status": "done", "resolvedAt": now},
+                {
+                    "$set": {
+                        "status": "open",
+                        "resolution": None,
+                        "resolvedAt": None,
+                        "resolvedBy": None,
+                    }
+                },
+            )
+        except DuplicateKeyError:
+            pass  # user filed a fresh open request meanwhile; that one is the live request
+
+    # 2) update the user, only if still an approved non-admin
+    try:
+        result = await db.users.update_one(
+            {"_id": req["userId"], "role": {"$ne": "admin"}, **_status_query("approved")},
+            {
+                "$set": {"passwordHash": new_hash, "mustChangePassword": True, "updatedAt": now},
+                "$inc": {"tokenVersion": 1},
+            },
+        )
+    except Exception:
+        await roll_back()
+        raise
+    # 3) nothing matched: undo the claim
+    if result.matched_count == 0:
+        await roll_back()
+        raise HTTPException(
+            status_code=403, detail="A temporary password can only be set for an approved user."
+        )
+    # 4) audit (ids only, never the password)
+    await log_action(
+        current_user.id,
+        "PASSWORD_RESET_TEMP_SET",
+        {"targetUserId": str(req["userId"]), "requestId": str(request_id)},
+    )
+    return {"ok": True}
+
+
+@router.post("/password-requests/{request_id}/dismiss")
+async def dismiss_password_request(
+    request_id: PyObjectId, current_user: CurrentUser = Depends(require_admin)
+) -> dict:
+    db = get_database()
+    req = await _open_request_or_error(db, request_id)
+    now = datetime.now(UTC)
+    result = await db.passwordresetrequests.update_one(
+        {"_id": request_id, "status": "open"},
+        {
+            "$set": {
+                "status": "dismissed",
+                "resolution": "dismissed",
+                "resolvedAt": now,
+                "resolvedBy": current_user.id,
+                "updatedAt": now,
+            }
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="This request has already been handled.")
+    await log_action(
+        current_user.id,
+        "PASSWORD_RESET_DISMISSED",
+        {"targetUserId": str(req["userId"]), "requestId": str(request_id)},
+    )
+    return {"ok": True}
 
 
 async def _execute_purge(filter_query: dict) -> tuple[int, int, list[str]]:
@@ -1338,6 +1498,7 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
         users_trend,
         docs_trend,
         exports_trend,
+        password_requests_open,
     ) = await _gather_untyped(
         db.users.count_documents({}),
         *(
@@ -1365,6 +1526,7 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
         window("users", "createdAt"),
         window("documents", "createdAt", live),
         window("exportedrows", "exportedAt"),
+        db.passwordresetrequests.count_documents({"status": "open"}),
     )
     by_status = {"uploaded": n_uploaded, "processed": n_processed, "failed": n_failed}
     by_type = {"Tax Invoice": n_tax, "Delivery Challan": n_challan}
@@ -1400,6 +1562,7 @@ async def telemetry(current_user: CurrentUser = Depends(require_admin)) -> dict:
         "ocrFailureRate": ocr_failure_rate,
         "recentActivity": {"last24h": activity_24h, "last7d": activity_7d},
         "pendingUsers": {"count": pending_count, "oldest": pending_oldest},
+        "passwordRequests": {"count": password_requests_open},
         "orphanedFiles": orphaned,
         "failedDocuments": n_failed,
         "trends": {"users": users_trend, "documents": docs_trend, "exports": exports_trend},

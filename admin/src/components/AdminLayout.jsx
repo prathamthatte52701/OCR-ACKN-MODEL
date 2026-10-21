@@ -11,7 +11,7 @@ import TopBar from './TopBar'
 // API and refresh every 30-60 s or at once when a page announces a change.
 export default function AdminLayout() {
   const [drawerPath, setDrawerPath] = useState(null) // open only for the path it was opened on
-  const [counts, setCounts] = useState({ pending: 0, orphaned: 0 })
+  const [counts, setCounts] = useState({ pending: 0, passwordRequests: 0, orphaned: 0 })
   const [system, setSystem] = useState(null)
   const { user, logout } = useAdminAuth()
   const navigate = useNavigate()
@@ -22,7 +22,7 @@ export default function AdminLayout() {
 
   const loadCounts = useCallback(() => {
     api.get('/admin/users', { params: { limit: 1, status: 'pending' } })
-      .then((res) => setCounts((c) => ({ ...c, pending: res.data.pendingCount || 0 })))
+      .then((res) => setCounts((c) => ({ ...c, pending: res.data.pendingCount || 0, passwordRequests: res.data.passwordRequestCount || 0 })))
       .catch(() => {})
     api.get('/admin/orphaned-files', { params: { limit: 1 } })
       .then((res) => setCounts((c) => ({ ...c, orphaned: res.data.totalOrphanedFiles || 0 })))
@@ -82,7 +82,7 @@ export default function AdminLayout() {
       )}
 
       <div className="flex min-h-screen flex-col lg:pl-[260px]">
-        <TopBar user={user} pending={counts.pending} onOpenMenu={() => setDrawerOpen(true)} drawerOpen={drawerOpen} menuButtonRef={menuButton} onLogout={handleLogout} />
+        <TopBar user={user} pending={counts.pending + counts.passwordRequests} bellTo={counts.pending === 0 && counts.passwordRequests > 0 ? '/password-requests' : '/approvals'} onOpenMenu={() => setDrawerOpen(true)} drawerOpen={drawerOpen} menuButtonRef={menuButton} onLogout={handleLogout} />
         <main className="flex-1">
           <Outlet />
         </main>

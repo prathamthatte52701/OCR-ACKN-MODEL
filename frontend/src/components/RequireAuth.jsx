@@ -22,5 +22,10 @@ export default function RequireAuth() {
     return <Navigate to={`/login?next=${next}`} replace />
   }
 
+  // Forced password change: every route goes to the one allowed page until the flag clears.
+  const onForcedPage = location.pathname === '/set-new-password'
+  if (user.mustChangePassword && !onForcedPage) return <Navigate to="/set-new-password" replace />
+  if (!user.mustChangePassword && onForcedPage) return <Navigate to="/" replace />
+
   return <Outlet />
 }

@@ -48,7 +48,8 @@ const TOPICS = [
     q: 'I can\'t log in - is it a wrong password, or something else?',
     a: [
       'If the page says "Invalid email or password", either your email or password is wrong. Check for typos, and make sure Caps Lock is off.',
-      'If you genuinely forgot your password, click "Forgot password?" on the login page and follow the steps there - you will need to enter your username and email correctly.',
+      'If you genuinely forgot your password, click "Request password reset" on the login page and enter your email. The admin is told and will give you a temporary password in person or by phone.',
+      'Log in with the temporary password. You must then choose a new password of your own before you can use the app.',
       'If you see a message about "too many login attempts", wait about 15 minutes before trying again - this is a safety feature, not a bug.',
     ],
   },

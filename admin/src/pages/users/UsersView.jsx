@@ -16,6 +16,7 @@ import EditUserModal from './EditUserModal'
 import RowMenu from './RowMenu'
 import SelectedUserPanel from './SelectedUserPanel'
 import SkeletonRows from './SkeletonRows'
+import UsersTabs from './UsersTabs'
 
 const ADMIN_LOCK_TIP = 'Admins can only be changed by themselves.'
 const PAGE_SIZE = 30
@@ -53,6 +54,7 @@ export default function UsersView({ mode = 'users' }) {
   const [totalPages, setTotalPages] = useState(1)
   const [totalUsers, setTotalUsers] = useState(0)
   const [pendingCount, setPendingCount] = useState(0)
+  const [requestCount, setRequestCount] = useState(0)
   const [counts, setCounts] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -115,6 +117,7 @@ export default function UsersView({ mode = 'users' }) {
       if (requestId !== latestRequest.current) return
       setUsers(res.data.users || [])
       setPendingCount(res.data.pendingCount || 0)
+      setRequestCount(res.data.passwordRequestCount || 0)
       if (res.data.statusCounts) setCounts(res.data.statusCounts)
       setTotalPages(res.data.totalPages || 1)
       setTotalUsers(res.data.totalUsers || 0)
@@ -246,6 +249,8 @@ export default function UsersView({ mode = 'users' }) {
         title={approvals ? 'Approvals' : 'Users'}
         subtitle={approvals ? 'Review pending access requests' : 'Manage accounts and access permissions'}
       />
+
+      <UsersTabs active={approvals ? 'approvals' : 'users'} pending={pendingCount} requests={requestCount} />
 
       {!approvals && (
         <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -43,7 +43,7 @@ def validate_email(email: str) -> str | None:
 def validate_password(
     password: str, username: str | None = None, email: str | None = None
 ) -> str | None:
-    """Rules for NEW passwords (signup, change-password, forgot-password reset).
+    """Rules for NEW passwords (signup, change-password, admin temp password).
     Existing passwords are never re-validated, so nobody gets locked out."""
     if (
         not PASSWORD_MIN_LENGTH <= len(password) <= PASSWORD_MAX_LENGTH

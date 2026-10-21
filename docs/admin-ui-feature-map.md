@@ -13,13 +13,14 @@ aggregate endpoint, DROP = no real feature, not shown.
 | Brand "ACKN OCR" + logo | static text/svg (ours) | KEEP |
 | Sidebar: Dashboard, Users, Documents, Workbooks | existing routes `/`, `/users`, `/documents`, `/workbooks` | KEEP |
 | Sidebar: Approvals | the pending-approvals view of Users (`/users` pending tab) with the real pending count badge | ADAPT (route `/approvals` = pending-only Users view, same API) |
+| Sidebar + Users tab: Password requests | `GET /admin/password-requests` (`requests`, `openCount`); own tab (`/password-requests`) with its own badge, separate from Pending/Rejected. Table shows username, email, note (plain text), requested date, status. Actions: Set temp password (`POST .../{id}/temp-password`, admin types or generates it; shown only while the dialog is open) and Dismiss with confirm (`POST .../{id}/dismiss`) | ADD (admin-handled password reset) |
 | Sidebar: Exports | no admin Exports page exists (export rows only appear inside a user's detail page) | DROP |
 | Sidebar: Maintenance | existing `/maintenance` | KEEP |
 | Sidebar: Settings | no such page | DROP |
 | (not in mockup) Logs, Orphaned Files | existing, must stay reachable | KEEP, shown as "Activity" (`/logs`) and "Orphaned files" |
 | Sidebar footer "All services running" + "Open Maintenance" | only if computed from a real check: `GET /admin/system` (DB ping + OCR lock) | ADAPT (shows real status; red/amber when a check fails) |
 | Top bar search "Search users, documents..." | no global search; user search is real (new `q` param on `GET /admin/users`) | ADAPT ("Search users by name or email", goes to `/users?q=`) |
-| Notification bell + red badge | real pending-approval count (`pendingCount` of `GET /admin/users`), links to Approvals; no badge at 0 | ADAPT |
+| Notification bell + red badge | `pendingCount` + `passwordRequestCount` of `GET /admin/users`, links to Approvals (or Password requests when only requests are waiting); no badge at 0 | ADAPT |
 | Admin name + role + avatar chevron | `useAdminAuth().user`; menu: Profile, Log out | KEEP (initials circle, colour from user id) |
 | Photos / avatars | the app has none | ADAPT (coloured initial circles, deterministic from user id) |
 

@@ -1,51 +1,33 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { forgotPasswordVerify, forgotPasswordReset } from '../api/auth'
-import { validatePassword } from '../utils/validators'
-import PasswordInput from '../components/PasswordInput'
+import { Link } from 'react-router-dom'
+import { requestPasswordReset } from '../api/auth'
+import { validateEmail } from '../utils/validators'
 import BackButton from '../components/BackButton'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-slate-950/60 px-3.5 py-2.5 text-[14.7px] text-white outline-none transition-colors focus:border-blue-300/60'
 const labelClass = 'mb-1 block text-[12.6px] font-semibold text-slate-400'
+const NOTE_MAX = 200
 
+// One form. The server always answers with the same generic message, so the page never
+// reveals whether the email belongs to an account.
 export default function ForgotPasswordPage() {
-  const navigate = useNavigate()
-  const [verified, setVerified] = useState(false)
-  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  const [done, setDone] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  async function handleVerify(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    const emailErr = validateEmail(email)
+    if (emailErr) { setError(emailErr); return }
     setSubmitting(true)
     try {
-      await forgotPasswordVerify(username, email.trim().toLowerCase())
-      setVerified(true)
+      const data = await requestPasswordReset(email.trim().toLowerCase(), note.trim())
+      setDone(data?.message || 'If this account exists, the admin has been told.')
     } catch (err) {
-      setError(err.userMessage || 'Username and email do not match our records.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  async function handleReset(e) {
-    e.preventDefault()
-    setError('')
-
-    const passwordErr = validatePassword(newPassword)
-    if (passwordErr) { setError(passwordErr); return }
-    if (newPassword !== confirmNewPassword) { setError('New password and confirmation do not match.'); return }
-
-    setSubmitting(true)
-    try {
-      await forgotPasswordReset(username, email.trim().toLowerCase(), newPassword, confirmNewPassword)
-      navigate('/login', { replace: true, state: { success: 'Password updated successfully. Please log in.' } })
-    } catch (err) {
-      setError(err.userMessage || 'Could not reset your password. Please try again.')
+      setError(err.userMessage || 'Could not send the request. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -57,47 +39,24 @@ export default function ForgotPasswordPage() {
         <BackButton fallback="/login" />
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-[14.7px] font-black text-blue-200">AI</span>
-          <h1 className="text-2xl font-black text-white">{verified ? 'Set new password' : 'Forgot password'}</h1>
-          <p className="mt-1 text-[14.7px] text-slate-500">
-            {verified ? 'Choose a new password for your account.' : 'Verify your username and email to reset your password.'}
-          </p>
+          <h1 className="text-2xl font-black text-white">Request password reset</h1>
+          <p className="mt-1 text-[14.7px] text-slate-500">The admin will give you a temporary password.</p>
         </div>
 
-        {!verified ? (
-          <form onSubmit={handleVerify} className="space-y-4">
-            <div>
-              <label className={labelClass}>Username</label>
-              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required className={inputClass} />
-            </div>
-            <div>
-              <label className={labelClass}>Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={inputClass} />
-            </div>
-
-            {error && (
-              <div className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-3.5 py-2.5 text-[13.6px] text-rose-200">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2.5 text-[14.7px] font-black text-white shadow-[0_16px_38px_rgba(37,99,235,0.3)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {submitting ? 'Verifying...' : 'Verify'}
-            </button>
-          </form>
+        {done ? (
+          <div role="status" className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3.5 py-3 text-[14px] text-emerald-200">
+            {done}
+          </div>
         ) : (
-          <form onSubmit={handleReset} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
-              <label className={labelClass}>New password</label>
-              <PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} maxLength={64} autoComplete="new-password" required />
-              <p className="mt-1 text-[11.6px] text-slate-600">8-64 characters, with uppercase, lowercase, a number, and a special character - no spaces</p>
+              <label htmlFor="reset-email" className={labelClass}>Email</label>
+              <input id="reset-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={254} required autoComplete="email" className={inputClass} />
             </div>
             <div>
-              <label className={labelClass}>Confirm new password</label>
-              <PasswordInput value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} autoComplete="new-password" required />
+              <label htmlFor="reset-note" className={labelClass}>Note for the admin (optional)</label>
+              <textarea id="reset-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={NOTE_MAX} rows={3} className={inputClass} />
+              <p className="mt-1 text-right text-[11.6px] text-slate-600">{note.length}/{NOTE_MAX}</p>
             </div>
 
             {error && (
@@ -111,7 +70,7 @@ export default function ForgotPasswordPage() {
               disabled={submitting}
               className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2.5 text-[14.7px] font-black text-white shadow-[0_16px_38px_rgba(37,99,235,0.3)] transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {submitting ? 'Updating...' : 'Update password'}
+              {submitting ? 'Sending...' : 'Send request'}
             </button>
           </form>
         )}

@@ -1,6 +1,6 @@
 """Real-integration tests for POST /auth/google (Google OAuth login) plus the
 side effects it introduces elsewhere in auth/router.py: local-account
-linking, the forgot-password guard for Google-only accounts, and token
+linking and token
 revocation via tokenVersion.
 
 No test-db mocking infra exists in this repo (see CLAUDE.md) - this hits the
@@ -183,40 +183,7 @@ async def test_existing_local_account_links_via_google(
 
 
 # ---------------------------------------------------------------------------
-# 3. Google-only account blocked from forgot-password
-# ---------------------------------------------------------------------------
-
-
-async def test_google_only_account_blocked_from_forgot_password(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    email = _unique_email("googleonly")
-    _mock_google_payload(
-        monkeypatch, {"email": email, "email_verified": True, "sub": "google-sub-only"}
-    )
-    resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
-    assert resp.status_code == 200, resp.text
-    username = resp.json()["user"]["username"]
-
-    verify_resp = await client.post(
-        "/api/auth/forgot-password/verify", json={"username": username, "email": email}
-    )
-    assert verify_resp.status_code == 400
-    detail = verify_resp.json()["detail"]
-    assert "Google Sign-In" in detail
-    assert detail != "Username and email do not match our records."
-
-    # A genuinely non-matching account still gets the generic anti-enumeration message.
-    generic_resp = await client.post(
-        "/api/auth/forgot-password/verify",
-        json={"username": "nobody12", "email": "nobody@example.com"},
-    )
-    assert generic_resp.status_code == 400
-    assert generic_resp.json()["detail"] == "Username and email do not match our records."
-
-
-# ---------------------------------------------------------------------------
-# 4. Token revocation for the linked local+google account
+# 3. Token revocation for the linked local+google account
 # ---------------------------------------------------------------------------
 
 

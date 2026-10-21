@@ -23,6 +23,7 @@ const NAV = [
   { to: '/', label: 'Dashboard', icon: 'dashboard', exact: true },
   { to: '/users', label: 'Users', icon: 'users' },
   { to: '/approvals', label: 'Approvals', icon: 'approvals', badge: 'pending' },
+  { to: '/password-requests', label: 'Password requests', icon: 'approvals', badge: 'passwordRequests' },
   { to: '/documents', label: 'Documents', icon: 'documents' },
   { to: '/workbooks', label: 'Workbooks', icon: 'workbooks' },
   { to: '/logs', label: 'Activity', icon: 'activity' },

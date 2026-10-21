@@ -26,12 +26,6 @@ export function changePassword(currentPassword, newPassword, confirmNewPassword)
     .then((res) => res.data)
 }
 
-export function forgotPasswordVerify(username, email) {
-  return api.post('/auth/forgot-password/verify', { username, email }).then((res) => res.data)
-}
-
-export function forgotPasswordReset(username, email, newPassword, confirmNewPassword) {
-  return api
-    .post('/auth/forgot-password/reset', { username, email, newPassword, confirmNewPassword })
-    .then((res) => res.data)
+export function requestPasswordReset(email, note) {
+  return api.post('/auth/password-reset-request', { email, note: note || undefined }).then((res) => res.data)
 }

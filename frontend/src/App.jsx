@@ -14,6 +14,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import SignupPage from './pages/SignupPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import SetNewPasswordPage from './pages/SetNewPasswordPage'
 import Dashboard from './pages/Dashboard'
 import UploadPage from './pages/UploadPage'
 import DocumentsPage from './pages/DocumentsPage'
@@ -49,6 +50,7 @@ export default function App() {
             </Route>
 
             <Route element={<RequireAuth />}>
+              <Route path="/set-new-password" element={<SetNewPasswordPage />} />
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/upload" element={<UploadPage />} />

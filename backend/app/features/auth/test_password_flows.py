@@ -1,4 +1,4 @@
-"""T11 through the real endpoints: signup, change-password, forgot-password."""
+"""T11 through the real endpoints: signup, change-password."""
 
 from typing import Any
 
@@ -63,27 +63,3 @@ async def test_change_password_applies_rules_and_keeps_old_password_valid_for_lo
         },
     )
     assert good.status_code == 200
-
-
-async def test_forgot_password_reset_applies_rules(client: Any, make_user: Any) -> None:
-    u = await make_user()
-    payload = {"username": u.username, "email": u.email}
-    weak = await client.post(
-        "/api/auth/forgot-password/reset",
-        json={**payload, "newPassword": "qwerty12345", "confirmNewPassword": "qwerty12345"},
-    )
-    assert weak.status_code == 400
-    ident = await client.post(
-        "/api/auth/forgot-password/reset",
-        json={
-            **payload,
-            "newPassword": f"Zq9!{u.username}!X",
-            "confirmNewPassword": f"Zq9!{u.username}!X",
-        },
-    )
-    assert ident.status_code == 400
-    ok = await client.post(
-        "/api/auth/forgot-password/reset",
-        json={**payload, "newPassword": "Nw8#kLp2!Tz9", "confirmNewPassword": "Nw8#kLp2!Tz9"},
-    )
-    assert ok.status_code == 200

@@ -13,7 +13,7 @@ import { motion } from 'framer-motion'
 // `handleClose`, which already no-ops while a delete is in flight, and
 // Enter-to-confirm is deliberately NOT wired here or anywhere nuke-related -
 // see ConfirmPurgeModal.jsx.
-export default function Modal({ onClose, children, maxWidth = 'max-w-sm' }) {
+export default function Modal({ onClose, children, maxWidth = 'max-w-sm', ariaLabel }) {
   useEffect(() => {
     function handleKeyDown(e) {
       if (e.key === 'Escape') onClose()
@@ -33,6 +33,9 @@ export default function Modal({ onClose, children, maxWidth = 'max-w-sm' }) {
     >
       <motion.div
         className={`w-full ${maxWidth} max-h-[92vh] overflow-y-auto rounded-[20px] border border-[var(--line)] bg-[var(--surface-solid)] p-6 text-[var(--text)] shadow-[0_24px_80px_rgba(2,4,24,0.7),0_0_40px_rgba(124,92,255,0.18)]`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
         onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

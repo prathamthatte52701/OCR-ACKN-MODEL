@@ -59,7 +59,7 @@ function UserMenu({ user, onLogout }) {
   )
 }
 
-export default function TopBar({ user, pending, onOpenMenu, drawerOpen, menuButtonRef, onLogout }) {
+export default function TopBar({ user, pending, bellTo = '/approvals', onOpenMenu, drawerOpen, menuButtonRef, onLogout }) {
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--line-soft)] bg-[rgba(7,10,31,0.86)]">
       {/* Same max width as the page content, so the profile lines up with the page's right edge */}
@@ -69,7 +69,7 @@ export default function TopBar({ user, pending, onOpenMenu, drawerOpen, menuButt
         </button>
         <SearchBox className="min-w-0 max-w-[640px] flex-1" />
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
-          <Link to="/approvals" aria-label={pending > 0 ? `${pending} pending approvals` : 'Approvals'} className="relative grid h-10 w-10 place-items-center rounded-xl border border-[var(--line)] bg-[rgba(124,108,255,0.08)] text-white hover:bg-[rgba(124,108,255,0.18)]">
+          <Link to={bellTo} aria-label={pending > 0 ? `${pending} items need attention` : 'Approvals'} className="relative grid h-10 w-10 place-items-center rounded-xl border border-[var(--line)] bg-[rgba(124,108,255,0.08)] text-white hover:bg-[rgba(124,108,255,0.18)]">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></svg>
             {pending > 0 && <span className="absolute -right-1.5 -top-1.5 grid min-w-[20px] place-items-center rounded-full bg-rose-500 px-1 text-[13px] font-bold leading-5 text-white">{pending > 99 ? '99+' : pending}</span>}
           </Link>

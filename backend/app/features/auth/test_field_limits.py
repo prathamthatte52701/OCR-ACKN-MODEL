@@ -20,17 +20,8 @@ async def test_login_oversize_fields_422(client: Any) -> None:
         assert (await client.post("/api/auth/login", json=body)).status_code == 422
 
 
-async def test_google_token_and_forgot_password_oversize_422(client: Any) -> None:
+async def test_google_token_oversize_422(client: Any) -> None:
     assert (await client.post("/api/auth/google", json={"idToken": BIG * 2})).status_code == 422
-    r = await client.post(
-        "/api/auth/forgot-password/verify", json={"username": BIG, "email": "a@b.co"}
-    )
-    assert r.status_code == 422
-    r = await client.post(
-        "/api/auth/forgot-password/reset",
-        json={"username": "u", "email": "a@b.co", "newPassword": BIG, "confirmNewPassword": BIG},
-    )
-    assert r.status_code == 422
 
 
 async def test_change_password_and_profile_oversize_422(client: Any, make_user: Any) -> None:

@@ -58,8 +58,8 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
   the login and signup pages. Same JWT/session contract as normal login, so
   nothing else in the app needed to change. Existing accounts with a
   matching email get linked automatically instead of creating a duplicate
-  user. Google-only accounts (no password set) are blocked from the
-  forgot-password flow, since there's no password to reset.
+  user. Google-only accounts (no password set) cannot use the
+  password-reset request, since there's no password to reset.
 - **Bulk-upload crash fix** — the app used to briefly hang after a restart
   because startup recovery of interrupted uploads ran before the server
   started accepting requests at all. That recovery step now runs in the
@@ -213,13 +213,16 @@ files and keeps the admin accounts. Stop the backend first and take a `mongodump
   5× one file's time, not 1×.
 - **Image size**: images over 50 megapixels and PDFs with an oversized page
   are rejected (a tiny file can decode to gigabytes of RAM).
-- **Forgot password**: username+email match, not an emailed reset link —
-  no possession-of-inbox proof. Inherited from the original app's design.
+- **Password reset is admin-handled**: "Request password reset" on the login
+  page sends the admin a request (email + optional note); the admin gives a
+  temporary password in person or by phone, and the user must change it at
+  first login. There is no emailed link.
 - **Hosting**: local-only on one PC.
   Swagger/ReDoc/openapi.json are off everywhere unless `ENABLE_DOCS=true`.
 - **Google linking**: an existing password account that signs in with Google
   is linked automatically (Google verified the email).
-- **Admin forgot-password** has the same username+email reset as users.
+- **Admin accounts** cannot request a reset; they use
+  `backend/app/scripts/reset_admin_password.py`.
 - **7-day tokens**: JWTs last 7 days and are revoked only by a `tokenVersion`
   bump (password change, reject).
 - **OCR accuracy on photos**: the OCR step can misread one digit on blurry or

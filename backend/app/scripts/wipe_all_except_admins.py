@@ -29,6 +29,7 @@ DATA_COLLECTIONS = (
     "auditlogs",
     "orphanedfiles",
     "settings",
+    "passwordresetrequests",
 )
 GRIDFS_COLLECTIONS = ("fs.files", "fs.chunks")
 EXPORT_SUFFIXES = (".xlsx", ".lock")  # also covers .tmp{pid}.xlsx swap files
@@ -83,10 +84,10 @@ async def _snapshot(db: AsyncIOMotorDatabase, exports_dir: Path) -> dict[str, An
 
 def _print_table(s: dict[str, Any], exports_dir: Path, applied: bool) -> None:
     verb = "deleted" if applied else "to delete"
-    print(f"\n  {'collection':<16}{verb:>12}{'kept':>8}")
-    print(f"  {'users':<16}{s['non_admin']:>12}{len(s['admins']):>8}   (non-admin / admin)")
+    print(f"\n  {'collection':<22}{verb:>12}{'kept':>8}")
+    print(f"  {'users':<22}{s['non_admin']:>12}{len(s['admins']):>8}   (non-admin / admin)")
     for name, n in s["counts"].items():
-        print(f"  {name:<16}{n:>12}{0:>8}")
+        print(f"  {name:<22}{n:>12}{0:>8}")
     print(
         f"  GridFS: {s['gridfs_files']} files, {s['gridfs_chunks']} chunks, "
         f"{s['gridfs_bytes']} bytes {verb}"

@@ -44,6 +44,11 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     # existing record instead of creating a duplicate.
     await db.orphanedfiles.create_index([("gridFsFileId", 1)], unique=True)
     await db.orphanedfiles.create_index([("createdAt", -1)])
+    # One OPEN password-reset request per user (atomic upsert relies on this).
+    await db.passwordresetrequests.create_index(
+        [("userId", 1)], unique=True, partialFilterExpression={"status": "open"}
+    )
+    await db.passwordresetrequests.create_index([("status", 1), ("createdAt", -1)])
     # Email uniqueness was only a check-then-insert in the routers. The old
     # database carried a unique index from an earlier version, but a fresh
     # cluster has none, so two concurrent signups/profile updates could
