@@ -281,7 +281,7 @@ async def _normalize_photo_page(buffer: bytes) -> bytes:
             logger.info(f"Photo page normalization: {steps}")
         return page_bytes
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Photo page normalization failed, using original: {exc}")
+        logger.error(f"Photo page normalization failed, using original: class={type(exc).__name__}")
         return buffer
 
 
@@ -427,7 +427,7 @@ async def _log_processed(doc_id: ObjectId) -> None:
             },
         )
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Audit log 'document_processed' failed: {exc}")
+        logger.error(f"Audit log 'document_processed' failed: class={type(exc).__name__}")
 
 
 async def _fail_ocr(
@@ -559,7 +559,7 @@ async def process_document(
         if await _update_active_document(doc_id, update, run_id):
             await _log_processed(doc_id)
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"process_document error: {exc}")
+        logger.error(f"process_document error: class={type(exc).__name__}")
         await _update_active_document(
             doc_id,
             {

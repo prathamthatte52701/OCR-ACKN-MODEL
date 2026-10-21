@@ -367,7 +367,9 @@ async def bulk_upload_documents(
             try:
                 await process_document(doc_id, buffer, mime_type, doc_type, run_id)
             except Exception as exc:  # noqa: BLE001
-                logger.error(f"Bulk-upload file {doc_id} crashed the pipeline: {exc}")
+                logger.error(
+                    f"Bulk-upload file {doc_id} crashed the pipeline: class={type(exc).__name__}"
+                )
                 db = get_database()
                 try:
                     await db.documents.update_one(

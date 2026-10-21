@@ -385,7 +385,10 @@ async def _replace_old_rows(
             )
             continue
         except Exception as exc:  # noqa: BLE001 - the new row is in; never fail the save over this
-            logger.error(f"Removing the old Excel row of document {doc_id} failed: {exc}")
+            logger.error(
+                f"Removing the old Excel row of document {doc_id} failed: "
+                f"class={type(exc).__name__}"
+            )
             warnings.append(
                 f"The new row was saved, but the old row could not be removed from {name}. "
                 "Press Save Again to try again."
@@ -526,7 +529,9 @@ async def _save_document_locked(doc_id: ObjectId, current_user: CurrentUser) -> 
             new_file_existed,
         )
     except Exception as exc:  # noqa: BLE001 - the new row is in; a DB hiccup must not fail the save
-        logger.error(f"Replacing the old Excel rows of document {doc_id} failed: {exc}")
+        logger.error(
+            f"Replacing the old Excel rows of document {doc_id} failed: class={type(exc).__name__}"
+        )
         replaced = 0
         stale_warning = (
             "The new row was saved, but the old row could not be checked. "
@@ -624,7 +629,7 @@ async def bulk_save_documents_to_excel(
             reason = detail if isinstance(detail, str) else detail.get("message", "Could not save.")
             failed.append({"documentId": str(doc_id), "reason": reason})
         except Exception as exc:  # noqa: BLE001 - one bad document must not abort the batch
-            logger.error(f"Bulk save of document {doc_id} failed: {exc}")
+            logger.error(f"Bulk save of document {doc_id} failed: class={type(exc).__name__}")
             failed.append({"documentId": str(doc_id), "reason": "Could not save this document."})
 
     return {

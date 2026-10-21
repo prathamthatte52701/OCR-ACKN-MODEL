@@ -60,7 +60,10 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     except Exception as exc:  # noqa: BLE001
         from loguru import logger
 
-        logger.warning(f"Could not create unique users.email index (duplicates present?): {exc}")
+        logger.warning(
+            "Could not create unique users.email index (duplicates present?): "
+            f"class={type(exc).__name__}"
+        )
 
 
 async def close_mongo_connection() -> None:

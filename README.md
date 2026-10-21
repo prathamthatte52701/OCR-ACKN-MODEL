@@ -123,7 +123,7 @@ Required env vars (`backend/.env`):
 | `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
 | `MONGO_DB_NAME` | no (default `docintel_transport`) | blank = default |
 | `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
-| `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and the server log |
+| `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and in the server log (backend/logs/app.log) |
 | `GROQ_REASONING_EFFORT` | no (unset = `low`) | `low`, `medium` or `high`. Set but blank = the parameter is not sent (use this for models without a reasoning mode). Anything else stops the app at start |
 | `GROQ_MAX_TOKENS` | no (default `300`) | whole number 50-4000; blank = 300; anything else stops the app at start |
 | `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
@@ -160,6 +160,16 @@ cd admin && npm install && npm run dev      # http://localhost:5175
 ```
 
 Both dev servers proxy `/api` to the backend (see each app's `vite.config.js`).
+
+## Logs
+
+The server writes its log to `backend/logs/app.log` (created automatically). It rotates at 10 MB, is kept for 10 days, and old files are zipped. It can contain user emails and document details, so do not paste it into public chats.
+
+Read the latest lines on Windows PowerShell:
+
+```powershell
+Get-Content backend\logs\app.log -Tail 100 -Wait
+```
 
 ## Code quality
 

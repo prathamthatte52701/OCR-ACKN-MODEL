@@ -27,7 +27,7 @@ async def safe_log_action(
     try:
         await log_action(user_id, action, context)
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Audit log '{action}' failed: {exc}")
+        logger.error(f"Audit log '{action}' failed: class={type(exc).__name__}")
 
 
 ADMIN_ACCESS_ACTION = "admin_access"

@@ -39,7 +39,7 @@ async def _recover_interrupted_uploads_in_background() -> None:
         if recovered:
             logger.warning(f"Requeued {recovered} interrupted document(s) for processing.")
     except Exception as exc:  # noqa: BLE001
-        logger.error(f"Interrupted-upload recovery failed: {exc}")
+        logger.error(f"Interrupted-upload recovery failed: class={type(exc).__name__}")
 
 
 @asynccontextmanager
