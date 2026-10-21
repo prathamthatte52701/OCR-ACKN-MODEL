@@ -1,6 +1,6 @@
 import sys
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # A short/guessable JWT secret is brute-forceable offline (HS256 signatures
@@ -11,13 +11,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # discipline alone.
 MIN_JWT_SECRET_LENGTH = 32
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+DEFAULT_DB_NAME = "docintel_transport"
+DEFAULT_FRONTEND_ORIGIN = "http://localhost:5174"
+DEFAULT_ADMIN_ORIGIN = "http://localhost:5175"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     mongo_uri: str = Field(alias="MONGO_URI")
-    mongo_db_name: str = Field(default="docintel_transport", alias="MONGO_DB_NAME")
+    mongo_db_name: str = Field(default=DEFAULT_DB_NAME, alias="MONGO_DB_NAME")
     jwt_secret: str = Field(alias="JWT_SECRET")
     groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
     # Groq has already retired a model once; the model name must be changeable without a deploy.
@@ -27,8 +30,8 @@ class Settings(BaseSettings):
     # (models without a reasoning mode reject it with a 400).
     groq_reasoning_effort: str | None = Field(default="low", alias="GROQ_REASONING_EFFORT")
     groq_max_tokens: int = Field(default=300, alias="GROQ_MAX_TOKENS")
-    frontend_origin: str = Field(default="http://localhost:5174", alias="FRONTEND_ORIGIN")
-    admin_origin: str = Field(default="http://localhost:5175", alias="ADMIN_ORIGIN")
+    frontend_origin: str = Field(default=DEFAULT_FRONTEND_ORIGIN, alias="FRONTEND_ORIGIN")
+    admin_origin: str = Field(default=DEFAULT_ADMIN_ORIGIN, alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
     admin_2_password: str = Field(default="", alias="ADMIN_2_PASSWORD")
     # Seed-only identities (see app/scripts/seed_admin.py) - kept out of source so
@@ -41,6 +44,30 @@ class Settings(BaseSettings):
     # unless explicitly enabled (ENABLE_DOCS=true), in every environment.
     enable_docs: bool = Field(default=False, alias="ENABLE_DOCS")
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+
+    @field_validator("mongo_uri", mode="before")
+    @classmethod
+    def _require_mongo_uri(cls, value: object) -> object:
+        # Required: a blank MONGO_URI (e.g. a copied .env.example) must stop the start with a
+        # clear message, not become an empty string that fails later inside the driver.
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("MONGO_URI is required and must not be blank.")
+        return value.strip()
+
+    @field_validator("mongo_db_name", "frontend_origin", "admin_origin", mode="before")
+    @classmethod
+    def _blank_means_default(cls, value: object, info: ValidationInfo) -> object:
+        # .env.example ships these optional lines blank (or commented out); blank/whitespace
+        # means "use the default", exactly like ENABLE_DOCS / GROQ_MODEL above. Real values are
+        # only stripped of surrounding spaces.
+        defaults = {
+            "mongo_db_name": DEFAULT_DB_NAME,
+            "frontend_origin": DEFAULT_FRONTEND_ORIGIN,
+            "admin_origin": DEFAULT_ADMIN_ORIGIN,
+        }
+        if not isinstance(value, str) or not value.strip():
+            return defaults[str(info.field_name)]
+        return value.strip()
 
     @field_validator("enable_docs", mode="before")
     @classmethod
