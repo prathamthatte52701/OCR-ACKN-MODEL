@@ -74,3 +74,4 @@ frontend/e2e/
 admin/e2e/
 
 backend/logs/
+.run/

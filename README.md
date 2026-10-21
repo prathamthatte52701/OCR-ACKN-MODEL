@@ -138,23 +138,34 @@ Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
 the app refuse to start with a clear error — it will never silently boot
 with a broken config.
 
-Run the API (stop it with Ctrl+C in that terminal):
+### Run on the client PC
+
+Prerequisites: the Python 3.12 venv at the repo root (`venv/`), Node.js 20.19+ or 22.12+ installed, and `backend\.env` filled in per the table above.
+
+1. `setup.bat` - run once, and again after any frontend code change (stop the app with `stop.bat` first: running programs lock files on Windows). It installs the backend dependencies and builds both apps. Safe to run twice.
+2. Seed the admin accounts once (idempotent, safe to re-run):
+
+   ```bash
+   cd backend
+   ../venv/Scripts/python.exe -m app.scripts.seed_admin
+   ```
+
+3. `start.bat` - double-click it daily. It starts the backend on port 8000, the user app on 5174 and the admin app on 5175, all bound to this PC only (127.0.0.1), and opens http://localhost:5174. The admin app is http://localhost:5175. If the app is already running, it says so.
+4. `stop.bat` - stops only what `start.bat` started. A document that was being processed is requeued at the next start.
+
+Logs are in `backend\logs\app.log` (see Logs).
+
+If a port is busy: run `stop.bat` first. If another program uses 8000, 5174 or 5175, the script names the port and does not start.
+
+Before `git pull`: stop the app with `stop.bat`, pull, then run `setup.bat` and `start.bat`.
+
+### Developer mode (owner only)
+
+The client must not use developer mode. `--reload` has been seen to hang on Windows ("Reloading..." printed, the new worker never starts).
 
 ```bash
 cd backend
 ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --reload
-```
-
-Seed the two admin accounts from the `ADMIN_*` env vars (idempotent, safe to re-run):
-
-```bash
-cd backend
-../venv/Scripts/python.exe -m app.scripts.seed_admin
-```
-
-### Frontend / Admin
-
-```bash
 cd frontend && npm install && npm run dev   # http://localhost:5174
 cd admin && npm install && npm run dev      # http://localhost:5175
 ```
