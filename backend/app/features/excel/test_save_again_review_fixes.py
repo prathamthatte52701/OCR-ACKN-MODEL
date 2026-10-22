@@ -62,7 +62,7 @@ async def test_db_error_after_the_row_is_written_is_still_a_success(
     async def boom(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("mongo hiccup")
 
-    monkeypatch.setattr(excel_router, "_replace_old_rows", boom)
+    monkeypatch.setattr(excel_router, "_collect_old_rows", boom)
     r = await _save(client, u, d)
     assert r.status_code == 200, r.text
     body = r.json()

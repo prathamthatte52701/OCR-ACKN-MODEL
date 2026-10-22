@@ -1265,6 +1265,7 @@ async def recover_interrupted_uploads() -> int:
                             "Processing was interrupted and could not be recovered. "
                             "Please reprocess this document."
                         ),
+                        "updatedAt": datetime.now(UTC),
                     }
                 },
             )

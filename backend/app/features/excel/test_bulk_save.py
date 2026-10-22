@@ -187,52 +187,65 @@ async def test_another_users_id_fails_404_and_their_data_is_untouched(
     assert await db.exportedrows.count_documents({}) == 1
 
 
-async def test_locked_file_fails_one_document_others_still_saved(
+async def test_locked_file_fails_every_document_of_that_file_nothing_written(
     client: Any, db: Any, make_user: Any, exports_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A bulk save writes each workbook ONCE, so a locked file (open in Excel) fails every document
+    that targets it and writes nothing; documents of OTHER workbooks still succeed (that part is
+    covered by test_bulk_batch_races.py). Before batching, the injection point was one append per
+    document, so a single document could fail alone - that cannot happen for a real file lock."""
     u = await make_user()
     await _workbook(client, u)
     ids = [await _doc(db, u, n) for n in ("820000501", "LOCKME", "820000503")]
-    real_append = excel_service.append_row
+    real_append_rows = excel_service.append_rows
 
-    async def flaky(filename: str, month: str, row: dict) -> Path:
-        if row["number"] == "LOCKME":
+    async def flaky(filename: str, items: list) -> Path:
+        if any(row["number"] == "LOCKME" for _month, row in items):
             raise excel_service.FileLockedError("raw lock text")
-        return await real_append(filename, month, row)
+        return await real_append_rows(filename, items)
 
-    monkeypatch.setattr(excel_service, "append_row", flaky)
+    monkeypatch.setattr(excel_service, "append_rows", flaky)
     body = (await _bulk(client, u, ids)).json()
-    assert body["succeeded"] == [str(ids[0]), str(ids[2])]
-    assert body["failed"] == [{"documentId": str(ids[1]), "reason": excel_router.FILE_BUSY_MESSAGE}]
+    assert body["succeeded"] == []
+    assert body["failed"] == [
+        {"documentId": str(i), "reason": excel_router.FILE_BUSY_MESSAGE} for i in ids
+    ]
     assert (
         excel_router.FILE_BUSY_MESSAGE
         == "The Excel file is busy or open. Close it in Excel and try again."
     )
-    assert await db.exportedrows.count_documents({}) == 2
-    assert len(_xlsx_rows(exports_dir, u)) == 2
+    assert await db.exportedrows.count_documents({}) == 0
+    assert len(_xlsx_rows(exports_dir, u)) == 0
+    for i in ids:
+        assert (await db.documents.find_one({"_id": i}))["exported"] is False
 
 
-async def test_unexpected_error_on_one_document_does_not_abort_the_batch(
+async def test_unexpected_error_fails_that_file_only_and_leaks_nothing(
     client: Any, db: Any, make_user: Any, exports_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An unexpected error while writing a workbook fails the documents of THAT file with the
+    generic reason (nothing written, no error text leaked); the request still answers 200. Before
+    batching the injection point was one append per document."""
     u = await make_user()
     await _workbook(client, u)
     ids = [await _doc(db, u, n) for n in ("820000601", "BOOM", "820000603")]
-    real_append = excel_service.append_row
+    real_append_rows = excel_service.append_rows
 
-    async def boom(filename: str, month: str, row: dict) -> Path:
-        if row["number"] == "BOOM":
+    async def boom(filename: str, items: list) -> Path:
+        if any(row["number"] == "BOOM" for _month, row in items):
             raise RuntimeError("disk exploded")
-        return await real_append(filename, month, row)
+        return await real_append_rows(filename, items)
 
-    monkeypatch.setattr(excel_service, "append_row", boom)
+    monkeypatch.setattr(excel_service, "append_rows", boom)
     r = await _bulk(client, u, ids)
     body = r.json()
-    assert r.status_code == 200 and len(body["succeeded"]) == 2
+    assert r.status_code == 200 and body["succeeded"] == []
     assert body["failed"] == [
-        {"documentId": str(ids[1]), "reason": "Could not save this document."}
+        {"documentId": str(i), "reason": "Could not save this document."} for i in ids
     ]
     assert "disk exploded" not in r.text
+    assert await db.exportedrows.count_documents({}) == 0
+    assert len(_xlsx_rows(exports_dir, u)) == 0
 
 
 async def test_missing_or_unreadable_date_is_listed_in_date_fallback(
