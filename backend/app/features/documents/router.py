@@ -7,7 +7,7 @@ import zipfile
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -26,6 +26,7 @@ from fastapi import (
 from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pymongo import ReturnDocument
+from pymongo.collation import Collation
 from starlette.background import BackgroundTask
 
 from app.core.audit_log import log_action, safe_log_action
@@ -34,6 +35,7 @@ from app.core.image_limits import ImageTooLarge, check_upload
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import UPLOAD_LIMIT, limiter
+from app.core.timezones import ist_midnight_utc, now_ist
 from app.features.auth.dependencies import CurrentUser, get_current_user
 from app.features.documents.correction import correction_set_fields
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
@@ -425,6 +427,71 @@ def _escape_regex(value: str) -> str:
     return re.escape(value)
 
 
+_TEXT_COLLATION = Collation(locale="en", strength=2)
+_SORT_HELPER = "_sortKey"
+
+
+def _str_or_empty(field: str) -> dict:
+    return {"$cond": [{"$eq": [{"$type": field}, "string"]}, field, ""]}
+
+
+def _sort_key_expr(sort: str) -> dict | str:
+    """Mongo expression for the sort key (see list_documents for the semantics)."""
+    if sort == "number":
+        a, b = _str_or_empty("$taxInvoiceNo"), _str_or_empty("$referenceNo")
+        tax_number = {
+            "$cond": [
+                {"$and": [{"$ne": [a, ""]}, {"$ne": [b, ""]}]},
+                {"$concat": [a, " / ", b]},
+                {"$concat": [a, b]},
+            ]
+        }
+        return {
+            "$cond": [
+                {"$eq": ["$documentType", "Tax Invoice"]},
+                tax_number,
+                _str_or_empty("$number"),
+            ]
+        }
+    if sort == "date":  # DD/MM/YYYY -> YYYYMMDD, anything else -> ""
+        return {
+            "$cond": [
+                {
+                    "$and": [
+                        {"$eq": [{"$type": "$date"}, "string"]},
+                        {"$regexMatch": {"input": "$date", "regex": r"^\d{2}/\d{2}/\d{4}$"}},
+                    ]
+                },
+                {
+                    "$concat": [
+                        {"$substrCP": ["$date", 6, 4]},
+                        {"$substrCP": ["$date", 3, 2]},
+                        {"$substrCP": ["$date", 0, 2]},
+                    ]
+                },
+                "",
+            ]
+        }
+    if sort == "edited":
+        return {"$eq": ["$edited", True]}
+    if sort in ("documentType", "uploadStatus"):
+        return _str_or_empty(f"${sort}")
+    return "$createdAt"
+
+
+def _sorted_page_pipeline(
+    filter_query: dict, sort: str, direction: int, skip: int, lim: int
+) -> list[dict]:
+    return [
+        {"$match": filter_query},
+        {"$addFields": {_SORT_HELPER: _sort_key_expr(sort)}},
+        {"$sort": {_SORT_HELPER: direction, "_id": direction}},
+        {"$skip": skip},
+        {"$limit": lim},
+        {"$project": {_SORT_HELPER: 0}},
+    ]
+
+
 @router.get("")
 async def list_documents(
     document_type: str | None = Query(default=None, alias="documentType"),
@@ -435,12 +502,21 @@ async def list_documents(
     uploaded_from: str | None = Query(default=None, alias="uploadedFrom"),
     page: int | None = Query(default=None),
     limit: int | None = Query(default=None),
+    sort: (
+        Literal["documentType", "number", "date", "uploadStatus", "edited", "createdAt"] | None
+    ) = Query(default=None),
+    order: Literal["asc", "desc"] | None = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Paginated only when ?page= is passed (My Documents page). No ?page ->
-    full-list behavior, since the Dashboard needs every document back to
-    compute its stats/recent-docs widget from - ported 1:1 from the old
-    Express route's contract (see old backend/routes/documents.js)."""
+    """Paginated only when ?page= is passed (every page must use this mode).
+
+    Paged sort: no sort/order = createdAt desc (unchanged). Otherwise sort=<whitelisted key>,
+    order defaults to asc (createdAt-with-order-only sorts createdAt). `_id` is always the final
+    tie-breaker in the SAME direction as the primary key, so walking all pages yields each
+    document exactly once.
+
+    No ?page = legacy FULL-LIST mode: UNBOUNDED, returns every document the user has. Pages must
+    NOT use it (use ?page= and GET /summary); kept only for old callers and tests."""
     db = get_database()
     filter_query: dict = {"userId": current_user.id, "isDeleted": {"$ne": True}}
 
@@ -484,7 +560,16 @@ async def list_documents(
         pg = min(MAX_PAGE_NUMBER, max(1, page))
         skip = (pg - 1) * lim
         total_documents = await db.documents.count_documents(filter_query)
-        cursor = db.documents.find(filter_query).sort("createdAt", -1).skip(skip).limit(lim)
+        cursor: Any
+        if sort is None and order is None:
+            cursor = db.documents.find(filter_query).sort("createdAt", -1).skip(skip).limit(lim)
+        else:
+            direction = -1 if order == "desc" else 1
+            cursor = db.documents.aggregate(
+                _sorted_page_pipeline(filter_query, sort or "createdAt", direction, skip, lim),
+                allowDiskUse=True,
+                collation=_TEXT_COLLATION,
+            )
         documents = [_serialize_document(d) async for d in cursor]
         return {
             "documents": documents,
@@ -500,6 +585,56 @@ async def list_documents(
         if d["documentType"] in by_document_type:
             by_document_type[d["documentType"]] += 1
     return {"documents": documents, "byDocumentType": by_document_type}
+
+
+@router.get("/summary")
+async def documents_summary(current_user: CurrentUser = Depends(get_current_user)) -> dict:
+    """Dashboard numbers computed in the database (no full list). processedToday = processed docs
+    whose processedAt (else reprocessedAt, else updatedAt) falls on today's IST calendar day."""
+    start = ist_midnight_utc(now_ist())  # one clock read: both bounds come from the same instant
+    end = start + timedelta(days=1)  # IST has a fixed offset, so +24h is exactly the next midnight
+    stamp = {"$ifNull": ["$processedAt", {"$ifNull": ["$reprocessedAt", "$updatedAt"]}]}
+    processed = {"$eq": ["$uploadStatus", "processed"]}
+    today = {
+        "$and": [
+            processed,
+            {"$eq": [{"$type": stamp}, "date"]},
+            {"$gte": [stamp, start]},
+            {"$lt": [stamp, end]},
+        ]
+    }
+
+    def count(cond: dict) -> list[dict]:
+        return [{"$match": {"$expr": cond}}, {"$count": "n"}]
+
+    pipeline = [
+        {"$match": {"userId": current_user.id, "isDeleted": {"$ne": True}}},
+        {
+            "$facet": {
+                "total": [{"$count": "n"}],
+                "processed": count(processed),
+                "failed": count({"$eq": ["$uploadStatus", "failed"]}),
+                "today": count(today),
+                "taxInvoice": count({"$eq": ["$documentType", "Tax Invoice"]}),
+                "challan": count({"$eq": ["$documentType", "Delivery Challan"]}),
+                "recent": [{"$sort": {"createdAt": -1, "_id": -1}}, {"$limit": 3}],
+            }
+        },
+    ]
+    res = await get_database().documents.aggregate(pipeline).to_list(1)
+    facet = res[0] if res else {}
+
+    def n(key: str) -> int:
+        return facet[key][0]["n"] if facet.get(key) else 0
+
+    return {
+        "total": n("total"),
+        "processed": n("processed"),
+        "failed": n("failed"),
+        "processedToday": n("today"),
+        "byDocumentType": {"Tax Invoice": n("taxInvoice"), "Delivery Challan": n("challan")},
+        "recent": [_serialize_document(d) for d in facet.get("recent", [])],
+    }
 
 
 @router.get("/training-stats")

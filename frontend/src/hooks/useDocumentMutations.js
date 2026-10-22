@@ -27,6 +27,7 @@ export function useReprocessDocument(id) {
     // may be stale ('failed'), so refetch to resume polling the running job.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: documentKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: documentKeys.summary })
     },
   })
 }

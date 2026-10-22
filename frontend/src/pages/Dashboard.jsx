@@ -2,10 +2,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { downloadWorkbook } from '../api/excel'
-import { useDocumentsList, useTrainingStats } from '../hooks/useDocumentsQueries'
+import { useDocumentsSummary, useTrainingStats } from '../hooks/useDocumentsQueries'
 import LoadingState from '../components/LoadingState'
 import PageBackground from '../components/PageBackground'
-import { formatIST, isTodayIST } from '../utils/formatDate'
+import { formatIST } from '../utils/formatDate'
 import challanRouteVisual from '../assets/transport-bill-route-visual.png'
 
 const features = [
@@ -257,21 +257,20 @@ function DocumentSearchBar() {
 
 export default function Dashboard() {
   const [exporting, setExporting] = useState(false)
-  const { data, isLoading: docsLoading } = useDocumentsList({})
+  const { data, isLoading: docsLoading } = useDocumentsSummary()
   const { data: training = { trainedCount: 0, correctedCount: 0 }, isLoading: trainingLoading } = useTrainingStats()
   const loading = docsLoading || trainingLoading
 
-  const docs = data?.documents || []
   const byDocumentType = data?.byDocumentType || {}
   const stats = {
-    total: docs.length,
-    processed: docs.filter((d) => d.uploadStatus === 'processed').length,
-    failed: docs.filter((d) => d.uploadStatus === 'failed').length,
-    processedToday: docs.filter((d) => d.uploadStatus === 'processed' && isTodayIST(d.processedAt || d.reprocessedAt || d.updatedAt)).length,
+    total: data?.total || 0,
+    processed: data?.processed || 0,
+    failed: data?.failed || 0,
+    processedToday: data?.processedToday || 0,
     taxInvoice: byDocumentType['Tax Invoice'] || 0,
     deliveryChallan: byDocumentType['Delivery Challan'] || 0,
   }
-  const recentDocs = docs.slice(0, 3)
+  const recentDocs = data?.recent || []
 
   async function handleExport() {
     setExporting(true)

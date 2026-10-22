@@ -1,9 +1,11 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { getDocument, listDocuments, myActivity, trainingStats } from '../api/documents'
+import { getDocument, listDocuments, listDocumentsSummary, myActivity, trainingStats } from '../api/documents'
 import { exportHistory } from '../api/excel'
 
 export const documentKeys = {
   list: (params) => ['documents', 'list', params],
+  // under the ['documents', 'list'] prefix so list invalidations also refresh it
+  summary: ['documents', 'list', 'summary'],
   detail: (id) => ['documents', 'detail', id],
   trainingStats: ['documents', 'training-stats'],
   myActivity: (params) => ['documents', 'my-activity', params],
@@ -13,6 +15,18 @@ export function useDocumentsList(params, options = {}) {
   return useQuery({
     queryKey: documentKeys.list(params),
     queryFn: () => listDocuments(params),
+    ...options,
+  })
+}
+
+// Dashboard counts: tiny payload, so always refetch on mount (the 15s global staleTime
+// would show stale numbers right after an upload).
+export function useDocumentsSummary(options = {}) {
+  return useQuery({
+    queryKey: documentKeys.summary,
+    queryFn: listDocumentsSummary,
+    staleTime: 0,
+    refetchOnMount: 'always',
     ...options,
   })
 }

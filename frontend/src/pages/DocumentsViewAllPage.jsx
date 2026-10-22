@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import { keepPreviousData } from '@tanstack/react-query'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
 import PageBackground from '../components/PageBackground'
 import BackButton from '../components/BackButton'
@@ -17,37 +18,32 @@ function formatNumberCell(doc) {
 }
 
 const COLUMNS = [
-  { key: 'documentType', label: 'Document Type', getValue: (d) => d.documentType || '' },
-  { key: 'number', label: 'Number', getValue: formatNumberCell },
-  { key: 'date', label: 'Date', getValue: (d) => d.date || '' },
-  { key: 'uploadStatus', label: 'Upload Status', getValue: (d) => d.uploadStatus || '' },
-  { key: 'edited', label: 'Edited', getValue: (d) => (d.edited ? 'Yes' : 'No') },
-  { key: 'createdAt', label: 'Created At', getValue: (d) => d.createdAt || '' },
+  { key: 'documentType', label: 'Document Type' },
+  { key: 'number', label: 'Number' },
+  { key: 'date', label: 'Date' },
+  { key: 'uploadStatus', label: 'Upload Status' },
+  { key: 'edited', label: 'Edited' },
+  { key: 'createdAt', label: 'Created At' },
 ]
 
 export default function DocumentsViewAllPage() {
-  const { data, isLoading, isError, error, refetch } = useDocumentsList({})
-  const documents = data?.documents || EMPTY_DOCUMENTS
-
   const [sortKey, setSortKey] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
   const [page, setPage] = useState(1)
 
-  const sorted = useMemo(() => {
-    if (!sortKey) return documents
-    const col = COLUMNS.find((c) => c.key === sortKey)
-    const copy = [...documents]
-    copy.sort((a, b) => {
-      const av = col.getValue(a)
-      const bv = col.getValue(b)
-      const cmp = String(av).localeCompare(String(bv))
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-    return copy
-  }, [documents, sortKey, sortDir])
+  // No sort/order params until a header is clicked, so the server default (createdAt desc) applies.
+  const params = sortKey
+    ? { page, limit: PAGE_SIZE, sort: sortKey, order: sortDir }
+    : { page, limit: PAGE_SIZE }
+  const { data, isLoading, isError, error, refetch } = useDocumentsList(params, {
+    placeholderData: keepPreviousData,
+  })
+  const documents = data?.documents || EMPTY_DOCUMENTS
+  const totalDocuments = data?.totalDocuments ?? 0
+  const totalPages = Math.max(1, data?.totalPages ?? 1)
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
-  const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  // Deleted-elsewhere clamp (setState during render, React-sanctioned; only ever lowers page, so no loop).
+  if (data && page > totalPages) setPage(totalPages)
 
   function toggleSort(key) {
     if (sortKey === key) {
@@ -71,7 +67,7 @@ export default function DocumentsViewAllPage() {
             <h1 className="text-3xl font-black tracking-[-0.03em] text-white sm:text-4xl">View All Details</h1>
             <p className="mt-2 flex items-center gap-2 text-[14.7px] font-medium text-slate-500">
               <span className="h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_16px_rgba(96,165,250,0.85)]" />
-              {isLoading ? 'Loading documents...' : `${documents.length} document${documents.length !== 1 ? 's' : ''}`}
+              {isLoading ? 'Loading documents...' : `${totalDocuments} document${totalDocuments !== 1 ? 's' : ''}`}
             </p>
           </div>
         </div>
@@ -90,7 +86,7 @@ export default function DocumentsViewAllPage() {
               Try Again
             </button>
           </div>
-        ) : documents.length === 0 ? (
+        ) : totalDocuments === 0 ? (
           <div className="rounded-[30px] border border-blue-300/12 bg-slate-900/62 p-10 text-center shadow-[0_28px_100px_rgba(2,8,23,0.35)] backdrop-blur-xl">
             <h2 className="text-2xl font-black text-white">No documents yet</h2>
             <p className="mx-auto mt-2 max-w-md text-[14.7px] leading-6 text-slate-500">
@@ -118,7 +114,7 @@ export default function DocumentsViewAllPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.map((doc) => (
+                  {documents.map((doc) => (
                     <tr key={doc._id} className="border-b border-white/5 last:border-0">
                       <td className="px-4 py-3 text-slate-300">{doc.documentType}</td>
                       <td className="px-4 py-3 text-slate-300">{formatNumberCell(doc)}</td>

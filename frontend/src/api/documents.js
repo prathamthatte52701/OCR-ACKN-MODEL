@@ -13,6 +13,10 @@ export function listDocuments(params) {
     .then((res) => res.data)
 }
 
+export function listDocumentsSummary() {
+  return api.get('/documents/summary').then((res) => res.data)
+}
+
 export function getDocument(id) {
   return api.get(`/documents/${id}`).then((res) => res.data.document)
 }
