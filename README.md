@@ -2,7 +2,16 @@
 
 **Acknowledgement document intelligence.** Upload a Tax Invoice or Delivery Challan (photo or PDF), and AckIntel AI reads the document number and date for you, lets you check and correct them, and files everything into organised Excel workbooks.
 
-It is built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. The app itself runs only on that PC and is not published on the internet. It does use two online services: MongoDB Atlas stores the data, and Groq receives the header text of each document to pick out the number and date (never the image or the rest of the page).
+It is a Windows desktop-style tool, built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. The app itself runs only on that PC and is not published on the internet. It does use two online services: MongoDB Atlas stores the data, and Groq receives the header text of each document to pick out the number and date (never the image or the rest of the page).
+
+### At a glance
+
+**Upload** a document → **check** the number and date beside the original → **save** to Excel → find it in your yearly workbook, filed under the right month.
+
+- Review and edit with the original file always in view
+- Excel files that are written safely, even while you have them open
+- Private accounts with admin approval and a full audit trail
+- Clear flags for anything that looks unusual, so nothing slips through quietly
 
 ---
 
@@ -88,6 +97,7 @@ This is the setup for the office PC. It runs everything locally on Windows.
    ```
 
 4. Double-click **`start.bat`** every day. It starts everything and opens the app.
+5. **First sign-in.** Open the admin app (http://localhost:5175) and sign in with the admin email and password you set in `.env`. Open **Approvals** to approve new users. Each user then signs in at http://localhost:5174.
 
 | Part | Address | Port |
 |---|---|---|
@@ -140,7 +150,7 @@ If a request is rejected, or access is later removed, the sign-in page shows the
 ### Uploading and reviewing
 
 1. Open **Upload**, choose **Tax Invoice** or **Delivery Challan**, and add a file. For several files, use bulk upload (up to 10).
-2. Wait while the document is read. You can leave the page; progress is saved.
+2. Wait while the document is read. You can leave the page; progress is saved. For the best results with a phone photo, lay the page flat, keep the header in focus and use even light.
 3. Check the values against the original shown beside them. Click **Edit** on any field to correct it.
 4. Press **Save to Excel**.
 
@@ -245,7 +255,7 @@ Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scri
 
 ### Backups
 
-Take regular `mongodump` backups of the database and copy `backend/exports/` (the Excel workbooks). Documents are stored inside the database itself.
+Take regular `mongodump` backups of the database, and copy the `backend/exports/` folder, which holds the Excel workbooks. Each workbook file is named `<userId>_<workbook name>.xlsx`, so every user's files are easy to tell apart. Uploaded documents are stored inside the database itself.
 
 ## Development
 
