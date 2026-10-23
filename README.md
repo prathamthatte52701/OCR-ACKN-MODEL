@@ -19,7 +19,6 @@ It is built for one office PC: private per-user accounts, an admin approval step
 - [Security](#security)
 - [Operations](#operations)
 - [Development](#development)
-- [Known limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -301,16 +300,6 @@ The suite has close to 950 tests covering sign-in and approval, per-user isolati
 Tests are safe by design. `backend/conftest.py` forces a database whose name ends in `_test` and a separate test-only signing secret, and stops immediately if that is ever not the case. Set `ACKN_TEST_DB` to choose a different `_test` database name, for example to run two test sessions side by side.
 
 Browser checks for the document viewer are in `frontend/tests/` (plain Playwright scripts with the API mocked). Browser end-to-end scripts are in `frontend/e2e/`.
-
-## Known limitations
-
-- **Speed.** Reading one document takes roughly 40 to 90 seconds on a CPU. The model stays loaded between documents. There is no GPU, and the CPU speed-up library is turned off because it crashes on the pinned version.
-- **One at a time.** Documents are read one after another by design. See [How a document is read](#how-a-document-is-read).
-- **Bulk save speed.** Saving a page to a large workbook is much faster than it was, but is still limited by database round trips. A page of 100 documents can take over a minute.
-- **Photos.** On a blurry or tilted photo one digit can be misread, and on a skewed page the date may be taken from a neighbouring row. Always compare photo results with the original. Incomplete numbers are flagged.
-- **Single PC.** The app is local only. There is no hosted version.
-- **No email.** There is no email sending anywhere, so password resets and approvals are handled by the admin in person.
-- **Admins and Google.** An existing password account that signs in with Google is linked automatically, because Google has verified the email. Google-only accounts have no password to reset.
 
 ## Troubleshooting
 
