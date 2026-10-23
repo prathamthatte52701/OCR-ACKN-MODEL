@@ -10,7 +10,7 @@ from bson import ObjectId
 from app.features.excel import service as excel_service
 from app.features.excel.test_bulk_save import YEAR, _bulk, _doc, _workbook
 
-BLANK = "Add the number first, then save."
+BLANK = "Number not read. Reprocess the document, or type the number, then save."
 DUP = (
     "Another document with the same number and date is already in Excel. "
     "Check that this is not a duplicate."

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { displayNumber } from '../utils/documentDisplay'
+import { displayNumber, numberNotRead } from '../utils/documentDisplay'
 import { useSaveDocumentMutation } from '../hooks/useDocumentMutations'
 import { confirmAction } from '../store/dialogStore'
 
@@ -75,6 +75,7 @@ export default function DocumentCard({ doc, serialNumber }) {
           <span className="text-slate-200 font-semibold">{doc.date || '-'}</span>
         </p>
       </div>
+      {numberNotRead(doc) && <p className="relative mt-2 text-[12.6px] text-amber-400">Number not read</p>}
 
       <div className="relative mt-4 grid grid-cols-2 gap-3">
         <Link

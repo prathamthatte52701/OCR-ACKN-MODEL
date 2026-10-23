@@ -37,8 +37,9 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
 - **Admin approval for new accounts** — password signups start as `pending`
   and cannot log in (or use any route, even with an old token) until an admin
   approves them. Admins can reject, revoke or re-approve from the admin
-  panel's Pending / Rejected tabs. Google sign-ups and seeded admins are
-  approved automatically. Old databases: run
+  panel's Pending / Rejected tabs. A first-time Google sign-in also creates a
+  pending account (no login until approved); only seeded admins are approved
+  automatically. Old databases: run
   `python -m app.scripts.migrate_user_status --dry-run` once, then without
   the flag, so existing users stay approved.
 - **Private Export History** — a user only sees their own exports and can only
@@ -58,7 +59,9 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
   the login and signup pages. Same JWT/session contract as normal login, so
   nothing else in the app needed to change. Existing accounts with a
   matching email get linked automatically instead of creating a duplicate
-  user. An existing account that is still pending or was rejected gets the
+  user. A brand-new Google user is created as pending and gets no login
+  until an admin approves; they sign in with Google again afterwards. An
+  existing account that is still pending or was rejected gets the
   same "not approved" 403 as password login. Google-only accounts (no password set) cannot use the
   password-reset request, since there's no password to reset.
 - **Bulk-upload crash fix** — the app used to briefly hang after a restart

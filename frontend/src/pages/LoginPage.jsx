@@ -3,26 +3,9 @@ import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-do
 import { useAuth } from '../hooks/useAuth'
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
-import { formatLocal } from '../utils/formatDate'
+import { statusText } from '../utils/accountStatus'
 import { safeNext } from '../utils/safeNext'
 import BackButton from '../components/BackButton'
-
-// Plain-text status card for a 403 login (pending / rejected / revoked). Text nodes only -
-// the admin's reason is user-controlled data and is never rendered as HTML.
-function statusText(d) {
-  const reason = d.reason || 'No reason was given'
-  if (d.code === 'ACCOUNT_PENDING') {
-    const when = formatLocal(d.requestedAt)
-    return `${when ? `Your request was sent on ${when}. ` : ''}The admin has not decided yet. Log in again later to check. No email is sent.`
-  }
-  if (d.code === 'ACCOUNT_REJECTED') {
-    return `Your request was not approved${d.decidedAt ? ` on ${formatLocal(d.decidedAt)}` : ''}. Reason: ${reason}. Contact your admin.`
-  }
-  if (d.code === 'ACCOUNT_REVOKED') {
-    return `Your access was removed${d.decidedAt ? ` on ${formatLocal(d.decidedAt)}` : ''}. Reason: ${reason}. Contact your admin.`
-  }
-  return d.message || ''
-}
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -58,13 +41,20 @@ export default function LoginPage() {
       const next = searchParams.get('next')
       navigate(safeNext(next), { replace: true })
     } catch (err) {
-      const detail = err.response?.data?.detail
-      if (err.response?.status === 403 && typeof detail?.code === 'string') setNotice(statusText(detail))
-      else if (err.response?.status === 403) setNotice(err.userMessage)
-      else setError(err.userMessage || 'Could not log in. Please try again.')
+      showLoginError(err)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Shared by the password form and the Google button.
+  function showLoginError(err) {
+    setError('')
+    setNotice('')
+    const detail = err.response?.data?.detail
+    if (err.response?.status === 403 && typeof detail?.code === 'string') setNotice(statusText(detail))
+    else if (err.response?.status === 403) setNotice(err.userMessage)
+    else setError(err.userMessage || 'Could not log in. Please try again.')
   }
 
   return (
@@ -134,7 +124,7 @@ export default function LoginPage() {
           or
           <span className="h-px flex-1 bg-white/10" />
         </div>
-        <GoogleSignInButton />
+        <GoogleSignInButton onError={showLoginError} />
 
         <p className="mt-5 text-center text-[13.6px] text-slate-500">
           No account? <Link to="/signup" className="font-semibold text-blue-300 no-underline hover:text-blue-200">Sign up</Link>

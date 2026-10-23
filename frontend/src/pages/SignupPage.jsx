@@ -5,6 +5,7 @@ import { validateUsername, validateEmail, validatePassword } from '../utils/vali
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
 import BackButton from '../components/BackButton'
+import { statusText } from '../utils/accountStatus'
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -31,6 +32,16 @@ export default function SignupPage() {
       setError(err.userMessage || 'Could not create your account. Please try again.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // Pending / rejected / revoked Google attempt: show the same card the login page shows.
+  function handleGoogleError(err) {
+    const detail = err.response?.data?.detail
+    if (err.response?.status === 403 && typeof detail?.code === 'string') {
+      navigate(`/login?notice=${encodeURIComponent(statusText(detail))}`, { replace: true })
+    } else {
+      setError(err.userMessage || 'Could not sign in with Google. Please try again.')
     }
   }
 
@@ -103,7 +114,7 @@ export default function SignupPage() {
           or
           <span className="h-px flex-1 bg-white/10" />
         </div>
-        <GoogleSignInButton />
+        <GoogleSignInButton onError={handleGoogleError} />
 
         <p className="mt-5 text-center text-[13.6px] text-slate-500">
           Already have an account? <Link to="/login" className="font-semibold text-blue-300 no-underline hover:text-blue-200">Log in</Link>

@@ -19,7 +19,7 @@ export function useAuth() {
 
   async function loginWithGoogle(idToken) {
     const data = await authApi.loginWithGoogle(idToken)
-    setSession(data.token, data.user, false) // Google sign-in never shows the approval notice
+    setSession(data.token, data.user, Boolean(data.justApproved), data.approvedAt || null)
     return data.user
   }
 

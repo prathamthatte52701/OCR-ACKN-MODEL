@@ -532,7 +532,10 @@ async def _prepare_save(db: Any, doc_id: ObjectId, current_user: CurrentUser) ->
         raise HTTPException(status_code=400, detail="Document has not been processed yet.")
 
     if _number_is_blank(doc):  # before any workbook is created or rolled over
-        raise HTTPException(status_code=400, detail="Add the number first, then save.")
+        raise HTTPException(
+            status_code=400,
+            detail="Number not read. Reprocess the document, or type the number, then save.",
+        )
 
     now_local = excel_service.now_ist()  # one clock read for both decisions
     current_year, _ = excel_service.current_period(now_local)

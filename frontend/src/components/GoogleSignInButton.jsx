@@ -9,11 +9,16 @@ import { safeNext } from '../utils/safeNext'
 // init/poll logic exists exactly once. Without VITE_GOOGLE_CLIENT_ID set
 // (true in this dev environment - no real Google OAuth credentials exist
 // here) there's nothing to render; email/password auth is unaffected.
-export default function GoogleSignInButton() {
+export default function GoogleSignInButton({ onError }) {
   const { loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const containerRef = useRef(null)
+  // Ref so a new onError identity each render does not re-initialize the GSI button.
+  const onErrorRef = useRef(onError)
+  useEffect(() => {
+    onErrorRef.current = onError
+  })
 
   useEffect(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
@@ -36,9 +41,8 @@ export default function GoogleSignInButton() {
         await loginWithGoogle(credential)
         const next = searchParams.get('next')
         navigate(safeNext(next), { replace: true })
-      } catch {
-        // No error-UI hook back into the page from here - the existing
-        // email/password form's error state already covers that path.
+      } catch (err) {
+        onErrorRef.current?.(err)
       }
     }
 

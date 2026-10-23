@@ -27,7 +27,6 @@ from app.core.validators import (
     validate_username,
 )
 from app.features.auth.dependencies import (
-    STATUS_APPROVED,
     STATUS_PENDING,
     CurrentUser,
     get_current_user,
@@ -137,6 +136,16 @@ async def password_reset_request(
     return MessageResponse(message=GENERIC_RESET_MESSAGE)
 
 
+async def _consume_approval_notice(db: AsyncIOMotorDatabase, user: dict) -> bool:
+    """One-time "you're approved" notice, shared by password and Google login. Call only after
+    the approval gate. find_one_and_update is atomic: of two concurrent logins only one matches."""
+    consumed = await db.users.find_one_and_update(
+        {"_id": user["_id"], "approvalNoticePending": True},
+        {"$set": {"approvalNoticePending": False}},
+    )
+    return consumed is not None
+
+
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("100/15minute")
 async def login(request: Request, body: LoginRequest) -> TokenResponse:
@@ -161,10 +170,7 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     # Consume the one-time "you're approved" notice. Reached only after the password check
     # AND the approval gate above, so a wrong password or a pending/rejected account can never
     # use it up. find_one_and_update is atomic: of two concurrent logins only one matches.
-    consumed = await db.users.find_one_and_update(
-        {"_id": user["_id"], "approvalNoticePending": True},
-        {"$set": {"approvalNoticePending": False}},
-    )
+    consumed = await _consume_approval_notice(db, user)
 
     # Auto-close an open password-reset request: the user got in with their own password.
     # Skipped while a temporary password is in force (that request is already done). One
@@ -189,7 +195,7 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     return TokenResponse(
         token=token,
         user=_user_out(user),
-        just_approved=consumed is not None,
+        just_approved=consumed,
         approved_at=iso_utc(user.get("decidedAt")) if user.get("decision") == "approved" else None,
     )
 
@@ -235,26 +241,46 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
 
     if user:
         raise_if_not_approved(user)  # same 403 as password login; before any link/log/token
-
-    if not user:
+    else:
+        # New Google user: waits for admin approval like an email signup, no token.
         username = await _derive_google_username(db, email)
-        await db.users.insert_one(
-            {
-                "username": username,
-                "email": email,
-                "role": "user",
-                "status": STATUS_APPROVED,
-                "tokenVersion": 0,
-                "authProvider": "google",
-                "googleId": google_id,
-                "createdAt": now,
-                "updatedAt": now,
-            }
-        )
-        user = await db.users.find_one({"email": email})
-        assert user is not None
-        await log_action(user["_id"], "signup", {"email": email, "method": "google"})
-    elif "google" not in user.get("authProvider", "local"):
+        try:
+            inserted = await db.users.insert_one(
+                {
+                    "username": username,
+                    "email": email,
+                    "role": "user",
+                    "status": STATUS_PENDING,
+                    "tokenVersion": 0,
+                    "authProvider": "google",
+                    "googleId": google_id,
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
+        except Exception as exc:
+            if "E11000" not in str(exc):
+                raise
+            # A concurrent first login created it; answer from that account's real state
+            # (pending/rejected/revoked 403; if it was approved meanwhile, sign in normally).
+            user = await db.users.find_one({"email": email})
+            if not user:
+                raise HTTPException(status_code=400, detail=GENERIC_SIGNUP_ERROR) from exc
+            raise_if_not_approved(user)
+        else:
+            await log_action(inserted.inserted_id, "signup", {"email": email, "method": "google"})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "ACCOUNT_PENDING",
+                    "message": "Your request was sent. Sign in again after the admin approves.",
+                    "requestedAt": iso_utc(now),
+                    "decidedAt": None,
+                    "reason": None,
+                },
+            )
+
+    if "google" not in user.get("authProvider", "local"):
         # Existing local-password account signing in with Google for the
         # first time - link the accounts, leave passwordHash untouched so
         # the original password keeps working.
@@ -268,8 +294,14 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
     else:
         await log_action(user["_id"], "login", {"email": email, "method": "google"})
 
+    consumed = await _consume_approval_notice(db, user)
     token = sign_token(str(user["_id"]), user["tokenVersion"], user["role"])
-    return TokenResponse(token=token, user=_user_out(user))
+    return TokenResponse(
+        token=token,
+        user=_user_out(user),
+        just_approved=consumed,
+        approved_at=iso_utc(user.get("decidedAt")) if user.get("decision") == "approved" else None,
+    )
 
 
 @router.get("/me", response_model=dict)

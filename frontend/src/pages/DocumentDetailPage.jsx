@@ -20,6 +20,7 @@ import ProcessingState from '../components/ProcessingState'
 import { formatIST } from '../utils/formatDate'
 import { confirmAction } from '../store/dialogStore'
 import BackButton from '../components/BackButton'
+import { numberNotRead } from '../utils/documentDisplay'
 
 function formatSize(bytes) {
   if (!bytes) return '-'
@@ -277,6 +278,7 @@ export default function DocumentDetailPage() {
       {doc.uploadStatus === 'processed' && !reprocessing && (
         <div className="space-y-3">
           <h3 className="mb-2 font-semibold text-gray-300">Extracted Fields</h3>
+          {numberNotRead(doc) && <p className="text-[12.6px] text-amber-400">Number not read</p>}
           {fieldsFor(doc).map((f) => {
             return (
               <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl border bg-gray-900 px-4 py-3 border-gray-800`}>

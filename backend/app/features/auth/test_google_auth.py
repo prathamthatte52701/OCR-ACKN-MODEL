@@ -17,13 +17,13 @@ created on - a module-scoped connection opened on test #1's loop raises
 Run: pytest app/features/auth/test_google_auth.py
 """
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from bson import ObjectId
 from google.oauth2 import id_token as google_id_token
 from httpx import ASGITransport, AsyncClient
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -104,15 +104,13 @@ async def test_new_user_created_via_google(
     )
 
     resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["user"]["email"] == email
-    assert body["user"]["role"] == "user"
-    assert body["token"]
+    assert resp.status_code == 403, resp.text
+    assert "token" not in resp.text
 
     db = get_database()
-    user = await db.users.find_one({"_id": ObjectId(body["user"]["id"])})
+    user = await db.users.find_one({"email": email})
     assert user is not None
+    assert user["status"] == "pending"
     assert user["authProvider"] == "google"
     assert user["role"] == "user"
     assert user["tokenVersion"] == 0
@@ -239,10 +237,12 @@ async def test_admin_users_list_includes_auth_provider(
         monkeypatch, {"email": email, "email_verified": True, "sub": "google-sub-adminview"}
     )
     resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
-    assert resp.status_code == 200, resp.text
-    user_id = resp.json()["user"]["id"]
+    assert resp.status_code == 403, resp.text
 
     db = get_database()
+    created = await db.users.find_one({"email": email})
+    assert created is not None
+    user_id = str(created["_id"])
     admin_id = await _insert_admin(db)
     admin_token = sign_token(admin_id, 0, "admin")
 
@@ -309,15 +309,116 @@ async def test_existing_approved_google_user_logs_in(
     assert resp.status_code == 200 and resp.json()["token"]
 
 
-async def test_new_google_user_is_auto_approved(
+NEW_PENDING_MESSAGE = "Your request was sent. Sign in again after the admin approves."
+
+
+async def test_new_google_user_is_pending_without_token(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     email = _unique_email("autoappr")
     _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-new2"})
     resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
-    assert resp.status_code == 200
+    assert resp.status_code == 403, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "ACCOUNT_PENDING" and detail["message"] == NEW_PENDING_MESSAGE
+    assert detail["requestedAt"] and detail["decidedAt"] is None and detail["reason"] is None
+    assert "token" not in resp.text
     user = await get_database().users.find_one({"email": email})
-    assert user is not None and user["status"] == "approved"
+    assert user is not None and user["status"] == "pending" and "passwordHash" not in user
+    assert user["authProvider"] == "google" and user["role"] == "user"
+    # second sign-in while pending: the normal pending 403, still no second account
+    again = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert again.status_code == 403 and again.json()["detail"]["code"] == "ACCOUNT_PENDING"
+    assert await get_database().users.count_documents({"email": email}) == 1
+
+
+async def test_concurrent_first_google_logins_create_one_account(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    email = _unique_email("race")
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-race"})
+    rs = await asyncio.gather(
+        *[client.post("/api/auth/google", json={"idToken": "fake-token"}) for _ in range(2)]
+    )
+    assert [r.status_code for r in rs] == [403, 403], [r.text for r in rs]
+    assert all(r.json()["detail"]["code"] == "ACCOUNT_PENDING" for r in rs)
+    assert await get_database().users.count_documents({"email": email}) == 1
+
+
+class _FirstLookupMisses:
+    """Proxy over the real db: the FIRST users.find_one returns None (the "no account yet" read of
+    a request that lost the race); the rest is real, so the insert really hits E11000."""
+
+    def __init__(self, real: AsyncIOMotorDatabase) -> None:
+        self._real = real
+        self.users = _UsersProxy(real.users)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+class _UsersProxy:
+    def __init__(self, real: object) -> None:
+        self._real = real
+        self._missed = False
+
+    async def find_one(self, *args: object, **kwargs: object) -> object:
+        if not self._missed:
+            self._missed = True
+            return None
+        return await self._real.find_one(*args, **kwargs)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+
+async def test_lost_race_and_winner_already_approved_signs_in(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.features.auth import router as auth_router
+
+    email = _unique_email("raceok")
+    await _existing(email, status="approved")
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-existing"})
+    real = get_database()
+    monkeypatch.setattr(auth_router, "get_database", lambda: _FirstLookupMisses(real))
+    r = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert r.status_code == 200 and r.json()["token"], r.text
+    assert await real.users.count_documents({"email": email}) == 1
+
+
+async def test_lost_race_and_winner_still_pending_gets_403(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.features.auth import router as auth_router
+
+    email = _unique_email("racepend")
+    await _existing(email, status="pending")
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-existing"})
+    real = get_database()
+    monkeypatch.setattr(auth_router, "get_database", lambda: _FirstLookupMisses(real))
+    r = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "ACCOUNT_PENDING", r.text
+    assert "token" not in r.text
+
+
+async def test_approved_google_login_consumes_approval_notice_once(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    email = _unique_email("notice")
+    decided = datetime.now(UTC)
+    await _existing(
+        email,
+        status="approved",
+        decision="approved",
+        decidedAt=decided,
+        approvalNoticePending=True,
+    )
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-existing"})
+    first = (await client.post("/api/auth/google", json={"idToken": "fake-token"})).json()
+    assert first["justApproved"] is True and first["approvedAt"]
+    second = (await client.post("/api/auth/google", json={"idToken": "fake-token"})).json()
+    assert second["justApproved"] is False
 
 
 async def test_pending_local_account_cannot_link_via_google(
