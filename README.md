@@ -2,7 +2,7 @@
 
 **Acknowledgement document intelligence.** Upload a Tax Invoice or Delivery Challan (photo or PDF), and AckIntel AI reads the document number and date for you, lets you check and correct them, and files everything into organised Excel workbooks.
 
-It is built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. Nothing is hosted on the internet.
+It is built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. The app itself runs only on that PC and is not published on the internet. It does use two online services: MongoDB Atlas stores the data, and Groq receives the header text of each document to pick out the number and date (never the image or the rest of the page).
 
 ---
 
@@ -61,6 +61,7 @@ Each person only ever sees their own documents, workbooks and export history.
 Things worth knowing:
 
 - Only the top part of the page is read. The numbers and date sit in the header, and ignoring the rest keeps reading fast and accurate.
+- The first document after the app starts is slower, because the reading model takes up to a minute or two to load. After that it stays in memory.
 - Documents are processed **one at a time**, on purpose, to keep memory use safe on a single PC. A bulk upload of 10 files takes about ten times as long as one file.
 - The AI step is treated as untrusted. Whatever it returns is cleaned and checked before it is stored (see [Data quality safeguards](#data-quality-safeguards)).
 
@@ -218,7 +219,7 @@ Admins are created from the environment settings by the seed script and cannot b
 - **Rate limits** on sign-in, signup, upload and workbook creation.
 - **Upload safety.** Size, file type and image-size limits are checked before the file is processed, so a small file cannot expand into gigabytes of memory.
 - **Browser protections.** Strict security headers and a fixed list of allowed origins.
-- **Secrets stay private.** Keys, tokens and passwords are never written to the log.
+- **Secrets stay out of the log.** Keys, tokens and passwords are masked before anything is written to it.
 
 ## Operations
 
@@ -236,7 +237,7 @@ Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scri
 
 | Script | Purpose |
 |---|---|
-| `seed_admin` | Create or refresh the admin accounts. Safe to repeat. |
+| `seed_admin` | Create the admin accounts from the environment settings. Safe to repeat: an admin whose email already exists is left unchanged. |
 | `reset_admin_password` | Set a new password for an admin. |
 | `migrate_user_status` | One-time step for an older database so existing users stay approved. Run with `--dry-run` first. |
 | `cleanup_orphan_corrections` | Remove correction history whose document no longer exists. Dry run by default; add `--apply` to delete. |
@@ -295,7 +296,7 @@ cd backend
 ../venv/Scripts/python.exe -m pytest app
 ```
 
-The suite has close to 950 tests covering sign-in and approval, per-user isolation, the reading pipeline, Excel saving, admin actions and the maintenance scripts. A full run takes well over an hour because many tests talk to the real database service.
+The suite has close to 950 tests covering sign-in and approval, per-user isolation, the reading pipeline, Excel saving, admin actions and the maintenance scripts. A full run takes well over an hour because the tests use a real MongoDB Atlas database (a separate `_test` one), so each step is a network round trip.
 
 Tests are safe by design. `backend/conftest.py` forces a database whose name ends in `_test` and a separate test-only signing secret, and stops immediately if that is ever not the case. Set `ACKN_TEST_DB` to choose a different `_test` database name, for example to run two test sessions side by side.
 
