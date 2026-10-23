@@ -2,8 +2,12 @@
 post-processing (normalizeDateToDDMMYYYY plus the OCR character-confusion
 corrections). No AI involved in this file."""
 
+import math
 import re
 from datetime import datetime
+from typing import Any
+
+from loguru import logger
 
 DATE_RE = re.compile(r"^(\d{2})[./-](\d{2})[./-](\d{4})$")
 # A real TAX INVOICE No. always starts with "G" or "P" (e.g. G0027704827).
@@ -186,7 +190,35 @@ def _corrected_date(raw_date: str | None) -> tuple[str | None, bool]:
     return None, False
 
 
-def build_extraction_result(document_type: str, parsed: dict) -> dict:
+_MAX_FIELD_LENGTH = 64
+
+
+def _clean_text_field(value: Any, field: str, allow_numbers: bool = True) -> str | None:
+    """Every AI value goes through here before any corrector: only a short str (or a whole
+    number the model returned as a JSON number) survives; everything else is "not read" (None).
+    Never guesses and never joins list items. Logs the field and python type only - not the value.
+    """
+    text: str | None = None
+    if isinstance(value, str):
+        text = value.strip()
+    elif isinstance(value, bool) or not allow_numbers:
+        pass
+    elif isinstance(value, int):
+        try:
+            text = str(value)
+        except ValueError:  # absurdly long integer
+            text = None
+    elif isinstance(value, float):
+        if math.isfinite(value) and value == int(value) and abs(value) < 2**53:
+            text = str(int(value))
+    if text is not None and 0 < len(text) <= _MAX_FIELD_LENGTH:
+        return text
+    if value is not None and not (isinstance(value, str) and not text):
+        logger.warning("AI value for {} dropped (type {})", field, type(value).__name__)
+    return None
+
+
+def build_extraction_result(document_type: str, parsed: Any) -> dict:
     """Applies a deterministic rule-based correction pass for classic OCR
     character-confusion errors (e.g. a trailing "I" misread in place of "1")
     to a raw {taxInvoiceNo/number, referenceNo, date} dict already parsed from
@@ -194,14 +226,18 @@ def build_extraction_result(document_type: str, parsed: dict) -> dict:
     that fails validation into one that passes, using an unambiguous
     letter-to-digit mapping; anything it can't resolve falls through
     unchanged."""
-    date, date_auto_corrected = _corrected_date(parsed.get("date"))
+    if not isinstance(parsed, dict):
+        return empty_extraction_result(document_type)
+    date, date_auto_corrected = _corrected_date(
+        _clean_text_field(parsed.get("date"), "date", allow_numbers=False)
+    )
 
     if document_type == "Tax Invoice":
-        tax_invoice_no = parsed.get("taxInvoiceNo") or None
+        tax_invoice_no = _clean_text_field(parsed.get("taxInvoiceNo"), "taxInvoiceNo")
         corrected_tin, tin_auto_corrected = correct_number_format(tax_invoice_no, document_type)
         if tin_auto_corrected:
             tax_invoice_no = corrected_tin
-        reference_no = parsed.get("referenceNo") or None
+        reference_no = _clean_text_field(parsed.get("referenceNo"), "referenceNo")
         corrected_ref, ref_auto_corrected = correct_all_digits_format(reference_no)
         if ref_auto_corrected:
             reference_no = corrected_ref
@@ -216,7 +252,7 @@ def build_extraction_result(document_type: str, parsed: dict) -> dict:
             "dateAutoCorrected": date_auto_corrected,
         }
 
-    number = parsed.get("number") or None
+    number = _clean_text_field(parsed.get("number"), "number")
     corrected_number, number_auto_corrected = correct_number_format(number, document_type)
     if number_auto_corrected:
         number = corrected_number

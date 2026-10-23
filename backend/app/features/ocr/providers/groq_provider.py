@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 from typing import Any
 
 from groq import Groq
@@ -23,6 +24,12 @@ _RETRYABLE_STATUSES = {401, 403, 429}
 CALL_TIMEOUT_SECONDS = 60
 
 
+# Process-wide rotation counter: a new GroqProvider is built for every document, so a per-instance
+# counter always started at key #1. next() on itertools.count is atomic, so concurrent documents
+# never get the same number.
+_rotation = itertools.count()
+
+
 def _get_key_pool() -> list[str]:
     raw = settings.groq_api_keys
     return [k.strip() for k in raw.split(",") if k.strip()] if raw else []
@@ -30,21 +37,20 @@ def _get_key_pool() -> list[str]:
 
 class GroqProvider(AIProvider):
     """Multiple keys (GROQ_API_KEYS, comma-separated) are round-robined
-    across calls so no single key absorbs the full load - ported from the
+    across every call in the process (the counter is module-level, shared by all
+    GroqProvider instances) so no single key absorbs the full load - ported from the
     old callGroqWithFailover. Only fails over for capacity/auth/server
     errors; a genuine bad-request error is not retried with a different key."""
 
     def __init__(self) -> None:
         self._key_pool = _get_key_pool()
-        self._next_start_index = 0
 
     async def extract(self, system_prompt: str, user_prompt: str) -> str:
         model = settings.groq_model
         if not self._key_pool:
             raise AIExtractionError(NO_KEYS, None, model)
 
-        start_index = self._next_start_index % len(self._key_pool)
-        self._next_start_index += 1
+        start_index = next(_rotation) % len(self._key_pool)
 
         failures: list[tuple[str, int | None]] = []
         details: list[str | None] = []
