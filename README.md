@@ -1,193 +1,283 @@
-# AckIntel AI — Acknowledgement Document Intelligence
+# AckIntel AI
 
-OCR-based extraction of Number and Date from Tax Invoice / Delivery Challan
-acknowledgement documents (image or PDF), with per-user auth, manual
-correction, bulk upload, Excel export with yearly/monthly auto-organization,
-and an admin panel with cross-user CRUD + telemetry.
+**Acknowledgement document intelligence.** Upload a Tax Invoice or Delivery Challan (photo or PDF), and AckIntel AI reads the document number and date for you, lets you check and correct them, and files everything into organised Excel workbooks.
 
-Python/FastAPI rewrite of an earlier Node.js/Express app — same product,
-new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
+It is built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. Nothing is hosted on the internet.
 
-## Recent features
+---
 
-- **Approval decision details** - the admin can give an optional reason (max 300
-  characters, plain text) when rejecting or revoking a user. A user who logs in
-  with the right password sees a status card: request date while pending, or
-  decision date and reason if rejected/revoked; the first login after approval
-  shows the approval date. No email is sent. A wrong password never reveals any
-  of this.
-- **New admin panel design** - dark navy/violet theme with a left sidebar and a top bar (search, a
-  bell with the real pending-approval count, account menu). The Dashboard shows gradient stat
-  cards, a 30-day documents chart, a document-type donut, an OCR success gauge, a readable recent
-  activity feed and one-click Approve for the oldest pending requests. Users, Approvals,
-  Maintenance (real storage, server uptime and a "Danger zone" for the global delete) and every
-  other admin page share the same components. Only real data is shown. Feature map:
-  `docs/admin-ui-feature-map.md`.
-- **Review flag for incomplete numbers** - a Tax Invoice No. that is not
-  `G`/`P` + 10 digits, a Reference No. that is not 10 digits, or a Delivery
-  Challan No. that is not 9 digits starting `82` (a character was dropped or
-  added, or an Order number was picked up), is kept exactly as read but shown with an
-  amber "Looks incomplete - please check against the original" note. Editing
-  the field clears the note.
-- **Document viewer** - the original file is shown beside the extracted data
-  (PDF.js with zoom/pan) on the upload result, the bulk review and the detail
-  page.
-- **My Activity** logs uploads, OCR results, corrections, reprocessing, deletes
-  and file purges, per user. The Documents page also has a month filter.
-- **Admin approval for new accounts** — password signups start as `pending`
-  and cannot log in (or use any route, even with an old token) until an admin
-  approves them. Admins can reject, revoke or re-approve from the admin
-  panel's Pending / Rejected tabs. A first-time Google sign-in also creates a
-  pending account (no login until approved); only seeded admins are approved
-  automatically. Old databases: run
-  `python -m app.scripts.migrate_user_status --dry-run` once, then without
-  the flag, so existing users stay approved.
-- **Private Export History** — a user only sees their own exports and can only
-  download their own workbooks. Admins see everything through the admin
-  panel, and every time an admin opens or downloads another user's data an
-  audit entry is written.
-- **Email is admin-only** — users can edit their name but not their email;
-  an admin changes it (this signs that user out).
-- **Page detection for photos** — phone photos are cropped to the paper,
-  straightened and rotated upright before OCR; small camera photos are OCR'd
-  without the binarizing cleanup that used to corrupt digits.
-- **Stronger passwords and limits** — 8-64 characters (safe for bcrypt's
-  72-byte limit), no username/email inside the
-  password, max lengths on every auth field, and a request-size ceiling on
-  uploads (413 before the body is read).
-- **Google Sign-In** — alongside the existing email/password login, on both
-  the login and signup pages. Same JWT/session contract as normal login, so
-  nothing else in the app needed to change. Existing accounts with a
-  matching email get linked automatically instead of creating a duplicate
-  user. A brand-new Google user is created as pending and gets no login
-  until an admin approves; they sign in with Google again afterwards. An
-  existing account that is still pending or was rejected gets the
-  same "not approved" 403 as password login. Google-only accounts (no password set) cannot use the
-  password-reset request, since there's no password to reset.
-- **Bulk-upload crash fix** — the app used to briefly hang after a restart
-  because startup recovery of interrupted uploads ran before the server
-  started accepting requests at all. That recovery step now runs in the
-  background after the app is already serving traffic, so `/health` and
-  every other route stay responsive immediately on startup.
-- **Date-range filter** on the Documents page — Today / This Week / This
-  Month / This Year, alongside the existing document-type and pagination
-  filters.
-- **View All Details** — a read-only, spreadsheet-style page
-  (`/documents/view-all`) showing every saved document's extracted fields
-  in one table, matching what the real Excel export contains.
-- **Admin nuclear/age-based delete** — admins can permanently wipe a user's
-  documents (full account or just documents older than a chosen age/year),
-  gated behind a typed-confirmation-phrase + password dialog. This lives in
-  the admin app only, not the main user-facing app.
-- **Smarter OCR preprocessing** — before running OCR, a quick quality check
-  (blur, tilt, contrast, lighting) decides whether a scan needs cleanup
-  first. Good scans skip straight to OCR unchanged; only rough scans get
-  the extra processing, so normal uploads aren't slowed down.
+## Contents
 
-## Stack
+- [What it does](#what-it-does)
+- [How a document is read](#how-a-document-is-read)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Using the app](#using-the-app)
+- [Excel export rules](#excel-export-rules)
+- [Data quality safeguards](#data-quality-safeguards)
+- [Admin panel](#admin-panel)
+- [Security](#security)
+- [Operations](#operations)
+- [Development](#development)
+- [Known limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
 
-- **Backend**: FastAPI, Motor (async MongoDB), PaddleOCR (CPU), Groq (field
-  extraction via Jinja2-templated prompts), PyMuPDF (PDF handling), openpyxl
-  (Excel export), PyJWT (JWT), bcrypt, slowapi (rate limiting)
-- **Frontend**: React + Vite + Tailwind + TanStack Query + Zustand
-- **Admin**: separate React + Vite app, same backend, role-gated
-- **Database**: MongoDB Atlas
-- **File storage**: GridFS (same Atlas cluster, no separate object storage)
+---
 
-## Project layout
+## What it does
+
+| Area | Details |
+|---|---|
+| **Reading documents** | Reads the **Tax Invoice No.** and **Reference No.** (Tax Invoice) or the **Delivery Challan No.** (Delivery Challan), plus the **date**. Accepts PDF, JPG, JPEG and PNG up to 5 MB each. |
+| **Photos** | Phone photos are cropped to the page, straightened and turned upright before reading. |
+| **Upload** | Single upload, or bulk upload of up to 10 files at once. |
+| **Review** | The original file is shown next to the extracted values (zoom and pan for PDFs). Any value can be corrected by hand. |
+| **Excel** | One workbook per year, one sheet per month. Save one document or a whole page at once. |
+| **Accounts** | Email and password, or Google Sign-In. New accounts wait for admin approval. |
+| **Admin panel** | Approve users, handle password requests, browse all documents and workbooks, read the audit log, and run maintenance. |
+
+Each person only ever sees their own documents, workbooks and export history.
+
+## How a document is read
 
 ```
-backend/    FastAPI app (feature-based: app/features/{auth,documents,ocr,excel,admin})
-frontend/   Main user-facing React app
-admin/      Admin panel React app
+ Upload (PDF / image)
+        │
+        ▼
+ Page cleanup ── crops to the paper, straightens, only enhances rough scans
+        │
+        ▼
+ OCR (PaddleOCR, on this PC) ── reads only the header at the top of the page
+        │
+        ▼
+ Field extraction (Groq) ── a language model picks out the number(s) and the date
+        │
+        ▼
+ Safety checks (plain Python, no AI) ── type check, format fixes, review flags
+        │
+        ▼
+ You review and correct ── then save to Excel
 ```
 
-## Setup
+Things worth knowing:
 
-Prerequisites: Python 3.12+ (see `backend/.python-version`), Node.js 18+ and npm, a MongoDB
-connection string, and (optional) Groq API keys. Everything runs locally on Windows.
+- Only the top part of the page is read. The numbers and date sit in the header, and ignoring the rest keeps reading fast and accurate.
+- Documents are processed **one at a time**, on purpose, to keep memory use safe on a single PC. A bulk upload of 10 files takes about ten times as long as one file.
+- The AI step is treated as untrusted. Whatever it returns is cleaned and checked before it is stored (see [Data quality safeguards](#data-quality-safeguards)).
 
-### Backend
+## Quick start
 
-```bash
-cd backend
-python -m venv ../venv          # or use the existing venv/ at repo root
-../venv/Scripts/activate         # Windows
-pip install -r requirements-dev.txt   # exact runtime pins + ruff/black/isort/mypy/pytest
-# OpenCV: keep exactly one opencv-* package (opencv-contrib-python, pinned by paddlex).
-# A second one (e.g. opencv-python-headless) overwrites the same cv2/ dir; `pip list | grep opencv` must show one row.
-cp .env.example .env             # fill in real values, see below
-```
+This is the setup for the office PC. It runs everything locally on Windows.
 
-Required env vars (`backend/.env`):
+**You need**
 
-| Var | Required | Notes |
-|---|---|---|
-| `MONGO_URI` | yes | MongoDB Atlas connection string |
-| `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
-| `MONGO_DB_NAME` | no (default `ackn_AI_model`) | blank = default |
-| `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
-| `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and in the server log (backend/logs/app.log) |
-| `GROQ_REASONING_EFFORT` | no (unset = `low`) | `low`, `medium` or `high`. Set but blank = the parameter is not sent (use this for models without a reasoning mode). Anything else stops the app at start |
-| `GROQ_MAX_TOKENS` | no (default `300`) | whole number 50-4000; blank = 300; anything else stops the app at start |
-| `AUDIT_LOG_RETENTION_DAYS` | no (default `365`) | whole number 0-3650; audit entries older than this are deleted automatically by a MongoDB TTL index on `auditlogs.createdAt`. `0` = keep forever; blank = 365. Changing it and restarting updates the index |
-| `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
-| `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list; blank = default |
-| `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app; blank = default |
-| `ADMIN_1_NAME` / `ADMIN_1_EMAIL` / `ADMIN_1_PASSWORD` and the same three for `ADMIN_2_` | only for seeding | the seed script reads the admin identities from here (none are in source); the password plaintext is used once, then only the bcrypt hash is stored |
-| `GOOGLE_CLIENT_ID` | only for Google Sign-In | verifies Google ID tokens server-side; frontend needs the matching `VITE_GOOGLE_CLIENT_ID` in its own `.env`. Without it, Google Sign-In simply doesn't render — email/password login is unaffected |
+- Windows, with Python 3.12 and the project's `venv/` folder in place
+- Node.js 20.19+ or 22.12+
+- A MongoDB Atlas connection string
+- Optional: one or more Groq API keys (without them, documents upload but cannot be read)
 
-After changing `GROQ_MODEL`: (1) set `GROQ_REASONING_EFFORT` blank if the new model has no reasoning mode, (2) restart the backend, (3) upload ONE test document and check it is processed.
+**Steps**
 
-Missing `MONGO_URI` or `JWT_SECRET` (or a `JWT_SECRET` under 32 chars) makes
-the app refuse to start with a clear error — it will never silently boot
-with a broken config.
-
-### Run on the client PC
-
-Prerequisites: the Python 3.12 venv at the repo root (`venv/`), Node.js 20.19+ or 22.12+ installed, and `backend\.env` filled in per the table above.
-
-1. `setup.bat` - run once, and again after any frontend code change (stop the app with `stop.bat` first: running programs lock files on Windows). It installs the backend dependencies and builds both apps. Safe to run twice.
-2. Seed the admin accounts once (idempotent, safe to re-run):
+1. Copy `backend/.env.example` to `backend/.env` and fill it in. See [Configuration](#configuration).
+2. Double-click **`setup.bat`**. It installs the backend packages and builds both web apps. Run it once, and again after any frontend code change. Stop the app first with `stop.bat`, because Windows locks files that are in use.
+3. Create the admin accounts once. This is safe to repeat:
 
    ```bash
    cd backend
    ../venv/Scripts/python.exe -m app.scripts.seed_admin
    ```
 
-3. `start.bat` - double-click it daily. It starts the backend on port 8000, the user app on 5174 and the admin app on 5175, all bound to this PC only (127.0.0.1), and opens http://localhost:5174. The admin app is http://localhost:5175. If the app is already running, it says so.
-4. `stop.bat` - stops only what `start.bat` started. A document that was being processed is requeued at the next start.
+4. Double-click **`start.bat`** every day. It starts everything and opens the app.
 
-Logs are in `backend\logs\app.log` (see Logs).
+| Part | Address | Port |
+|---|---|---|
+| User app | http://localhost:5174 | 5174 |
+| Admin app | http://localhost:5175 | 5175 |
+| Backend API | http://127.0.0.1:8000 | 8000 |
 
-If a port is busy: run `stop.bat` first. If another program uses 8000, 5174 or 5175, the script names the port and does not start.
+All three listen on this PC only (`127.0.0.1`). Other computers cannot reach them.
 
-Before `git pull`: stop the app with `stop.bat`, pull, then run `setup.bat` and `start.bat`.
+To stop, double-click **`stop.bat`**. It only stops what `start.bat` started. A document that was being processed is queued again at the next start.
 
-### Developer mode (owner only)
+**Updating the app:** run `stop.bat`, pull the new code, run `setup.bat`, then `start.bat`.
 
-The client must not use developer mode. `--reload` has been seen to hang on Windows ("Reloading..." printed, the new worker never starts).
+## Configuration
 
-```bash
-cd backend
-../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --reload
-cd frontend && npm install && npm run dev   # http://localhost:5174
-cd admin && npm install && npm run dev      # http://localhost:5175
-```
+All settings live in `backend/.env`. A missing or invalid required setting stops the app at start with a clear message. It never starts half-configured.
 
-Both dev servers proxy `/api` to the backend (see each app's `vite.config.js`).
+| Variable | Required | Default | What it does |
+|---|---|---|---|
+| `MONGO_URI` | **Yes** | — | MongoDB Atlas connection string. |
+| `JWT_SECRET` | **Yes** | — | Signs login tokens. At least 32 characters. Generate one with `python -c "import secrets; print(secrets.token_hex(48))"`. |
+| `MONGO_DB_NAME` | No | `ackn_AI_model` | Database name. Blank means the default. |
+| `GROQ_API_KEYS` | No | — | One or more Groq keys, comma-separated. Calls are spread evenly across keys, and if one key is rate-limited or rejected the next is tried. |
+| `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Model used for extraction. The app never switches models on its own. |
+| `GROQ_REASONING_EFFORT` | No | `low` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
+| `GROQ_MAX_TOKENS` | No | `300` | Reply length limit, a whole number from 50 to 4000. |
+| `AUDIT_LOG_RETENTION_DAYS` | No | `365` | Audit entries older than this are deleted automatically. `0` keeps them forever. Whole number from 0 to 3650. |
+| `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. The frontend also needs the same value as `VITE_GOOGLE_CLIENT_ID`. Without it the Google button is simply not shown. |
+| `FRONTEND_ORIGIN` | No | `http://localhost:5174` | Allowed browser origin for the user app. |
+| `ADMIN_ORIGIN` | No | `http://localhost:5175` | Allowed browser origin for the admin app. |
+| `ADMIN_1_NAME`, `ADMIN_1_EMAIL`, `ADMIN_1_PASSWORD` | Seeding only | — | First admin account. Also `ADMIN_2_*` for the second. The password is used once; only its hash is stored. |
+| `ENABLE_DOCS` | No | off | `true` shows the API documentation pages (`/docs`, `/redoc`). Use on a developer machine only. |
 
-## Logs
+**Changing the Groq model:** set the new `GROQ_MODEL`, clear `GROQ_REASONING_EFFORT` if the model has no reasoning mode, restart the backend, then upload one test document to confirm it is read. If a model is retired by Groq, users see "The AI service is not set up correctly" and the log shows the reason.
 
-The server writes its log to `backend/logs/app.log` (created automatically). It rotates at 10 MB, is kept for 10 days, and old files are zipped. It can contain user emails and document details, so do not paste it into public chats.
+**Audit retention note:** the first time the app starts with retention on, entries older than the limit are removed by MongoDB. Set `AUDIT_LOG_RETENTION_DAYS=0` before that first start if you want to keep older history.
 
-Read the latest lines on Windows PowerShell:
+## Using the app
+
+### Getting an account
+
+1. Sign up with email and password, or continue with Google.
+2. The request waits for an admin. The sign-in page tells you your request was sent.
+3. When an admin approves it, sign in again. You will see a short "you're approved" notice once.
+
+If a request is rejected, or access is later removed, the sign-in page shows the date and the reason the admin gave. A wrong password never reveals any of this.
+
+**Forgot your password?** Use "Request password reset" on the sign-in page. An admin gives you a temporary password in person or by phone, and you choose a new one at your next sign-in. There is no reset email.
+
+### Uploading and reviewing
+
+1. Open **Upload**, choose **Tax Invoice** or **Delivery Challan**, and add a file. For several files, use bulk upload (up to 10).
+2. Wait while the document is read. You can leave the page; progress is saved.
+3. Check the values against the original shown beside them. Click **Edit** on any field to correct it.
+4. Press **Save to Excel**.
+
+**Reading problems are shown, not hidden:**
+
+| Message | Meaning |
+|---|---|
+| **Number not read** | No number was found. Reprocess the document or type the number. The document cannot be saved to Excel until it has one. |
+| **Looks incomplete** | The number is not in the usual shape (for example a digit is missing). It is kept exactly as read. Check it against the original. |
+| **Please check this date** | The date is real but unlikely: more than a day in the future, or more than five years old. |
+
+### Everyday pages
+
+| Page | Use it to |
+|---|---|
+| **Dashboard** | See totals, recent documents and your document types at a glance. |
+| **My Documents** | Browse by type, month and upload date. Save or download a whole page at once. |
+| **View All Details** | See every document's extracted values in one table, sortable and paged. |
+| **Export History** | Re-download the workbooks you have created. |
+| **My Activity** | Review your own uploads, corrections, saves and deletes. |
+| **Help** | Short answers to common questions. |
+
+## Excel export rules
+
+- Each user gets **one workbook per year**, with **one sheet per month**.
+- A document is filed by **its own date**, not by the day you upload or save it. A paper dated 20 December and saved in January goes into the December sheet of the earlier year.
+- Each row has four columns: **Document Type, Number, Date, Timestamp**.
+- **Save Again** replaces the earlier row for that document. It does not add a duplicate.
+- When a new year starts, the old workbook is archived and you are asked to name the new one. Old workbooks stay on disk, untouched.
+- Writes are safe if the workbook is open in Excel: the file is written aside and swapped in, and if Excel holds it you are told it is busy and nothing is lost.
+- **Save All** saves one page of documents. Each document succeeds or fails on its own, and failures are listed with the reason.
+
+**Rules at save time**
+
+| Situation | What happens |
+|---|---|
+| No number | **Blocked.** For a Delivery Challan the number must be present. For a Tax Invoice at least one of Tax Invoice No. or Reference No. must be present. |
+| No date, or an odd date | Saved, with a notice. A missing date uses the save date. |
+| Same type, number and date as another saved document | **Saved, with a warning** to check it is not a duplicate. |
+| Document edited while it was being saved | The row may hold the earlier values. You are told to press Save Again, and the document is not marked as exported. |
+
+## Data quality safeguards
+
+The AI is helpful but not trusted. Every value goes through plain code before you see it:
+
+- **Type and length checks.** Only text (or a whole number) of at most 64 characters is accepted. Lists, objects, true/false and huge values are dropped, so the field is left empty for you to fill in. Nothing is guessed.
+- **Date rules.** Only a real calendar date between 2000 and 2100 is accepted.
+- **Look-alike fixes.** Common OCR mix-ups (a letter read in place of a digit) are corrected only when the result then passes the format check. A correction never invents digits.
+- **Review flags.** Values that are read but look wrong are flagged and never changed. These cover numbers of the wrong length, and dates far in the future or the past.
+- **Your edits win.** Typing a value clears its flag and marks the document as edited.
+
+## Admin panel
+
+Open http://localhost:5175 and sign in with an admin account.
+
+| Section | Purpose |
+|---|---|
+| **Dashboard** | Totals, a 30-day chart, reading success, recent activity, and one-click approval of the oldest pending requests. |
+| **Users** | Search and view users, change a user's email, delete a user. |
+| **Approvals** | Approve, reject (with an optional reason), revoke or re-approve. This includes people who signed up with Google. |
+| **Password requests** | See who asked for a reset and set a temporary password. |
+| **Documents, Workbooks** | Browse every user's data. Admin access to another user's data is written to the audit log. |
+| **Activity** | The audit log. |
+| **Orphaned files** | Files left behind by a failed cleanup, for follow-up. |
+| **Maintenance** | Storage and uptime, plus a protected "danger zone" for permanent bulk deletes. These need a typed confirmation phrase and your password. |
+
+Admins are created from the environment settings by the seed script and cannot be rejected from the panel. An admin who forgets their password uses `backend/app/scripts/reset_admin_password.py`.
+
+## Security
+
+- **Approval gate.** Every protected route checks the account is approved, even for a token issued earlier.
+- **Sessions.** Login tokens last 7 days and are cancelled immediately by a password change, an email change or a rejection.
+- **Passwords.** 8 to 64 characters, not containing the username or email, stored as bcrypt hashes.
+- **Data isolation.** Every document, workbook and export query is limited to its owner. Another person's item looks like it does not exist.
+- **Admin routes.** The role is re-read from the database on every request, never taken from the token.
+- **Rate limits** on sign-in, signup, upload and workbook creation.
+- **Upload safety.** Size, file type and image-size limits are checked before the file is processed, so a small file cannot expand into gigabytes of memory.
+- **Browser protections.** Strict security headers and a fixed list of allowed origins.
+- **Secrets stay private.** Keys, tokens and passwords are never written to the log.
+
+## Operations
+
+### Logs
+
+The server writes to `backend/logs/app.log`. The file rotates at 10 MB, is kept for 10 days, and older files are compressed. It can contain email addresses and document details, so do not share it publicly.
 
 ```powershell
 Get-Content backend\logs\app.log -Tail 100 -Wait
 ```
 
-## Code quality
+### Maintenance scripts
+
+Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scripts.<name>`. Scripts that change data do nothing unless you ask for it explicitly.
+
+| Script | Purpose |
+|---|---|
+| `seed_admin` | Create or refresh the admin accounts. Safe to repeat. |
+| `reset_admin_password` | Set a new password for an admin. |
+| `migrate_user_status` | One-time step for an older database so existing users stay approved. Run with `--dry-run` first. |
+| `cleanup_orphan_corrections` | Remove correction history whose document no longer exists. Dry run by default; add `--apply` to delete. |
+| `wipe_all_except_admins` | Fresh start: remove all users, documents, files and workbooks except the admins. Dry run by default. Applying needs `--apply --i-have-a-backup`. Stop the app and take a `mongodump` backup first. |
+
+### Backups
+
+Take regular `mongodump` backups of the database and copy `backend/exports/` (the Excel workbooks). Documents are stored inside the database itself.
+
+## Development
+
+**Stack**
+
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI, Motor (async MongoDB), PaddleOCR (CPU), Groq, PyMuPDF, openpyxl, PyJWT, bcrypt, slowapi |
+| User and admin apps | React, Vite, Tailwind, TanStack Query, Zustand |
+| Database and files | MongoDB Atlas, with documents stored in GridFS |
+
+**Layout**
+
+```
+backend/    FastAPI app, one folder per feature under app/features
+            (auth, documents, ocr, excel, admin)
+frontend/   User app (port 5174)
+admin/      Admin app (port 5175)
+docs/       Extra notes, such as the admin screen map
+```
+
+**Developer mode** (for the developer only, not for daily use; `--reload` can hang on Windows):
+
+```bash
+cd backend && ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
+cd frontend && npm install && npm run dev
+cd admin && npm install && npm run dev
+```
+
+Both dev servers forward `/api` to the backend.
+
+**Code quality.** These four checks are kept clean on every change:
 
 ```bash
 cd backend
@@ -197,81 +287,39 @@ cd backend
 ../venv/Scripts/python.exe -m mypy app
 ```
 
-All four are kept clean on every change.
+The frontend and admin apps are checked with `npm run lint` and `npm run build`.
 
-## Tests
+**Tests**
 
 ```bash
 cd backend
 ../venv/Scripts/python.exe -m pytest app
 ```
 
-`backend/conftest.py` forces the database name to `<name>_test` and a
-test-only JWT secret before the app loads, and aborts if the DB name does not
-end in `_test` — the suite never touches real data. Over 200 tests cover
-the approval gate, isolation (two-user IDOR checks on every documents/excel
-route), admin audit logging, passwords, field/upload limits, JWT and the
-pinned requirements. Frontend and admin have no unit-test runner (`npm run
-lint` and `npm run build` only).
+The suite has close to 950 tests covering sign-in and approval, per-user isolation, the reading pipeline, Excel saving, admin actions and the maintenance scripts. A full run takes well over an hour because many tests talk to the real database service.
 
-Browser regression scripts for the PDF/image viewer live in `frontend/tests/`
-(raw Playwright, all `/api/` calls mocked, no backend needed). Start `npm run dev`
-and run `BASE=http://localhost:5174 node frontend/tests/test_viewer_cleanup.cjs`
-or `node frontend/tests/test_viewer_break.cjs` (optional `SHOTS_DIR` for screenshots).
+Tests are safe by design. `backend/conftest.py` forces a database whose name ends in `_test` and a separate test-only signing secret, and stops immediately if that is ever not the case. Set `ACKN_TEST_DB` to choose a different `_test` database name, for example to run two test sessions side by side.
 
-## Wiping data (fresh start)
-
-`python -m app.scripts.wipe_all_except_admins --db <name>` is a dry run that only reports what would go.
-Adding `--apply --i-have-a-backup` deletes ALL non-admin users, documents, GridFS files and workbook
-files and keeps the admin accounts. Stop the backend first and take a `mongodump` backup before applying.
+Browser checks for the document viewer are in `frontend/tests/` (plain Playwright scripts with the API mocked). Browser end-to-end scripts are in `frontend/e2e/`.
 
 ## Known limitations
 
-- **OCR speed**: PaddleOCR on CPU takes roughly 40-90 seconds per document.
-  The model stays loaded in memory (not reloaded per request), but there's
-  no GPU here and Intel's oneDNN CPU acceleration is disabled — it crashes
-  on this paddlepaddle version, and the one paddlepaddle version where it
-  doesn't crash is independently slower on this machine (measured, not
-  assumed). See `backend/app/features/ocr/paddle_runner.py` for the details.
-- **Sequential processing**: uploads (single and bulk) process one at a
-  time through a single global lock, by design — protects memory on a
-  single-machine deployment, but means a 5-file bulk upload takes roughly
-  5× one file's time, not 1×.
-- **Image size**: images over 50 megapixels and PDFs with an oversized page
-  are rejected (a tiny file can decode to gigabytes of RAM).
-- **Password reset is admin-handled**: "Request password reset" on the login
-  page sends the admin a request (email + optional note); the admin gives a
-  temporary password in person or by phone, and the user must change it at
-  first login. There is no emailed link.
-- **Hosting**: local-only on one PC.
-  Swagger/ReDoc/openapi.json are off everywhere unless `ENABLE_DOCS=true`.
-- **Google linking**: an existing password account that signs in with Google
-  is linked automatically (Google verified the email).
-- **Admin accounts** cannot request a reset; they use
-  `backend/app/scripts/reset_admin_password.py`.
-- **7-day tokens**: JWTs last 7 days and are revoked only by a `tokenVersion`
-  bump (password change, reject).
-- **OCR accuracy on photos**: the OCR step can misread one digit on blurry or
-  tilted phone photos, and on a skewed scan the invoice date can be taken from
-  the neighbouring "Sales order" row. Incomplete numbers are flagged for
-  review; always check a photo's values against the original.
+- **Speed.** Reading one document takes roughly 40 to 90 seconds on a CPU. The model stays loaded between documents. There is no GPU, and the CPU speed-up library is turned off because it crashes on the pinned version.
+- **One at a time.** Documents are read one after another by design. See [How a document is read](#how-a-document-is-read).
+- **Bulk save speed.** Saving a page to a large workbook is much faster than it was, but is still limited by database round trips. A page of 100 documents can take over a minute.
+- **Photos.** On a blurry or tilted photo one digit can be misread, and on a skewed page the date may be taken from a neighbouring row. Always compare photo results with the original. Incomplete numbers are flagged.
+- **Single PC.** The app is local only. There is no hosted version.
+- **No email.** There is no email sending anywhere, so password resets and approvals are handled by the admin in person.
+- **Admins and Google.** An existing password account that signs in with Google is linked automatically, because Google has verified the email. Google-only accounts have no password to reset.
 
-## Security posture
+## Troubleshooting
 
-Admin-approval gate on every authenticated route, JWT (PyJWT, HS256 pinned)
-auth with `tokenVersion`-based session revocation, bcrypt password
-hashing, NoSQL-injection-safe input validation (Pydantic-typed throughout,
-no raw dict pass-through), rate limiting on auth + upload + workbook-creation
-endpoints, per-user data isolation (documents/workbooks) with 404-not-403 on
-cross-user access, security headers (CSP, HSTS, nosniff, frame-ancestors),
-CORS restricted to explicit configured origins, admin routes gated by a
-server-side role check that re-reads the DB (never trusts the JWT's role
-claim) with audit logging of admin access to other users' data. See
-git history for specifics.
-
-## Admin accounts
-
-Two admin accounts are seeded from env vars (`ADMIN_1_*`, `ADMIN_2_*` — name,
-email and password). Nothing about them is hardcoded in source and only the
-bcrypt hash of the password is ever persisted. Admins cannot be rejected
-from the panel.
+| Problem | What to do |
+|---|---|
+| The app does not start | Run `stop.bat`, then `start.bat`. If a port is in use by another program, the script names it. |
+| "Missing MONGO_URI" or a `JWT_SECRET` error | Fill in `backend/.env`. See [Configuration](#configuration). |
+| Cannot reach the database | Check the internet connection and that this PC's address is allowed in the Atlas network access list. |
+| Documents stay in "uploaded" | Check `backend/logs/app.log`. A missing Groq key or a retired model is reported there. |
+| "The AI service is not set up correctly" | Check `GROQ_API_KEYS` and `GROQ_MODEL`, then restart. |
+| A save says the workbook is busy | Close the workbook in Excel and save again. |
+| A page looks old after an update | Run `setup.bat` again so both apps are rebuilt. |
