@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import threading
+import unicodedata
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta
@@ -66,6 +67,10 @@ class FileLockedError(Exception):
     pass
 
 
+class WorkbookExistsError(Exception):
+    """A workbook file with this name is already on disk; creating it would replace it."""
+
+
 def _ensure_export_dir() -> None:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -85,6 +90,17 @@ def physical_workbook_filename(user_id: object, filename: str) -> str:
     Ordinary names are unchanged, so existing files keep resolving."""
     safe = _UNSAFE_NAME_CHARS.sub("_", str(filename)).replace("..", "_")
     return f"{user_id}_{safe}"
+
+
+def workbook_key(name: str) -> str:
+    """Canonical identity of a workbook NAME, as the file system sees it: surrounding spaces and
+    a trailing ".xlsx" (any case) do not count, upper/lower case does not count (Windows ignores
+    it), and the same path-steering characters are neutralised as in the physical name. Two names
+    with the same key would land on the same file, so only one of them may exist per user."""
+    safe = _UNSAFE_NAME_CHARS.sub("_", str(name).strip()).replace("..", "_")
+    if safe.lower().endswith(".xlsx"):
+        safe = safe[: -len(".xlsx")]
+    return unicodedata.normalize("NFC", safe.strip()).casefold()
 
 
 def file_path(filename: str) -> Path:
@@ -157,12 +173,14 @@ def _lock_path(target: Path) -> Path:
     return target.with_suffix(".lock")
 
 
-def _create_workbook_sync(filename: str, month: str) -> Path:
+def _create_workbook_sync(filename: str, month: str, exclusive: bool = False) -> Path:
     """Assumes the caller already holds this filename's cross-process
     FileLock - does not acquire it itself, so it can be called both
     standalone (via _create_workbook_locked_sync) and inline from inside
     _append_row_sync's own lock without a reentrant/nested acquisition."""
     _ensure_export_dir()
+    if exclusive and file_path(filename).exists():
+        raise WorkbookExistsError(file_path(filename).name)
     workbook = openpyxl.Workbook()
     default_sheet = workbook.active
     workbook.remove(default_sheet)
@@ -184,17 +202,21 @@ def _create_workbook_sync(filename: str, month: str) -> Path:
     return target
 
 
-def _create_workbook_locked_sync(filename: str, month: str) -> Path:
+def _create_workbook_locked_sync(filename: str, month: str, exclusive: bool = False) -> Path:
     _ensure_export_dir()
     target = file_path(filename)
     with FileLock(str(_lock_path(target)), timeout=30):
-        return _create_workbook_sync(filename, month)
+        return _create_workbook_sync(filename, month, exclusive)
 
 
-async def create_workbook(filename: str, month: str | None = None) -> Path:
+async def create_workbook(
+    filename: str, month: str | None = None, *, exclusive: bool = False
+) -> Path:
+    """exclusive=True never replaces an existing file: raises WorkbookExistsError instead (the
+    check and the write happen under the same file lock)."""
     month = month or current_period()[1]
     async with _get_write_lock(filename):
-        return await asyncio.to_thread(_create_workbook_locked_sync, filename, month)
+        return await asyncio.to_thread(_create_workbook_locked_sync, filename, month, exclusive)
 
 
 # Leading characters Excel/LibreOffice treat as the start of a formula.

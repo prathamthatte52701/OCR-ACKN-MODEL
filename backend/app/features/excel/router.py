@@ -38,6 +38,11 @@ MAX_EXPORT_PAGE_NUMBER = 100_000
 _period_locks: dict[tuple[ObjectId, int], asyncio.Lock] = {}
 
 
+WORKBOOK_EXISTS_MESSAGE = "A workbook with this name already exists."
+# One lock per user for "start a new workbook" (in-process only; the app runs as one process).
+_create_locks: dict[ObjectId, asyncio.Lock] = {}
+
+
 async def _workbook_for_year(db: Any, user_id: ObjectId, year: int) -> dict | None:
     """The user's workbook for `year`: the active one if there is one, else the newest."""
     return await db.workbooks.find_one(
@@ -54,12 +59,22 @@ async def _create_year_workbook(db: Any, user_id: ObjectId, year: int, month: st
         existing = await _workbook_for_year(db, user_id, year)
         if existing:
             return existing
-        taken = {w["filename"] async for w in db.workbooks.find({"userId": user_id})}
+        taken = {
+            excel_service.workbook_key(w["filename"])
+            async for w in db.workbooks.find({"userId": user_id})
+        }
         name, n = f"Excel {year}", 1
-        while name in taken:
-            n += 1
-            name = f"Excel {year} ({n})"
-        await excel_service.create_workbook(_physical_workbook_filename(user_id, name), month)
+        while True:
+            while excel_service.workbook_key(name) in taken:
+                n += 1
+                name = f"Excel {year} ({n})"
+            try:
+                await excel_service.create_workbook(
+                    _physical_workbook_filename(user_id, name), month, exclusive=True
+                )
+                break
+            except excel_service.WorkbookExistsError:
+                taken.add(excel_service.workbook_key(name))  # a file without a record: next name
         now = datetime.now(UTC)
         record = {
             "userId": user_id,
@@ -276,20 +291,31 @@ async def new_excel_file(
 
     db = get_database()
     now = datetime.now(UTC)
-    # create_workbook always replaces the physical file, so reusing a name
-    # would silently wipe that workbook's rows.
-    if await db.workbooks.find_one({"userId": current_user.id, "filename": trimmed}):
-        raise HTTPException(
-            status_code=400, detail="You already have a workbook with that name. Pick another."
-        )
+    # One create at a time per user: the name check, the file write and the record insert are a
+    # single step, so two parallel creates of the same name cannot both pass the check.
+    async with _create_locks.setdefault(current_user.id, asyncio.Lock()):
+        return await _start_new_workbook(db, current_user, trimmed, year, month, now)
+
+
+async def _start_new_workbook(
+    db: Any, current_user: CurrentUser, trimmed: str, year: int, month: str, now: datetime
+) -> dict:
+    # A name is taken when ANY of the user's workbooks maps to the same file ("Bills",
+    # "Bills.xlsx", "bills" are one file on disk): creating it would wipe that workbook's rows.
+    key = excel_service.workbook_key(trimmed)
+    async for w in db.workbooks.find({"userId": current_user.id}, {"filename": 1}):
+        if excel_service.workbook_key(w["filename"]) == key:
+            raise HTTPException(status_code=400, detail=WORKBOOK_EXISTS_MESSAGE)
 
     # Create the file FIRST. It used to archive the active workbook before
     # creating the new one, so a failed create left the user with no active
-    # workbook at all.
+    # workbook at all. exclusive=True: an existing file is never replaced.
     try:
         await excel_service.create_workbook(
-            _physical_workbook_filename(current_user.id, trimmed), month
+            _physical_workbook_filename(current_user.id, trimmed), month, exclusive=True
         )
+    except excel_service.WorkbookExistsError as exc:
+        raise HTTPException(status_code=400, detail=WORKBOOK_EXISTS_MESSAGE) from exc
     except excel_service.FileLockedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OSError as exc:
