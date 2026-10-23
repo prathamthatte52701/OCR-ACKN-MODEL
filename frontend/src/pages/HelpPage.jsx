@@ -106,8 +106,8 @@ const TOPICS = [
   {
     q: 'Bulk Upload won\'t let me add more files',
     a: [
-      'Bulk Upload accepts a maximum of 5 files at once.',
-      'If you have more than 5 documents, upload the first 5, wait for that batch to finish, then click "Start New Batch" and upload the rest.',
+      'Bulk Upload accepts a maximum of 10 files at once.',
+      'If you have more than 10 documents, upload the first 10, wait for that batch to finish, then click "Start New Batch" and upload the rest.',
       'Each file in Bulk Upload still needs the right Document Type selected in its own dropdown, and still follows the same file type/size rules as a single upload.',
     ],
   },

@@ -15,6 +15,7 @@ import pytest
 from bson import ObjectId
 
 from app.features.excel import old_excel_oracle as oracle
+from app.features.excel import router as excel_router
 from app.features.excel import service as excel_service
 from app.features.excel.batch_test_support import (
     BASE,
@@ -38,6 +39,16 @@ WB25 = "Book2025"
 @pytest.fixture(autouse=True)
 def _clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(excel_service, "now_ist", lambda: CLOCK)
+
+
+@pytest.fixture(autouse=True)
+def _no_duplicate_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The oracle is the OLD code, which has no duplicate warning (covered by its own tests)."""
+
+    async def _none(db: Any, plans: Any) -> None:
+        return None
+
+    monkeypatch.setattr(excel_router, "_warn_duplicates", _none)
 
 
 class Builder:

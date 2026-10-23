@@ -34,11 +34,15 @@ from app.features.admin.schemas import (
 )
 from app.features.auth.dependencies import CurrentUser, require_admin
 from app.features.auth.schemas import TempPasswordRequest
-from app.features.documents.correction import correction_set_fields
+from app.features.documents.correction_rules import (
+    CHANGED_MSG,
+    apply_correction,
+    check_request,
+    validate_correction,
+)
 from app.features.documents.gridfs_service import delete_file
 from app.features.documents.schemas import CorrectRequest
 from app.features.excel import service as excel_service
-from app.features.ocr.extraction import normalize_date_to_ddmmyyyy
 from app.features.ocr.pipeline import ocr_engine_status, ocr_lock_status
 
 router = APIRouter()
@@ -647,6 +651,7 @@ async def _execute_purge(filter_query: dict) -> tuple[int, int, list[str]]:
             await purge_service.remove_exported_rows_from_workbooks(exported_rows)
         )
         await db.documents.delete_many({"_id": {"$in": doc_ids}})
+        await db.corrections.delete_many({"documentId": {"$in": doc_ids}})
         await db.exportedrows.delete_many({"documentId": {"$in": doc_ids}})
 
     return len(doc_ids), rows_removed, workbooks_fully_deleted
@@ -907,47 +912,16 @@ async def correct_document_as_admin(
     doc_id: PyObjectId, body: CorrectRequest, current_user: CurrentUser = Depends(require_admin)
 ) -> dict:
     field = body.field
-    value = body.value
-    if field not in EDITABLE_FIELDS:
-        raise HTTPException(status_code=400, detail="That field cannot be edited.")
-    if not value or not value.strip():
-        raise HTTPException(status_code=400, detail="Please enter a value before saving.")
+    check_request(field, body.value)
 
     db = get_database()
     doc = await db.documents.find_one({"_id": doc_id, "isDeleted": {"$ne": True}})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    if field not in FIELDS_BY_DOCUMENT_TYPE[doc["documentType"]]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"That field cannot be edited on a {doc['documentType']} document.",
-        )
-
-    value = value.strip()
-    if field == "date":
-        normalized = normalize_date_to_ddmmyyyy(value)
-        if not normalized:
-            raise HTTPException(status_code=400, detail="Date must be in DD/MM/YYYY format.")
-        value = normalized
-
-    old_value = doc.get(field)
-    now = datetime.now(UTC)
-    await db.documents.update_one(
-        {"_id": doc_id}, {"$set": correction_set_fields(field, value, now)}
-    )
-    await db.corrections.insert_one(
-        {
-            "documentId": doc_id,
-            "fieldLabel": field,
-            "fieldKey": field,
-            "oldValue": old_value,
-            "newValue": value,
-            "correctedAt": now,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-    )
+    value = validate_correction(doc, field, body.value)
+    if not await apply_correction(db, doc, field, value):
+        raise HTTPException(status_code=409, detail=CHANGED_MSG)
     await log_action(
         current_user.id,
         "document_corrected",
@@ -984,6 +958,7 @@ async def delete_document_as_admin(
             cleanup_failed = True
 
     await db.documents.delete_one({"_id": doc_id})
+    await db.corrections.delete_many({"documentId": doc_id})
     await log_action(
         current_user.id,
         "document_deleted",

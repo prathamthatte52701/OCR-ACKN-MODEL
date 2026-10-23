@@ -11,9 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # discipline alone.
 MIN_JWT_SECRET_LENGTH = 32
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-DEFAULT_DB_NAME = "docintel_transport"
+DEFAULT_DB_NAME = "ackn_AI_model"
 DEFAULT_FRONTEND_ORIGIN = "http://localhost:5174"
 DEFAULT_ADMIN_ORIGIN = "http://localhost:5175"
+DEFAULT_AUDIT_LOG_RETENTION_DAYS = 365
 
 
 class Settings(BaseSettings):
@@ -44,6 +45,10 @@ class Settings(BaseSettings):
     # unless explicitly enabled (ENABLE_DOCS=true), in every environment.
     enable_docs: bool = Field(default=False, alias="ENABLE_DOCS")
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    # Audit entries older than this many days are deleted by MongoDB (TTL index). 0 = keep forever.
+    audit_log_retention_days: int = Field(
+        default=DEFAULT_AUDIT_LOG_RETENTION_DAYS, alias="AUDIT_LOG_RETENTION_DAYS"
+    )
 
     @field_validator("mongo_uri", mode="before")
     @classmethod
@@ -108,6 +113,16 @@ class Settings(BaseSettings):
         text = str(value).strip()
         if not text.isascii() or not text.isdigit() or not 50 <= int(text) <= 4000:
             raise ValueError("GROQ_MAX_TOKENS must be a whole number from 50 to 4000.")
+        return int(text)
+
+    @field_validator("audit_log_retention_days", mode="before")
+    @classmethod
+    def _clean_audit_retention(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return DEFAULT_AUDIT_LOG_RETENTION_DAYS
+        text = str(value).strip()
+        if not text.isascii() or not text.isdigit() or int(text) > 3650:
+            raise ValueError("AUDIT_LOG_RETENTION_DAYS must be a whole number from 0 to 3650.")
         return int(text)
 
     @field_validator("jwt_secret")

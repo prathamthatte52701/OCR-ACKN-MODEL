@@ -255,3 +255,82 @@ async def test_admin_users_list_includes_auth_provider(
     users = {u["id"]: u for u in users_resp.json()["users"]}
     assert user_id in users
     assert users[user_id]["authProvider"] == "google"
+
+
+# ---------------------------------------------------------------------------
+# 6. Approval gate applies to existing users signing in with Google
+# ---------------------------------------------------------------------------
+
+
+async def _existing(email: str, **fields: object) -> None:
+    now = datetime.now(UTC)
+    await get_database().users.insert_one(
+        {
+            "username": "gtexist",
+            "email": email,
+            "role": "user",
+            "tokenVersion": 0,
+            "authProvider": "google",
+            "googleId": "g-existing",
+            "createdAt": now,
+            "updatedAt": now,
+            **fields,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "fields,code",
+    [
+        ({"status": "pending"}, "ACCOUNT_PENDING"),
+        ({"status": "rejected"}, "ACCOUNT_REJECTED"),
+        ({"status": "rejected", "decision": "revoked"}, "ACCOUNT_REVOKED"),
+    ],
+)
+async def test_existing_unapproved_google_user_gets_403(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, fields: dict, code: str
+) -> None:
+    email = _unique_email("gate")
+    await _existing(email, **fields)
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-existing"})
+    resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == code
+    assert "token" not in resp.text
+
+
+async def test_existing_approved_google_user_logs_in(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    email = _unique_email("okexist")
+    await _existing(email, status="approved")
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-existing"})
+    resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert resp.status_code == 200 and resp.json()["token"]
+
+
+async def test_new_google_user_is_auto_approved(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    email = _unique_email("autoappr")
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-new2"})
+    resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert resp.status_code == 200
+    user = await get_database().users.find_one({"email": email})
+    assert user is not None and user["status"] == "approved"
+
+
+async def test_pending_local_account_cannot_link_via_google(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    email = _unique_email("pendlink")
+    r = await client.post(
+        "/api/auth/signup",
+        json={"username": "gtpend", "email": email, "password": LOCAL_PASSWORD},
+    )
+    assert r.status_code == 201, r.text  # signup leaves it pending
+    _mock_google_payload(monkeypatch, {"email": email, "email_verified": True, "sub": "g-pend"})
+    resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
+    assert resp.status_code == 403 and resp.json()["detail"]["code"] == "ACCOUNT_PENDING"
+    user = await get_database().users.find_one({"email": email})
+    assert user is not None and "googleId" not in user  # not linked

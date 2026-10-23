@@ -14,7 +14,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-os.environ["MONGO_DB_NAME"] = "ackn_AI_model_test"
+os.environ["MONGO_DB_NAME"] = os.environ.get("ACKN_TEST_DB", "ackn_AI_model_test")
 # Test-only signing secret: lets a pre-generated token fixture (made with the old
 # python-jose) be verified forever, and never involves the real secret.
 os.environ["JWT_SECRET"] = "test-only-jwt-secret-for-pytest-0123456789abcdef"

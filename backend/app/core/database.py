@@ -35,10 +35,15 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.documents.create_index([("userId", 1), ("documentType", 1)])
     await db.workbooks.create_index([("userId", 1), ("year", -1)])
     await db.exportedrows.create_index([("userId", 1), ("exportedAt", -1)])
+    # Save-Again and purge look rows up by documentId (userId is only a secondary filter).
+    await db.exportedrows.create_index([("documentId", 1), ("userId", 1)])
+    # Duplicate-warning lookup on Save: all of one user's exported rows for the batch's dates.
+    await db.exportedrows.create_index([("userId", 1), ("date", 1)])
     await db.settings.create_index([("userId", 1), ("key", 1)], unique=True)
     await db.corrections.create_index([("documentId", 1)])
     await db.auditlogs.create_index([("userId", 1), ("createdAt", -1)])
     await db.auditlogs.create_index([("action", 1)])
+    await _ensure_audit_ttl(db, settings.audit_log_retention_days)
     # unique on gridFsFileId - record_orphaned_file() upserts on this key so a
     # repeated failure on the same file (e.g. a failed retry) updates the
     # existing record instead of creating a duplicate.
@@ -64,6 +69,29 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             "Could not create unique users.email index (duplicates present?): "
             f"class={type(exc).__name__}"
         )
+
+
+async def _ensure_audit_ttl(db: AsyncIOMotorDatabase, days: int) -> None:
+    """Single-field createdAt TTL index on auditlogs (TTL only works on a single field and on real
+    datetimes; audit_log.py writes datetime.now(UTC)). A changed retention is applied by dropping
+    and recreating it; 0 = keep forever = no TTL index. Never crashes startup."""
+    try:
+        existing = None
+        async for ix in db.auditlogs.list_indexes():
+            if list(ix["key"]) == ["createdAt"]:
+                existing = ix
+        seconds = days * 86400
+        current = existing.get("expireAfterSeconds") if existing else None
+        if existing and (current == seconds if days else current is None):
+            return
+        if existing:
+            await db.auditlogs.drop_index(existing["name"])
+        if days:
+            await db.auditlogs.create_index([("createdAt", 1)], expireAfterSeconds=seconds)
+    except Exception as exc:  # noqa: BLE001
+        from loguru import logger
+
+        logger.warning(f"Could not set the audit-log retention index: class={type(exc).__name__}")
 
 
 async def close_mongo_connection() -> None:

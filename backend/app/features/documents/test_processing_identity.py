@@ -30,6 +30,7 @@ FLAGS = (
     "taxInvoiceNoAutoCorrected",
     "numberAutoCorrected",
     "dateAutoCorrected",
+    "dateNeedsReview",
 )
 VALUES = ("taxInvoiceNo", "referenceNo", "number", "date")
 ALLOWED_EXTRA = {
@@ -500,7 +501,7 @@ async def _flagged(db: Any, user: Any, doc_type: str) -> Any:
 CLEARS = {
     "taxInvoiceNo": ("taxInvoiceNoAutoCorrected", "taxInvoiceNoNeedsReview"),
     "referenceNo": ("referenceNoNeedsReview",),
-    "date": ("dateAutoCorrected",),
+    "date": ("dateAutoCorrected", "dateNeedsReview"),
     "number": ("numberAutoCorrected", "numberNeedsReview"),
 }
 VALUE_FOR = {

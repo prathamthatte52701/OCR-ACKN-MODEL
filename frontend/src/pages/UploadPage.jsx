@@ -32,12 +32,12 @@ function reviewFieldsFor(f) {
     return [
       { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: f.taxInvoiceNo, needsReview: f.taxInvoiceNoNeedsReview },
       { key: 'referenceNo', label: 'Reference No.', value: f.referenceNo, needsReview: f.referenceNoNeedsReview },
-      { key: 'date', label: 'Date', value: f.date },
+      { key: 'date', label: 'Date', value: f.date, needsReview: f.dateNeedsReview, reviewText: 'Please check this date' },
     ]
   }
   return [
     { key: 'number', label: 'Delivery Challan No.', value: f.number, needsReview: f.numberNeedsReview },
-    { key: 'date', label: 'Date', value: f.date },
+    { key: 'date', label: 'Date', value: f.date, needsReview: f.dateNeedsReview, reviewText: 'Please check this date' },
   ]
 }
 
@@ -336,6 +336,7 @@ export default function UploadPage() {
               number: polled.number,
               date: polled.date,
               numberNeedsReview: polled.numberNeedsReview,
+              dateNeedsReview: polled.dateNeedsReview,
               taxInvoiceNoNeedsReview: polled.taxInvoiceNoNeedsReview,
               referenceNoNeedsReview: polled.referenceNoNeedsReview,
               exported: polled.exported,
@@ -368,6 +369,7 @@ export default function UploadPage() {
               number: u.number,
               date: u.date,
               numberNeedsReview: u.numberNeedsReview,
+              dateNeedsReview: u.dateNeedsReview,
               taxInvoiceNoNeedsReview: u.taxInvoiceNoNeedsReview,
               referenceNoNeedsReview: u.referenceNoNeedsReview,
               exported: u.exported,
@@ -483,6 +485,7 @@ export default function UploadPage() {
             number: updated.number,
             date: updated.date,
             numberNeedsReview: updated.numberNeedsReview,
+            dateNeedsReview: updated.dateNeedsReview,
             taxInvoiceNoNeedsReview: updated.taxInvoiceNoNeedsReview,
             referenceNoNeedsReview: updated.referenceNoNeedsReview,
             exported: updated.exported,
@@ -607,7 +610,7 @@ export default function UploadPage() {
                                 <div className="min-w-0">
                                   <p className="text-[12.6px] text-slate-500">{f.label}</p>
                                   <p className="truncate text-[14.7px] font-semibold text-slate-200">{f.value || 'Not available'}</p>
-                                  {f.needsReview && <p className="text-[12.6px] text-amber-400">Looks incomplete - please check against the original</p>}
+                                  {f.needsReview && <p className="text-[12.6px] text-amber-400">{f.reviewText || 'Looks incomplete - please check against the original'}</p>}
                                 </div>
                               </div>
                               <button

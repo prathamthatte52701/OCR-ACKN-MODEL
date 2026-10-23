@@ -37,7 +37,12 @@ from app.core.orphaned_files import record_orphaned_file
 from app.core.rate_limit import UPLOAD_LIMIT, limiter
 from app.core.timezones import ist_midnight_utc, now_ist
 from app.features.auth.dependencies import CurrentUser, get_current_user
-from app.features.documents.correction import correction_set_fields
+from app.features.documents.correction_rules import (
+    CHANGED_MSG,
+    apply_correction,
+    check_request,
+    validate_correction,
+)
 from app.features.documents.gridfs_service import delete_file, download_buffer, upload_buffer
 from app.features.documents.schemas import (
     CorrectRequest,
@@ -46,7 +51,7 @@ from app.features.documents.schemas import (
     MessageResponse,
     PurgeFileResponse,
 )
-from app.features.ocr.extraction import extraction_reset_ops, normalize_date_to_ddmmyyyy
+from app.features.ocr.extraction import extraction_reset_ops
 from app.features.ocr.pipeline import process_document
 from app.features.ocr.preprocessing import get_pdf_page_count
 from app.features.ocr.providers.errors import PROCESSING_ERROR, user_message
@@ -59,7 +64,6 @@ DOCUMENT_TYPES = {"Tax Invoice", "Delivery Challan"}
 # Legacy rolling windows from "now" (?range=), kept for old callers. The My Documents chips send
 # a calendar-based ?uploadedFrom= (start of day/week/month/year in the USER's timezone) instead.
 RANGE_DAYS = {"today": 1, "week": 7, "month": 30, "year": 365}
-CORRECTABLE_NUMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./_-]{0,39}$")
 MAX_PAGE_SIZE = 100
 REPROCESS_STUCK_AFTER = timedelta(minutes=10)
 MAX_PAGE_NUMBER = 100_000
@@ -74,12 +78,6 @@ DOWNLOAD_SLOT_TIMEOUT_SECONDS = 10 * 60
 # multiple workers the limit would be per process.
 _active_downloads: dict[ObjectId, float] = {}
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/jpg", "image/png", "application/pdf"}
-
-EDITABLE_FIELDS = {"taxInvoiceNo", "referenceNo", "number", "date"}
-FIELDS_BY_DOCUMENT_TYPE = {
-    "Tax Invoice": {"taxInvoiceNo", "referenceNo", "date"},
-    "Delivery Challan": {"number", "date"},
-}
 
 
 def _detect_mime_type(buffer: bytes) -> str | None:
@@ -232,34 +230,44 @@ async def _validate_and_store(
     grid_fs_file_id = await upload_buffer(buffer, original_name, mime_type)
 
     now = datetime.now(UTC)
-    insert_result = await db.documents.insert_one(
-        {
-            "userId": user_id,
-            "autoName": auto_name,
-            "originalFilename": original_name,
-            "mimeType": mime_type,
-            "size": len(buffer),
-            "gridFsFileId": grid_fs_file_id,
-            "uploadStatus": "uploaded",
-            # identity of the processing job that owns this document: only that job may write
-            "processingRunId": uuid4().hex,
-            "documentType": document_type,
-            "taxInvoiceNo": None,
-            "referenceNo": None,
-            "number": None,
-            "date": None,
-            "taxInvoiceNoAutoCorrected": None,
-            "numberAutoCorrected": None,
-            "dateAutoCorrected": None,
-            "filePurged": False,
-            "filePurgedAt": None,
-            "edited": False,
-            "exported": False,
-            "isDeleted": False,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-    )
+    try:
+        insert_result = await db.documents.insert_one(
+            {
+                "userId": user_id,
+                "autoName": auto_name,
+                "originalFilename": original_name,
+                "mimeType": mime_type,
+                "size": len(buffer),
+                "gridFsFileId": grid_fs_file_id,
+                "uploadStatus": "uploaded",
+                # identity of the processing job that owns this document: only that job may write
+                "processingRunId": uuid4().hex,
+                "documentType": document_type,
+                "taxInvoiceNo": None,
+                "referenceNo": None,
+                "number": None,
+                "date": None,
+                "taxInvoiceNoAutoCorrected": None,
+                "numberAutoCorrected": None,
+                "dateAutoCorrected": None,
+                "filePurged": False,
+                "filePurgedAt": None,
+                "edited": False,
+                "exported": False,
+                "isDeleted": False,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+    except Exception:
+        # The file is stored but no document points at it: remove it (best effort).
+        try:
+            await delete_file(grid_fs_file_id)
+        except Exception as del_exc:  # noqa: BLE001
+            await record_orphaned_file(
+                grid_fs_file_id, None, user_id, "upload_insert_failed", del_exc
+            )
+        raise
     doc = await db.documents.find_one({"_id": insert_result.inserted_id})
     assert doc is not None
     await safe_log_action(
@@ -1032,6 +1040,7 @@ async def delete_document(
 
     db = get_database()
     await db.documents.delete_one({"_id": doc["_id"]})
+    await db.corrections.delete_many({"documentId": doc["_id"]})
     await log_action(
         current_user.id,
         "document_deleted",
@@ -1119,69 +1128,13 @@ async def purge_document_file(
 async def correct_document(
     doc_id: PyObjectId, body: CorrectRequest, current_user: CurrentUser = Depends(get_current_user)
 ) -> dict:
-    if body.field not in EDITABLE_FIELDS:
-        raise HTTPException(status_code=400, detail="That field cannot be edited.")
-    if not body.value or not body.value.strip():
-        raise HTTPException(status_code=400, detail="Please enter a value before saving.")
-
+    check_request(body.field, body.value)
     doc = await _get_owned_document(doc_id, current_user.id)
+    value = validate_correction(doc, body.field, body.value)
 
-    # A document still mid-OCR can have its uploadStatus flip to 'processed'
-    # right after this handler reads it and silently overwrite a correction
-    # made in that window - block corrections until processing has actually
-    # finished (race-condition fix ported from the old app).
-    if doc["uploadStatus"] not in ("processed", "failed"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This document is still being processed. "
-                "Please wait for it to finish before editing."
-            ),
-        )
-
-    if body.field not in FIELDS_BY_DOCUMENT_TYPE[doc["documentType"]]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"That field cannot be edited on a {doc['documentType']} document.",
-        )
-
-    value = body.value.strip()
-    if body.field == "date":
-        normalized = normalize_date_to_ddmmyyyy(value)
-        if not normalized:
-            raise HTTPException(
-                status_code=400, detail="Enter a real date in DD/MM/YYYY format (year 2000-2100)."
-            )
-        value = normalized
-    elif not CORRECTABLE_NUMBER_RE.match(value):
-        # Numbers are letters/digits (plus - / . _ and spaces), 1-40 chars.
-        # Previously anything was accepted: a 10 MB string, <script>, control
-        # characters (500 on Excel save) and "=HYPERLINK(...)" formulas.
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Number can only contain letters, digits, spaces and - / . _ "
-                "(max 40 characters)."
-            ),
-        )
-
-    old_value = doc.get(body.field)
     db = get_database()
-    now = datetime.now(UTC)
-    set_fields = correction_set_fields(body.field, value, now)
-    await db.documents.update_one({"_id": doc["_id"]}, {"$set": set_fields})
-    await db.corrections.insert_one(
-        {
-            "documentId": doc["_id"],
-            "fieldLabel": body.field,
-            "fieldKey": body.field,
-            "oldValue": old_value,
-            "newValue": value,
-            "correctedAt": now,
-            "createdAt": now,
-            "updatedAt": now,
-        }
-    )
+    if not await apply_correction(db, doc, body.field, value):
+        raise HTTPException(status_code=409, detail=CHANGED_MSG)
 
     await safe_log_action(
         current_user.id,

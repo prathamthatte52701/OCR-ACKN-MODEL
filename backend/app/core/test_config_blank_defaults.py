@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 
-DEFAULT_DB = "docintel_transport"
+DEFAULT_DB = "ackn_AI_model"
 DEFAULT_FRONTEND = "http://localhost:5174"
 DEFAULT_ADMIN = "http://localhost:5175"
 FAKE_URI = "mongodb://localhost:27017/placeholder"
@@ -100,3 +100,20 @@ def test_env_example_template_gives_the_defaults(monkeypatch: pytest.MonkeyPatch
     assert s.frontend_origin == DEFAULT_FRONTEND
     assert s.admin_origin == DEFAULT_ADMIN
     assert all(origin for origin in s.cors_origins)
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\t"])
+def test_audit_retention_blank_means_365(blank: str) -> None:
+    assert _settings(AUDIT_LOG_RETENTION_DAYS=blank).audit_log_retention_days == 365
+    assert _settings().audit_log_retention_days == 365
+
+
+@pytest.mark.parametrize("raw,expected", [("0", 0), ("30", 30), (" 3650 ", 3650), (90, 90)])
+def test_audit_retention_valid_values(raw: object, expected: int) -> None:
+    assert _settings(AUDIT_LOG_RETENTION_DAYS=raw).audit_log_retention_days == expected
+
+
+@pytest.mark.parametrize("bad", ["-1", "3651", "1.5", "abc", "1e3", "٣"])
+def test_audit_retention_invalid_values_are_rejected(bad: str) -> None:
+    with pytest.raises(ValidationError):
+        _settings(AUDIT_LOG_RETENTION_DAYS=bad)

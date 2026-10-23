@@ -233,6 +233,9 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
     user = await db.users.find_one({"email": email})
     now = datetime.now(UTC)
 
+    if user:
+        raise_if_not_approved(user)  # same 403 as password login; before any link/log/token
+
     if not user:
         username = await _derive_google_username(db, email)
         await db.users.insert_one(

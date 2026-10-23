@@ -58,7 +58,8 @@ new stack: FastAPI, MongoDB (Motor), PaddleOCR, Groq, React/Vite.
   the login and signup pages. Same JWT/session contract as normal login, so
   nothing else in the app needed to change. Existing accounts with a
   matching email get linked automatically instead of creating a duplicate
-  user. Google-only accounts (no password set) cannot use the
+  user. An existing account that is still pending or was rejected gets the
+  same "not approved" 403 as password login. Google-only accounts (no password set) cannot use the
   password-reset request, since there's no password to reset.
 - **Bulk-upload crash fix** — the app used to briefly hang after a restart
   because startup recovery of interrupted uploads ran before the server
@@ -121,11 +122,12 @@ Required env vars (`backend/.env`):
 |---|---|---|
 | `MONGO_URI` | yes | MongoDB Atlas connection string |
 | `JWT_SECRET` | yes | must be ≥32 chars, generate with `python -c "import secrets; print(secrets.token_hex(48))"` |
-| `MONGO_DB_NAME` | no (default `docintel_transport`) | blank = default |
+| `MONGO_DB_NAME` | no (default `ackn_AI_model`) | blank = default |
 | `GROQ_API_KEYS` | no | comma-separated, round-robined across calls |
 | `GROQ_MODEL` | no (default `openai/gpt-oss-120b`) | Groq model used for extraction. If Groq retires it, set a new one here - the app never switches models on its own; a retired model shows the user "The AI service is not set up correctly" and the cause (`MODEL_GONE`) is in `processingErrorCode` and in the server log (backend/logs/app.log) |
 | `GROQ_REASONING_EFFORT` | no (unset = `low`) | `low`, `medium` or `high`. Set but blank = the parameter is not sent (use this for models without a reasoning mode). Anything else stops the app at start |
 | `GROQ_MAX_TOKENS` | no (default `300`) | whole number 50-4000; blank = 300; anything else stops the app at start |
+| `AUDIT_LOG_RETENTION_DAYS` | no (default `365`) | whole number 0-3650; audit entries older than this are deleted automatically by a MongoDB TTL index on `auditlogs.createdAt`. `0` = keep forever; blank = 365. Changing it and restarting updates the index |
 | `ENABLE_DOCS` | no (default off) | `true` exposes `/docs`, `/redoc`, `/openapi.json` (developer machines only) |
 | `FRONTEND_ORIGIN` | no (default `http://localhost:5174`) | CORS allow-list; blank = default |
 | `ADMIN_ORIGIN` | no (default `http://localhost:5175`) | CORS allow-list for the admin app; blank = default |

@@ -4,10 +4,14 @@ corrections). No AI involved in this file."""
 
 import math
 import re
+from datetime import date as date_type
 from datetime import datetime
 from typing import Any
 
 from loguru import logger
+
+from app.core.date_window import date_implausible
+from app.core.timezones import now_ist
 
 DATE_RE = re.compile(r"^(\d{2})[./-](\d{2})[./-](\d{4})$")
 # A real TAX INVOICE No. always starts with "G" or "P" (e.g. G0027704827).
@@ -218,7 +222,9 @@ def _clean_text_field(value: Any, field: str, allow_numbers: bool = True) -> str
     return None
 
 
-def build_extraction_result(document_type: str, parsed: Any) -> dict:
+def build_extraction_result(
+    document_type: str, parsed: Any, today: date_type | None = None
+) -> dict:
     """Applies a deterministic rule-based correction pass for classic OCR
     character-confusion errors (e.g. a trailing "I" misread in place of "1")
     to a raw {taxInvoiceNo/number, referenceNo, date} dict already parsed from
@@ -231,6 +237,8 @@ def build_extraction_result(document_type: str, parsed: Any) -> dict:
     date, date_auto_corrected = _corrected_date(
         _clean_text_field(parsed.get("date"), "date", allow_numbers=False)
     )
+
+    date_needs_review = date_implausible(date, today or now_ist().date())
 
     if document_type == "Tax Invoice":
         tax_invoice_no = _clean_text_field(parsed.get("taxInvoiceNo"), "taxInvoiceNo")
@@ -250,6 +258,7 @@ def build_extraction_result(document_type: str, parsed: Any) -> dict:
             "referenceNoNeedsReview": _needs_review(reference_no, REFERENCE_NO_FULL_RE),
             "taxInvoiceNoAutoCorrected": tin_auto_corrected,
             "dateAutoCorrected": date_auto_corrected,
+            "dateNeedsReview": date_needs_review,
         }
 
     number = _clean_text_field(parsed.get("number"), "number")
@@ -263,6 +272,7 @@ def build_extraction_result(document_type: str, parsed: Any) -> dict:
         "numberNeedsReview": _needs_review(number, DELIVERY_CHALLAN_NO_FULL_RE),
         "numberAutoCorrected": number_auto_corrected,
         "dateAutoCorrected": date_auto_corrected,
+        "dateNeedsReview": date_needs_review,
     }
 
 
@@ -276,6 +286,7 @@ def empty_extraction_result(document_type: str) -> dict:
             "referenceNoNeedsReview": False,
             "taxInvoiceNoAutoCorrected": False,
             "dateAutoCorrected": False,
+            "dateNeedsReview": False,
         }
     return {
         "number": None,
@@ -283,6 +294,7 @@ def empty_extraction_result(document_type: str) -> dict:
         "numberNeedsReview": False,
         "numberAutoCorrected": False,
         "dateAutoCorrected": False,
+        "dateNeedsReview": False,
     }
 
 
@@ -297,6 +309,7 @@ EXTRACTION_FLAG_FIELDS = (
     "taxInvoiceNoAutoCorrected",
     "numberAutoCorrected",
     "dateAutoCorrected",
+    "dateNeedsReview",
 )
 # The retired AI-confidence fields: old rows may still carry them (the API hides them).
 LEGACY_CONFIDENCE_FIELDS = (

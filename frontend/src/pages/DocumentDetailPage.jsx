@@ -34,12 +34,12 @@ function fieldsFor(doc) {
     return [
       { key: 'taxInvoiceNo', label: 'TAX INVOICE No.', value: doc.taxInvoiceNo, needsReview: doc.taxInvoiceNoNeedsReview },
       { key: 'referenceNo', label: 'Reference No.', value: doc.referenceNo, needsReview: doc.referenceNoNeedsReview },
-      { key: 'date', label: 'Date', value: doc.date },
+      { key: 'date', label: 'Date', value: doc.date, needsReview: doc.dateNeedsReview, reviewText: 'Please check this date' },
     ]
   }
   return [
     { key: 'number', label: 'Delivery Challan No.', value: doc.number, needsReview: doc.numberNeedsReview },
-    { key: 'date', label: 'Date', value: doc.date },
+    { key: 'date', label: 'Date', value: doc.date, needsReview: doc.dateNeedsReview, reviewText: 'Please check this date' },
   ]
 }
 
@@ -284,7 +284,7 @@ export default function DocumentDetailPage() {
                   <div className="min-w-0">
                     <p className="text-[12.6px] text-gray-500">{f.label}</p>
                     <p className="truncate text-[14.7px] font-semibold text-gray-100">{f.value || 'Not available'}</p>
-                    {f.needsReview && <p className="text-[12.6px] text-amber-400">Looks incomplete - please check against the original</p>}
+                    {f.needsReview && <p className="text-[12.6px] text-amber-400">{f.reviewText || 'Looks incomplete - please check against the original'}</p>}
                   </div>
                 </div>
                 <button

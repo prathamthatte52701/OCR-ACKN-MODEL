@@ -26,6 +26,7 @@ FLAGS = (
     "taxInvoiceNoAutoCorrected",
     "numberAutoCorrected",
     "dateAutoCorrected",
+    "dateNeedsReview",
 )
 VALUES = ("taxInvoiceNo", "referenceNo", "number", "date")
 CONF = ("taxInvoiceNoConfidence", "referenceNoConfidence", "numberConfidence", "dateConfidence")

@@ -4,7 +4,7 @@
 from datetime import datetime
 
 AUTO_CORRECTED_FIELDS = ("taxInvoiceNo", "number", "date")
-NEEDS_REVIEW_FIELDS = ("taxInvoiceNo", "referenceNo", "number")
+NEEDS_REVIEW_FIELDS = ("taxInvoiceNo", "referenceNo", "number", "date")
 
 
 def correction_set_fields(field: str, value: str, now: datetime) -> dict:

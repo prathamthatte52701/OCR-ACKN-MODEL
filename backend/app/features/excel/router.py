@@ -484,6 +484,41 @@ async def _remove_old_rows(db: Any, jobs: list[_OldRowsJob], appended: list[_Sav
                 )
 
 
+DUPLICATE_WARNING = (
+    "Another document with the same number and date is already in Excel. "
+    "Check that this is not a duplicate."
+)
+
+
+def _number_is_blank(doc: dict) -> bool:
+    keys = ("taxInvoiceNo", "referenceNo") if doc["documentType"] == "Tax Invoice" else ("number",)
+    return not any(str(doc.get(k) or "").strip() for k in keys)
+
+
+async def _warn_duplicates(db: Any, plans: list[_SavePlan]) -> None:
+    """Warns (never blocks) when another document of the same user with the same (type, number,
+    date) is already exported, or comes earlier in this batch. One query per batch; it needs an
+    exportedrows index on (userId, date)."""
+    dated = [p for p in plans if p.row.get("date")]
+    if not dated:
+        return
+    try:
+        recs = await db.exportedrows.find(
+            {"userId": dated[0].user_id, "date": {"$in": list({p.row["date"] for p in dated})}}
+        ).to_list(None)
+    except Exception as exc:  # noqa: BLE001 - a warning must never fail the save
+        logger.error(f"Duplicate check failed: class={type(exc).__name__}")
+        return
+    seen: dict[tuple, set] = defaultdict(set)
+    for rec in recs:
+        seen[excel_service.row_key(rec)].add(rec["documentId"])
+    for plan in dated:
+        key = excel_service.row_key(plan.row)
+        if seen[key] - {plan.doc["_id"]}:
+            plan.warnings.append(DUPLICATE_WARNING)
+        seen[key].add(plan.doc["_id"])
+
+
 async def _prepare_save(db: Any, doc_id: ObjectId, current_user: CurrentUser) -> _SavePlan:
     """PREPARE of one document's save: every decision and check, no Excel write. Raises
     HTTPException on any failure, exactly as the single-document save always did; callers decide
@@ -495,6 +530,9 @@ async def _prepare_save(db: Any, doc_id: ObjectId, current_user: CurrentUser) ->
         raise HTTPException(status_code=404, detail="Document not found.")
     if doc["uploadStatus"] != "processed":
         raise HTTPException(status_code=400, detail="Document has not been processed yet.")
+
+    if _number_is_blank(doc):  # before any workbook is created or rolled over
+        raise HTTPException(status_code=400, detail="Add the number first, then save.")
 
     now_local = excel_service.now_ist()  # one clock read for both decisions
     current_year, _ = excel_service.current_period(now_local)
@@ -686,6 +724,7 @@ async def _save_batch_inner(ids: Sequence[ObjectId], current_user: CurrentUser) 
             if excel_service.file_path(plan.physical).name not in snapshot:
                 created_at.setdefault(plan.physical, len(plans))
             plans.append(plan)
+        await _warn_duplicates(db, plans)
 
         # EXECUTE: one append per physical file, request order inside a file
         by_file: dict[str, list[_SavePlan]] = defaultdict(list)
