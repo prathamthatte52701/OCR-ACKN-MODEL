@@ -27,10 +27,10 @@ class Settings(BaseSettings):
     # Groq has already retired a model once; the model name must be changeable without a deploy.
     # Blank = the default. A bad name is NOT replaced by another model: the failure is reported.
     groq_model: str = Field(default=DEFAULT_GROQ_MODEL, alias="GROQ_MODEL")
-    # Unset = "low". Set but blank = None = do not send the parameter
+    # Unset = "high". Set but blank = None = do not send the parameter
     # (models without a reasoning mode reject it with a 400).
-    groq_reasoning_effort: str | None = Field(default="low", alias="GROQ_REASONING_EFFORT")
-    groq_max_tokens: int = Field(default=300, alias="GROQ_MAX_TOKENS")
+    groq_reasoning_effort: str | None = Field(default="high", alias="GROQ_REASONING_EFFORT")
+    groq_max_tokens: int = Field(default=2000, alias="GROQ_MAX_TOKENS")
     frontend_origin: str = Field(default=DEFAULT_FRONTEND_ORIGIN, alias="FRONTEND_ORIGIN")
     admin_origin: str = Field(default=DEFAULT_ADMIN_ORIGIN, alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     @classmethod
     def _clean_max_tokens(cls, value: object) -> object:
         if value is None or (isinstance(value, str) and not value.strip()):
-            return 300
+            return 2000
         text = str(value).strip()
         if not text.isascii() or not text.isdigit() or not 50 <= int(text) <= 4000:
             raise ValueError("GROQ_MAX_TOKENS must be a whole number from 50 to 4000.")

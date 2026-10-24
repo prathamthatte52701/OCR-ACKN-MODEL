@@ -1,7 +1,7 @@
 """Why did AI extraction fail? A small closed set of codes instead of a catch-all "check the key".
 
 Public names (used by groq_provider.py, ai_extraction.py, pipeline.py):
-  CODES                         - the twelve code strings below
+  CODES                         - the thirteen code strings below
   AIExtractionError(code, status=None, model=None)
   classify_exception(exc)       -> (code, status)   for any exception the SDK/asyncio can raise
   combine_failures(failures)    -> (code, status)   final cause after failing over across keys
@@ -19,6 +19,8 @@ RATE_LIMIT = "RATE_LIMIT"
 MODEL_GONE = "MODEL_GONE"
 TIMEOUT_NETWORK = "TIMEOUT_NETWORK"
 BAD_REPLY = "BAD_REPLY"
+# The answer hit the token limit (finish_reason "length"), even after one retry with a bigger limit
+REPLY_CUT_OFF = "REPLY_CUT_OFF"
 UNKNOWN = "UNKNOWN"
 # Not an AI failure: the OCR slot is held by a timed-out OCR thread that never ended (pipeline.py)
 OCR_STUCK = "OCR_STUCK"
@@ -35,6 +37,7 @@ CODES = (
     MODEL_GONE,
     TIMEOUT_NETWORK,
     BAD_REPLY,
+    REPLY_CUT_OFF,
     UNKNOWN,
     OCR_STUCK,
     OCR_ENGINE_ERROR,
@@ -52,6 +55,10 @@ _USER_MESSAGES = {
         "Could not reach the AI service. Check the internet connection and try again."
     ),
     BAD_REPLY: "The AI gave an unreadable answer. Please try again.",
+    REPLY_CUT_OFF: (
+        "The AI answer was cut off. Press Reprocess. If it keeps happening, ask the admin to "
+        "raise GROQ_MAX_TOKENS."
+    ),
     UNKNOWN: "Something went wrong while reading this document. Please try again.",
     OCR_STUCK: (
         "The text reader is stuck. Please tell the administrator to restart the app, "

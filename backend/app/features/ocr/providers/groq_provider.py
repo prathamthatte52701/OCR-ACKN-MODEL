@@ -3,11 +3,13 @@ import itertools
 from typing import Any
 
 from groq import Groq
+from loguru import logger
 
 from app.core.config import settings
 from app.features.ocr.providers.base import AIProvider
 from app.features.ocr.providers.errors import (
     NO_KEYS,
+    REPLY_CUT_OFF,
     AIExtractionError,
     classify_exception,
     combine_failures,
@@ -22,6 +24,8 @@ _RETRYABLE_STATUSES = {401, 403, 429}
 # worst case and, since it's caught as an ordinary exception below, also
 # triggers failover to the next key instead of just hanging on a bad one.
 CALL_TIMEOUT_SECONDS = 60
+# Same ceiling as the GROQ_MAX_TOKENS setting (config.py): a cut-off retry never goes above it.
+MAX_TOKENS_CEILING = 4000
 
 
 # Process-wide rotation counter: a new GroqProvider is built for every document, so a per-instance
@@ -58,10 +62,9 @@ class GroqProvider(AIProvider):
             key_index = (start_index + i) % len(self._key_pool)
             client = Groq(api_key=self._key_pool[key_index])
             try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(self._call, client, system_prompt, user_prompt),
-                    timeout=CALL_TIMEOUT_SECONDS,
-                )
+                return await self._ask(client, system_prompt, user_prompt)
+            except AIExtractionError:
+                raise  # a cut-off answer is not a key problem: do not try the other keys
             except Exception as exc:  # noqa: BLE001
                 failures.append(classify_exception(exc))
                 details.append(error_detail(exc))
@@ -85,8 +88,33 @@ class GroqProvider(AIProvider):
         )
         raise AIExtractionError(code, status, model, detail)
 
+    async def _ask(self, client: Groq, system_prompt: str, user_prompt: str) -> str:
+        """One call; if the answer was cut off by the token limit, ONE retry (same key) with
+        double the limit, capped at MAX_TOKENS_CEILING. Still cut off -> REPLY_CUT_OFF."""
+        model = settings.groq_model
+        limit = settings.groq_max_tokens
+        for attempt in range(2):
+            text, finish_reason = await asyncio.wait_for(
+                asyncio.to_thread(self._call, client, system_prompt, user_prompt, limit),
+                timeout=CALL_TIMEOUT_SECONDS,
+            )
+            if finish_reason != "length":
+                return text
+            will_retry = attempt == 0 and limit < MAX_TOKENS_CEILING
+            # Only the reason, the limit and the model: never the reply, prompt, OCR text or a key.
+            logger.warning(
+                f"AI answer cut off: reason={finish_reason} max_tokens={limit} model={model} "
+                f"retry={will_retry}"
+            )
+            if not will_retry:
+                raise AIExtractionError(REPLY_CUT_OFF, None, model)
+            limit = min(limit * 2, MAX_TOKENS_CEILING)
+        raise AssertionError("unreachable")  # pragma: no cover
+
     @staticmethod
-    def _call(client: Groq, system_prompt: str, user_prompt: str) -> str:
+    def _call(
+        client: Groq, system_prompt: str, user_prompt: str, max_tokens: int
+    ) -> tuple[str, str | None]:
         # Model, reasoning effort and max tokens come from settings: Groq has retired a model
         # before, and models without a reasoning mode reject reasoning_effort (blank = not sent).
         kwargs: dict[str, Any] = {
@@ -96,12 +124,13 @@ class GroqProvider(AIProvider):
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.1,
-            "max_tokens": settings.groq_max_tokens,
+            "max_tokens": max_tokens,
         }
         if settings.groq_reasoning_effort is not None:
             kwargs["reasoning_effort"] = settings.groq_reasoning_effort
         response = client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content or ""
+        choice = response.choices[0]
+        return choice.message.content or "", getattr(choice, "finish_reason", None)
 
 
 def describe_config() -> str:

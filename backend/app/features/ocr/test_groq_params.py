@@ -30,7 +30,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch, **env: str | None) -> Settings:
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [(None, "low"), ("", None), ("  ", None), ("HIGH", "high"), (" medium ", "medium")],
+    [(None, "high"), ("", None), ("  ", None), ("HIGH", "high"), (" medium ", "medium")],
 )
 def test_effort_setting(monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: Any) -> None:
     assert _settings(monkeypatch, GROQ_REASONING_EFFORT=raw).groq_reasoning_effort == expected
@@ -43,7 +43,7 @@ def test_effort_invalid(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("raw", "expected"), [(None, 300), ("", 300), ("1000", 1000), ("50", 50), ("4000", 4000)]
+    ("raw", "expected"), [(None, 2000), ("", 2000), ("1000", 1000), ("50", 50), ("4000", 4000)]
 )
 def test_max_tokens_setting(
     monkeypatch: pytest.MonkeyPatch, raw: str | None, expected: int
@@ -68,8 +68,8 @@ def test_blank_vs_unset_from_a_real_env_file(
     unset.write_text("GROQ_MODEL=x/y\n")
     b = Settings(_env_file=blank)  # type: ignore[call-arg]
     u = Settings(_env_file=unset)  # type: ignore[call-arg]
-    assert (b.groq_reasoning_effort, b.groq_max_tokens) == (None, 300)
-    assert (u.groq_reasoning_effort, u.groq_max_tokens) == ("low", 300)
+    assert (b.groq_reasoning_effort, b.groq_max_tokens) == (None, 2000)
+    assert (u.groq_reasoning_effort, u.groq_max_tokens) == ("high", 2000)
 
 
 def _bad_request() -> BadRequestError:

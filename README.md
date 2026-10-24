@@ -122,8 +122,8 @@ All settings live in `backend/.env`. A missing or invalid required setting stops
 | `MONGO_DB_NAME` | No | `ackn_AI_model` | Database name. Blank means the default. |
 | `GROQ_API_KEYS` | No | — | One or more Groq keys, comma-separated. Calls are spread evenly across keys, and if one key is rate-limited or rejected the next is tried. |
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Model used for extraction. The app never switches models on its own. |
-| `GROQ_REASONING_EFFORT` | No | `low` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
-| `GROQ_MAX_TOKENS` | No | `300` | Reply length limit, a whole number from 50 to 4000. |
+| `GROQ_REASONING_EFFORT` | No | `high` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
+| `GROQ_MAX_TOKENS` | No | `2000` | Reply length limit, a whole number from 50 to 4000. If an answer is cut off it is retried once with double the limit (at most 4000); if it is still cut off the document fails with a message asking you to raise this value. |
 | `AUDIT_LOG_RETENTION_DAYS` | No | `365` | Audit entries older than this are deleted automatically. `0` keeps them forever. Whole number from 0 to 3650. |
 | `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. The frontend also needs the same value as `VITE_GOOGLE_CLIENT_ID`. Without it the Google button is simply not shown. |
 | `FRONTEND_ORIGIN` | No | `http://localhost:5174` | Allowed browser origin for the user app. |
