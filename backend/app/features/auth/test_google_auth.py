@@ -155,7 +155,6 @@ async def test_existing_local_account_links_via_google(
     original = await db.users.find_one({"email": email})
     assert original is not None
     original_id = original["_id"]
-    original_hash = original["passwordHash"]
 
     _mock_google_payload(
         monkeypatch, {"email": email, "email_verified": True, "sub": "google-sub-link"}
@@ -169,15 +168,15 @@ async def test_existing_local_account_links_via_google(
 
     linked = await db.users.find_one({"_id": original_id})
     assert linked is not None
-    assert linked["authProvider"] == "local+google"
+    assert linked["authProvider"] == "google"
     assert linked["googleId"] == "google-sub-link"
-    assert linked["passwordHash"] == original_hash  # untouched
+    assert "passwordHash" not in linked  # linking replaces the password
 
-    # Original password still works via the normal /login path.
+    # The old password no longer works (see test_google_link_security.py).
     login_resp = await client.post(
         "/api/auth/login", json={"email": email, "password": LOCAL_PASSWORD}
     )
-    assert login_resp.status_code == 200, login_resp.text
+    assert login_resp.status_code == 401, login_resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +197,12 @@ async def test_password_change_revokes_prior_token(
     assert signup_resp.status_code == 201, signup_resp.text
     await get_database().users.update_one({"email": email}, {"$set": {"status": "approved"}})
 
-    _mock_google_payload(
-        monkeypatch, {"email": email, "email_verified": True, "sub": "google-sub-revoke"}
+    # (a Google link now removes the password, so sign in with the password to get the token)
+    login_resp = await client.post(
+        "/api/auth/login", json={"email": email, "password": LOCAL_PASSWORD}
     )
-    google_resp = await client.post("/api/auth/google", json={"idToken": "fake-token"})
-    assert google_resp.status_code == 200, google_resp.text
-    old_token = google_resp.json()["token"]
+    assert login_resp.status_code == 200, login_resp.text
+    old_token = login_resp.json()["token"]
 
     # The pre-change token works right now.
     me_resp = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})

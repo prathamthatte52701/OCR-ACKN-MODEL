@@ -307,7 +307,7 @@ async def test_login_without_request_creates_nothing(client: Any, db: Any, make_
     assert await db.passwordresetrequests.count_documents({}) == 0
 
 
-async def test_google_login_keeps_flag_and_does_not_close(
+async def test_google_link_clears_temp_password_and_closes_request(
     client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     admin, u = await make_user(role="admin"), await make_user()
@@ -320,9 +320,11 @@ async def test_google_login_keeps_flag_and_does_not_close(
     )
     r = await client.post("/api/auth/google", json={"idToken": "fake"})
     assert r.status_code == 200, r.text
-    assert r.json()["user"]["mustChangePassword"] is True
-    assert (await db.users.find_one({"_id": u.id}))["mustChangePassword"] is True
-    assert (await db.passwordresetrequests.find_one({"userId": u.id}))["status"] == "open"
+    # linking replaces the password (temp one included), so there is nothing left to change
+    assert r.json()["user"]["mustChangePassword"] is False
+    doc = await db.users.find_one({"_id": u.id})
+    assert doc["mustChangePassword"] is False and "passwordHash" not in doc
+    assert (await db.passwordresetrequests.find_one({"userId": u.id}))["status"] == "done"
 
 
 # ---------- secrecy ----------

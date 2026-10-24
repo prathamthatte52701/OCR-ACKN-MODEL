@@ -27,6 +27,7 @@ from app.core.validators import (
     validate_username,
 )
 from app.features.auth.dependencies import (
+    STATUS_APPROVED,
     STATUS_PENDING,
     CurrentUser,
     get_current_user,
@@ -281,16 +282,48 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
             )
 
     if "google" not in user.get("authProvider", "local"):
-        # Existing local-password account signing in with Google for the
-        # first time - link the accounts, leave passwordHash untouched so
-        # the original password keeps working.
-        await db.users.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"authProvider": "local+google", "googleId": google_id, "updatedAt": now}},
+        # Existing password account signing in with Google for the first time. Whoever set that
+        # password may not be the Google owner (a stranger can sign up with someone's email), so
+        # the link REPLACES the password: drop it, end every old session, close any open reset
+        # request. One conditional update, so of two concurrent logins only one links.
+        linked = await db.users.update_one(
+            {
+                "_id": user["_id"],
+                "authProvider": {"$not": {"$regex": "google"}},
+                # still approved now (None = an old account without the field): the admin may
+                # have rejected it since the read above
+                "status": {"$in": [STATUS_APPROVED, None]},
+            },
+            {
+                "$set": {
+                    "authProvider": "google",
+                    "googleId": google_id,
+                    "mustChangePassword": False,
+                    "updatedAt": now,
+                },
+                "$unset": {"passwordHash": ""},
+                "$inc": {"tokenVersion": 1},
+            },
         )
         user = await db.users.find_one({"_id": user["_id"]})
         assert user is not None
-        await log_action(user["_id"], "google_account_linked", {"email": email})
+        if linked.matched_count:
+            await db.passwordresetrequests.update_one(
+                {"userId": user["_id"], "status": "open"},
+                {
+                    "$set": {
+                        "status": "done",
+                        "resolution": "google_linked",
+                        "resolvedAt": now,
+                        "resolvedBy": None,
+                        "updatedAt": now,
+                    }
+                },
+            )
+            await log_action(user["_id"], "google_account_linked", {"email": email})
+        else:  # lost the race, or the account was rejected since the read: check again
+            raise_if_not_approved(user)
+            await log_action(user["_id"], "login", {"email": email, "method": "google"})
     else:
         await log_action(user["_id"], "login", {"email": email, "method": "google"})
 
