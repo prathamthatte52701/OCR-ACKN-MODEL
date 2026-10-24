@@ -41,7 +41,7 @@ async def _links(db: Any, user_id: Any) -> int:
     )
 
 
-@pytest.mark.parametrize("role", ["user", "admin"])
+@pytest.mark.parametrize("role", ["user"])
 async def test_link_removes_password_and_google_login_works(
     client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch, role: str
 ) -> None:
@@ -233,3 +233,112 @@ async def test_link_closes_open_password_reset_request(
     row = await db.passwordresetrequests.find_one({"userId": u.id})
     assert row["status"] == "done" and row["resolution"] == "google_linked"
     assert row["resolvedAt"] and row["resolvedBy"] is None
+
+
+# ---------------- admins keep their password when they link Google ----------------
+# Admin accounts never come from public signup, so the pre-hijack attack above does not apply to
+# them, and a removed password would break reset_admin_password.py and Nuke Delete.
+
+
+async def test_admin_link_keeps_password_and_sessions(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = await make_user(role="admin")
+    before = await client.post(LOGIN, json={"email": a.email, "password": a.password})
+    old_token = before.json()["token"]
+    await db.users.update_one({"_id": a.id}, {"$set": {"mustChangePassword": True}})
+    _google(monkeypatch, a.email)
+
+    r = await _sign_in(client)
+    assert r.status_code == 200, r.text
+    assert (await client.get(ME, headers=_bearer(r.json()["token"]))).status_code == 200
+    doc = await db.users.find_one({"_id": a.id})
+    assert doc["authProvider"] == "local+google" and doc["googleId"] == "g-link"
+    assert "passwordHash" in doc and doc["tokenVersion"] == 0
+    assert doc["mustChangePassword"] is True  # untouched
+    assert await _links(db, a.id) == 1
+    await db.users.update_one({"_id": a.id}, {"$set": {"mustChangePassword": False}})
+    pw = await client.post(LOGIN, json={"email": a.email, "password": a.password})
+    assert pw.status_code == 200  # the password still works
+    assert (
+        await client.get(ME, headers=_bearer(old_token))
+    ).status_code == 200  # old session lives
+
+
+async def test_admin_link_twice_links_once(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = await make_user(role="admin")
+    _google(monkeypatch, a.email)
+    assert (await _sign_in(client)).status_code == 200
+    assert (await _sign_in(client)).status_code == 200  # now a plain Google login
+    doc = await db.users.find_one({"_id": a.id})
+    assert doc["authProvider"] == "local+google" and doc["tokenVersion"] == 0
+    assert await _links(db, a.id) == 1
+
+
+async def test_concurrent_admin_links_no_500_and_one_link(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = await make_user(role="admin")
+    _google(monkeypatch, a.email)
+    rs = await asyncio.gather(_sign_in(client), _sign_in(client))
+    assert [r.status_code for r in rs] == [200, 200], [r.text for r in rs]
+    doc = await db.users.find_one({"_id": a.id})
+    assert doc["authProvider"] == "local+google" and "passwordHash" in doc
+    assert doc["tokenVersion"] == 0 and await _links(db, a.id) == 1
+
+
+async def test_lost_admin_link_race_still_signs_in(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = await make_user(role="admin")
+    stale = await db.users.find_one({"_id": a.id})  # still a plain password account
+    _google(monkeypatch, a.email)
+    assert (await _sign_in(client)).status_code == 200  # the "winner" links
+    monkeypatch.setattr(auth_router, "get_database", lambda: _StaleFirstRead(db, stale))
+    r = await _sign_in(client)  # the loser: the conditional update matches nothing
+    assert r.status_code == 200, r.text
+    doc = await db.users.find_one({"_id": a.id})
+    assert doc["tokenVersion"] == 0 and "passwordHash" in doc and await _links(db, a.id) == 1
+
+
+@pytest.mark.parametrize("status", ["pending", "rejected"])
+async def test_unapproved_admin_is_blocked_before_any_link(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    a = await make_user(role="admin", status=status)
+    _google(monkeypatch, a.email)
+    r = await _sign_in(client)
+    assert r.status_code == 403 and "token" not in r.text, r.text
+    doc = await db.users.find_one({"_id": a.id})
+    assert "googleId" not in doc and "passwordHash" in doc and doc["tokenVersion"] == 0
+    assert doc.get("authProvider") is None and await _links(db, a.id) == 0
+
+
+async def test_reset_admin_password_script_still_works_after_google_link(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.scripts import reset_admin_password as rap
+
+    a = await make_user(role="admin")
+    _google(monkeypatch, a.email)
+    assert (await _sign_in(client)).status_code == 200  # linked, password kept
+    new_pw = "Nw8#kLp2!Tz9"
+    assert await rap.reset_admin_password(db, a.email, new_pw, apply=True) == a.email
+    ok = await client.post(LOGIN, json={"email": a.email, "password": new_pw})
+    assert ok.status_code == 200
+
+
+async def test_only_the_admin_role_keeps_the_password(
+    client: Any, db: Any, make_user: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only role == 'admin' keeps the password; anything else follows the normal-user rule."""
+    u = await make_user()
+    await db.users.update_one({"_id": u.id}, {"$set": {"role": "user"}})
+    _google(monkeypatch, u.email)
+    assert (await _sign_in(client)).status_code == 200
+    doc = await db.users.find_one({"_id": u.id})
+    assert (
+        doc["authProvider"] == "google" and "passwordHash" not in doc and doc["tokenVersion"] == 1
+    )

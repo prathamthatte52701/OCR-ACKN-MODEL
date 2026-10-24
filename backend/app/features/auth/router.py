@@ -286,15 +286,16 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
         # password may not be the Google owner (a stranger can sign up with someone's email), so
         # the link REPLACES the password: drop it, end every old session, close any open reset
         # request. One conditional update, so of two concurrent logins only one links.
-        linked = await db.users.update_one(
-            {
-                "_id": user["_id"],
-                "authProvider": {"$not": {"$regex": "google"}},
-                # still approved now (None = an old account without the field): the admin may
-                # have rejected it since the read above
-                "status": {"$in": [STATUS_APPROVED, None]},
-            },
-            {
+        # Admin accounts never come from public signup, so the hijack above does not apply to
+        # them - and a removed password would break reset_admin_password.py and Nuke Delete. An
+        # admin keeps the password and every session; the account just gains a Google sign-in.
+        is_admin = user.get("role") == "admin"
+        if is_admin:
+            change: dict = {
+                "$set": {"authProvider": "local+google", "googleId": google_id, "updatedAt": now}
+            }
+        else:
+            change = {
                 "$set": {
                     "authProvider": "google",
                     "googleId": google_id,
@@ -303,23 +304,33 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
                 },
                 "$unset": {"passwordHash": ""},
                 "$inc": {"tokenVersion": 1},
+            }
+        linked = await db.users.update_one(
+            {
+                "_id": user["_id"],
+                "authProvider": {"$not": {"$regex": "google"}},
+                # still approved now (None = an old account without the field): the admin may
+                # have rejected it since the read above
+                "status": {"$in": [STATUS_APPROVED, None]},
             },
+            change,
         )
         user = await db.users.find_one({"_id": user["_id"]})
         assert user is not None
         if linked.matched_count:
-            await db.passwordresetrequests.update_one(
-                {"userId": user["_id"], "status": "open"},
-                {
-                    "$set": {
-                        "status": "done",
-                        "resolution": "google_linked",
-                        "resolvedAt": now,
-                        "resolvedBy": None,
-                        "updatedAt": now,
-                    }
-                },
-            )
+            if not is_admin:  # the password is gone, so an open reset request has no purpose
+                await db.passwordresetrequests.update_one(
+                    {"userId": user["_id"], "status": "open"},
+                    {
+                        "$set": {
+                            "status": "done",
+                            "resolution": "google_linked",
+                            "resolvedAt": now,
+                            "resolvedBy": None,
+                            "updatedAt": now,
+                        }
+                    },
+                )
             await log_action(user["_id"], "google_account_linked", {"email": email})
         else:  # lost the race, or the account was rejected since the read: check again
             raise_if_not_approved(user)
