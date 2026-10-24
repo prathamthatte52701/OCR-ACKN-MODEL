@@ -300,6 +300,13 @@ async def _validated_new_email(db: AsyncIOMotorDatabase, user: dict, raw: str) -
         raise HTTPException(status_code=400, detail=err)
     if email == user["email"]:
         return None
+    # Google sign-in finds the account by email, so changing it would orphan the account and the
+    # user's next Google sign-in would create a NEW pending one.
+    if "google" in user.get("authProvider", "local"):
+        raise HTTPException(
+            status_code=400,
+            detail="This user signs in with Google, so the email cannot be changed.",
+        )
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="That email is already in use.")
     return email
