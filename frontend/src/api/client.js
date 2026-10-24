@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { toast } from 'sonner'
 import { useAuthStore } from '../store/authStore'
+import { codeFromDetail } from '../utils/noticeCodes'
 
 // Backend serializes camelCase on the wire (Phase 1 CamelModel alias_generator,
 // plus raw Mongo dicts that already store camelCase keys) - the same shape the
@@ -116,8 +117,9 @@ api.interceptors.response.use(
       detail.code.startsWith('ACCOUNT_')
     ) {
       useAuthStore.getState().clear()
+      const noticeCode = codeFromDetail(detail)
       if (!window.location.pathname.startsWith('/login')) {
-        window.location.replace(`/login?notice=${encodeURIComponent(detail.message || '')}`)
+        window.location.replace(noticeCode ? `/login?notice=${noticeCode}` : '/login')
       }
     }
 

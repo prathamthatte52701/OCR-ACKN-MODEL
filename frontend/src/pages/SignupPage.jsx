@@ -5,7 +5,7 @@ import { validateUsername, validateEmail, validatePassword } from '../utils/vali
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
 import BackButton from '../components/BackButton'
-import { statusText } from '../utils/accountStatus'
+import { codeFromDetail } from '../utils/noticeCodes'
 
 export default function SignupPage() {
   const { signup } = useAuth()
@@ -38,8 +38,9 @@ export default function SignupPage() {
   // Pending / rejected / revoked Google attempt: show the same card the login page shows.
   function handleGoogleError(err) {
     const detail = err.response?.data?.detail
-    if (err.response?.status === 403 && typeof detail?.code === 'string') {
-      navigate(`/login?notice=${encodeURIComponent(statusText(detail))}`, { replace: true })
+    const code = err.response?.status === 403 ? codeFromDetail(detail) : null
+    if (code) {
+      navigate(`/login?notice=${code}`, { replace: true })
     } else {
       setError(err.userMessage || 'Could not sign in with Google. Please try again.')
     }

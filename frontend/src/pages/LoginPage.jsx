@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import PasswordInput from '../components/PasswordInput'
 import GoogleSignInButton from '../components/GoogleSignInButton'
 import { statusText } from '../utils/accountStatus'
+import { noticeText } from '../utils/noticeCodes'
 import { safeNext } from '../utils/safeNext'
 import BackButton from '../components/BackButton'
 
@@ -17,7 +18,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   // 403 = pending/rejected account (not a typo in the password) - shown as an
   // amber notice with the server's own wording instead of a red error.
-  const [notice, setNotice] = useState(searchParams.get('notice') || '')
+  const [notice, setNotice] = useState(noticeText(searchParams.get('notice')))
   const [success, setSuccess] = useState(location.state?.success || '')
   const [submitting, setSubmitting] = useState(false)
 
