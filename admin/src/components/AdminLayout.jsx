@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import { useLayoutState } from '../hooks/useLayoutState'
 import api from '../utils/api'
 import { COUNTS_CHANGED_EVENT } from '../utils/events'
 import Sidebar from './Sidebar'
@@ -13,6 +14,7 @@ export default function AdminLayout() {
   const [drawerPath, setDrawerPath] = useState(null) // open only for the path it was opened on
   const [counts, setCounts] = useState({ pending: 0, passwordRequests: 0, orphaned: 0 })
   const [system, setSystem] = useState(null)
+  const { sidebarHidden, toggleSidebar } = useLayoutState()
   const { user, logout } = useAdminAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -68,7 +70,8 @@ export default function AdminLayout() {
 
   return (
     <div className="theme-admin min-h-screen">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[260px] border-r border-[var(--line-soft)] bg-[rgba(8,11,36,0.92)] lg:block">
+      {/* Hidden at lg+: slid off-screen and invisible, so keyboard focus cannot reach its links */}
+      <aside id="admin-sidebar" aria-hidden={sidebarHidden || undefined} className={`fixed inset-y-0 left-0 z-40 hidden w-[260px] border-r border-[var(--line-soft)] bg-[rgba(8,11,36,0.92)] lg:block lg:transition-[transform,visibility] lg:duration-200 motion-reduce:transition-none ${sidebarHidden ? 'lg:invisible lg:-translate-x-full' : ''}`}>
         <Sidebar counts={counts} system={system} />
       </aside>
 
@@ -81,8 +84,8 @@ export default function AdminLayout() {
         </div>
       )}
 
-      <div className="flex min-h-screen flex-col lg:pl-[260px]">
-        <TopBar user={user} pending={counts.pending + counts.passwordRequests} bellTo={counts.pending === 0 && counts.passwordRequests > 0 ? '/password-requests' : '/approvals'} onOpenMenu={() => setDrawerOpen(true)} drawerOpen={drawerOpen} menuButtonRef={menuButton} onLogout={handleLogout} />
+      <div className={`flex min-h-screen flex-col lg:transition-[padding] lg:duration-200 motion-reduce:transition-none ${sidebarHidden ? 'lg:pl-0' : 'lg:pl-[260px]'}`}>
+        <TopBar sidebarHidden={sidebarHidden} onToggleSidebar={toggleSidebar} user={user} pending={counts.pending + counts.passwordRequests} bellTo={counts.pending === 0 && counts.passwordRequests > 0 ? '/password-requests' : '/approvals'} onOpenMenu={() => setDrawerOpen(true)} drawerOpen={drawerOpen} menuButtonRef={menuButton} onLogout={handleLogout} />
         <main className="flex-1">
           <Outlet />
         </main>

@@ -59,13 +59,17 @@ function UserMenu({ user, onLogout }) {
   )
 }
 
-export default function TopBar({ user, pending, bellTo = '/approvals', onOpenMenu, drawerOpen, menuButtonRef, onLogout }) {
+export default function TopBar({ user, pending, bellTo = '/approvals', onOpenMenu, drawerOpen, menuButtonRef, onLogout, sidebarHidden = false, onToggleSidebar }) {
+  const sidebarLabel = sidebarHidden ? 'Show sidebar' : 'Hide sidebar'
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--line-soft)] bg-[rgba(7,10,31,0.86)]">
       {/* Same max width as the page content, so the profile lines up with the page's right edge */}
       <div className="mx-auto flex h-16 w-full max-w-[1560px] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <button ref={menuButtonRef} type="button" onClick={onOpenMenu} aria-label="Open menu" aria-expanded={drawerOpen} aria-controls="admin-drawer" className="btn btn-ghost !min-h-[40px] !px-3 shrink-0 lg:hidden">
           <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
+        <button type="button" onClick={onToggleSidebar} aria-label={sidebarLabel} title={sidebarLabel} aria-expanded={!sidebarHidden} aria-controls="admin-sidebar" className="btn btn-ghost !min-h-[40px] !px-3 hidden shrink-0 lg:inline-flex focus-visible:ring-2 focus-visible:ring-[#7c6cff]">
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path strokeLinecap="round" d="M9 4v16" /></svg>
         </button>
         <SearchBox className="min-w-0 max-w-[640px] flex-1" />
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
