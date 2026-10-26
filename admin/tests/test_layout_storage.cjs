@@ -34,7 +34,7 @@ const throwing = (which) => ({
     console.error(`FAIL: cannot load ${file}: ${e.message}`)
     process.exit(1)
   }
-  const { SIDEBAR_HIDDEN_KEY, readSidebarHidden, writeSidebarHidden, nextSidebarHidden } = mod
+  const { SIDEBAR_HIDDEN_KEY, readSidebarHidden, writeSidebarHidden, nextSidebarHidden, toggleAndPersist } = mod
 
   // key
   assert.equal(SIDEBAR_HIDDEN_KEY, EXPECTED_KEY)
@@ -124,6 +124,35 @@ const throwing = (which) => ({
   cur = nextSidebarHidden(cur)
   writeSidebarHidden(cur, SIDEBAR_HIDDEN_KEY, rs)
   assert.equal(readSidebarHidden(SIDEBAR_HIDDEN_KEY, rs), true)
+
+  // toggleAndPersist: writes synchronously, no render/effect involved
+  const tp = fake()
+  const ref = { current: false }
+  assert.equal(toggleAndPersist(ref, SIDEBAR_HIDDEN_KEY, tp), true)
+  assert.equal(ref.current, true)
+  assert.equal(tp._m.get(EXPECTED_KEY), 'true') // already persisted
+  assert.equal(readSidebarHidden(SIDEBAR_HIDDEN_KEY, tp), ref.current)
+  // two quick toggles end consistent
+  assert.equal(toggleAndPersist(ref, SIDEBAR_HIDDEN_KEY, tp), false)
+  assert.equal(readSidebarHidden(SIDEBAR_HIDDEN_KEY, tp), ref.current)
+  assert.equal(toggleAndPersist(ref, SIDEBAR_HIDDEN_KEY, tp), true)
+  assert.equal(toggleAndPersist(ref, SIDEBAR_HIDDEN_KEY, tp), false)
+  assert.equal(readSidebarHidden(SIDEBAR_HIDDEN_KEY, tp), false)
+  // throwing storage: no throw, ref still flips
+  const tref = { current: false }
+  assert.equal(toggleAndPersist(tref, SIDEBAR_HIDDEN_KEY, throwing('set')), true)
+  assert.equal(tref.current, true)
+  assert.equal(toggleAndPersist(tref, SIDEBAR_HIDDEN_KEY, throwing('set')), false)
+  assert.equal(tref.current, false)
+  // default key + global localStorage
+  globalThis.localStorage = fake()
+  try {
+    const dref = { current: false }
+    toggleAndPersist(dref)
+    assert.equal(globalThis.localStorage._m.get(EXPECTED_KEY), 'true')
+  } finally {
+    delete globalThis.localStorage
+  }
 
   console.log('OK: layoutStorage (admin app)')
 })().catch((e) => {

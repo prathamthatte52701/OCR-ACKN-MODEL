@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { nextSidebarHidden, readSidebarHidden, writeSidebarHidden } from '../utils/layoutStorage'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { readSidebarHidden, toggleAndPersist, writeSidebarHidden } from '../utils/layoutStorage'
 
-const DESKTOP_QUERY = '(min-width: 768px)'
+const DESKTOP_QUERY = '(min-width: 1024px)'
 
 function matchesDesktop() {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(DESKTOP_QUERY).matches
@@ -10,12 +10,9 @@ function matchesDesktop() {
 // A later phase adds chat panel state here.
 export function useLayoutState() {
   const [sidebarHidden, setSidebarHiddenState] = useState(() => readSidebarHidden())
+  const hiddenRef = useRef(sidebarHidden) // latest value; persisted inside the handlers, not in an effect
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [isDesktop, setIsDesktop] = useState(matchesDesktop)
-
-  useEffect(() => {
-    writeSidebarHidden(sidebarHidden)
-  }, [sidebarHidden])
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return undefined
@@ -28,8 +25,13 @@ export function useLayoutState() {
     return () => mql.removeEventListener('change', onChange)
   }, [])
 
-  const setSidebarHidden = useCallback((v) => setSidebarHiddenState(Boolean(v)), [])
-  const toggleSidebar = useCallback(() => setSidebarHiddenState(nextSidebarHidden), [])
+  const setSidebarHidden = useCallback((v) => {
+    const next = Boolean(v)
+    hiddenRef.current = next
+    writeSidebarHidden(next)
+    setSidebarHiddenState(next)
+  }, [])
+  const toggleSidebar = useCallback(() => setSidebarHiddenState(toggleAndPersist(hiddenRef)), [])
   const openDrawer = useCallback(() => setDrawerOpen(true), [])
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
   const toggleDrawer = useCallback(() => setDrawerOpen((o) => !o), [])

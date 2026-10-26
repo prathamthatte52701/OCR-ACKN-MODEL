@@ -288,7 +288,7 @@ export default function Dashboard() {
       <PageBackground variant="grid" />
 
       <main className="relative mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-10">
-        <section className="grid items-center gap-7 rounded-[28px] border border-blue-300/12 bg-slate-900/58 p-5 shadow-[0_32px_110px_rgba(2,8,23,0.48)] backdrop-blur-xl sm:p-7 lg:grid-cols-[1.02fr_0.98fr] lg:p-8">
+        <section className="grid items-center gap-7 rounded-[28px] border border-blue-300/12 bg-slate-900/58 p-5 shadow-[0_32px_110px_rgba(2,8,23,0.48)] backdrop-blur-xl sm:p-7 xl:grid-cols-[1.02fr_0.98fr] lg:p-8">
           <div className="max-w-3xl">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-blue-300/20 bg-blue-500/10 px-4 py-2 text-[12.6px] font-bold uppercase tracking-[0.18em] text-blue-200">
               <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(103,232,249,0.9)]" />
@@ -340,7 +340,7 @@ export default function Dashboard() {
           </section>
         ) : (
           <>
-            <section className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <StatCard icon="TD" label="Total Documents" value={stats.total} helper="Acknowledgements in workspace" color="blue" />
               <StatCard icon="OK" label="Processed" value={stats.processed} helper="Ready for review" color="green" />
               <StatCard icon="ER" label="Failed" value={stats.failed} helper="Needs reprocess or review" color="red" />
@@ -349,7 +349,7 @@ export default function Dashboard() {
               <StatCard icon="DC" label="Delivery Challan" value={stats.deliveryChallan} helper="Documents of this type" color="cyan" />
             </section>
 
-            <section className="mt-6 grid gap-6 lg:grid-cols-[1.12fr_0.88fr]">
+            <section className="mt-6 grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
               <div className="rounded-[28px] border border-blue-300/12 bg-slate-900/68 p-5 shadow-2xl shadow-slate-950/30 backdrop-blur-xl sm:p-6">
                 <div className="mb-5 flex items-center justify-between gap-3">
                   <div>
@@ -395,7 +395,7 @@ export default function Dashboard() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-blue-300/12 bg-slate-900/68 p-5 shadow-2xl shadow-slate-950/25 backdrop-blur-xl sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-start gap-4">
               <span className="grid h-12 w-12 place-items-center rounded-2xl border border-blue-300/15 bg-blue-500/10 text-[12.6px] font-black text-blue-200">DOC</span>
               <div>
@@ -414,7 +414,7 @@ export default function Dashboard() {
         </section>
 
         <section className="mt-6 rounded-[28px] border border-amber-300/12 bg-slate-900/68 p-5 shadow-2xl shadow-slate-950/25 backdrop-blur-xl sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-start gap-4">
               <span className="grid h-12 w-12 place-items-center rounded-2xl border border-amber-300/15 bg-amber-500/10 text-[12.6px] font-black text-amber-200">SP</span>
               <div>

@@ -35,7 +35,7 @@ function SidebarNav({ onNavigate }) {
   )
 }
 
-// Desktop (>= md): fixed rail under the top bar. Mobile: modal drawer.
+// Desktop (>= 1024px): fixed rail under the top bar. Mobile: modal drawer.
 export default function AppSidebar({ variant, onNavigate, onClose, panelRef }) {
   if (variant === 'drawer') {
     return (

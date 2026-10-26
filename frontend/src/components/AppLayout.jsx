@@ -121,7 +121,7 @@ export default function AppLayout() {
       {drawerShown && <AppSidebar variant="drawer" onNavigate={closeDrawerAndRefocus} onClose={closeDrawerAndRefocus} panelRef={panelRef} />}
 
       {/* Content column (sits right of the sidebar) */}
-      <div inert={drawerShown} className={`flex min-w-0 flex-1 flex-col transition-[padding] duration-200 motion-reduce:transition-none ${sidebarHidden ? '' : 'md:pl-[240px]'}`}>
+      <div inert={drawerShown} className={`flex min-w-0 flex-1 flex-col transition-[padding] duration-200 motion-reduce:transition-none ${sidebarHidden ? '' : 'lg:pl-[240px]'}`}>
         <main className="flex-1">
           <Outlet />
         </main>

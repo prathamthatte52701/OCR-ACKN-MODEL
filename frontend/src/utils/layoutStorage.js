@@ -32,3 +32,11 @@ export function writeSidebarHidden(hidden, key = SIDEBAR_HIDDEN_KEY, storage) {
 export function nextSidebarHidden(current) {
   return !current
 }
+
+// Flips ref.current and persists it synchronously (no effect/render needed). Returns the new value.
+export function toggleAndPersist(ref, key = SIDEBAR_HIDDEN_KEY, storage) {
+  const next = nextSidebarHidden(ref.current)
+  ref.current = next
+  writeSidebarHidden(next, key, storage)
+  return next
+}
