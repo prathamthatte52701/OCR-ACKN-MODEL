@@ -42,6 +42,9 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.settings.create_index([("userId", 1), ("key", 1)], unique=True)
     await db.corrections.create_index([("documentId", 1)])
     await db.auditlogs.create_index([("userId", 1), ("createdAt", -1)])
+    await db.chatmessages.create_index([("threadUserId", 1), ("updatedAt", 1)])
+    await db.chatmessages.create_index([("threadUserId", 1), ("createdAt", 1)])
+    await db.chatmessages.create_index([("toAdminId", 1), ("readAt", 1)])
     await db.auditlogs.create_index([("action", 1)])
     await _ensure_audit_ttl(db, settings.audit_log_retention_days)
     # unique on gridFsFileId - record_orphaned_file() upserts on this key so a

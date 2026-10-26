@@ -461,10 +461,12 @@ async def delete_user(
     await db.workbooks.delete_many({"userId": user_id})
     await db.settings.delete_many({"userId": user_id})
     await db.passwordresetrequests.delete_many({"userId": user_id})
+    await db.chatmessages.delete_many({"threadUserId": user_id})  # only this user's thread
 
     deleted_email = user["email"]
     await db.users.delete_one({"_id": user_id})
     await db.passwordresetrequests.delete_many({"userId": user_id})  # one that raced the delete
+    await db.chatmessages.delete_many({"threadUserId": user_id})  # a message sent during the delete
 
     await log_action(
         current_user.id,

@@ -30,6 +30,7 @@ DATA_COLLECTIONS = (
     "orphanedfiles",
     "settings",
     "passwordresetrequests",
+    "chatmessages",
 )
 GRIDFS_COLLECTIONS = ("fs.files", "fs.chunks")
 EXPORT_SUFFIXES = (".xlsx", ".lock")  # also covers .tmp{pid}.xlsx swap files

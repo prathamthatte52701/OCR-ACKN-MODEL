@@ -40,8 +40,10 @@ ROW_COLLECTIONS = [
     "auditlogs",
     "orphanedfiles",
     "settings",
+    "chatmessages",
 ]
 COUNTS = {
+    "chatmessages": 9,
     "documents": 3,
     "corrections": 4,
     "exportedrows": 5,

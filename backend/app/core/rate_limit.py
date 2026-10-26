@@ -23,8 +23,11 @@ def user_or_ip_key(request: Request) -> str:
     to IP for the (should-never-happen) case of a missing/invalid token,
     since the route's own auth dependency will 401 it anyway."""
     auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        payload = decode_token(auth_header[7:])
+    # the scheme is case-insensitive ("bearer <jwt>" authenticates too): key every spelling the
+    # same, or a caller could rotate "bEarer"/"BEARER" to multiply a per-account limit
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() == "bearer" and token:
+        payload = decode_token(token.strip())
         if payload and payload.get("userId"):
             return f"user:{payload['userId']}"
     return get_remote_address(request)
