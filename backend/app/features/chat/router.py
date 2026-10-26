@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from limits import RateLimitItemPerHour
 
-from app.core.audit_log import log_action
+from app.core.audit_log import safe_log_action
 from app.core.database import get_database
 from app.core.rate_limit import limiter, user_or_ip_key
 from app.core.security import verify_password
@@ -134,20 +134,26 @@ async def edit_message(
 
 @router.post("/read")
 async def mark_read(
-    body: ReadRequest | None = None, current_user: CurrentUser = Depends(get_current_user)
+    body: ReadRequest, current_user: CurrentUser = Depends(get_current_user)
 ) -> dict:
     db = get_database()
     if current_user.role != "admin":
         # a user only ever reads their own thread: naming someone else's is refused, not ignored
-        if body is not None and body.user_id not in (None, str(current_user.id)):
+        if body.user_id not in (None, str(current_user.id)):
             raise HTTPException(status_code=403, detail="You can only read your own messages.")
-        return {"marked": await service.mark_read_user(db, current_user.id)}
+
+        async def go_user() -> int:
+            up_to = service.parse_object_id(body.up_to_id, "message id")
+            return await service.mark_read_user(db, current_user.id, up_to)
+
+        return {"marked": await _run(go_user())}
 
     async def go() -> int:
-        if body is None or body.user_id is None:
+        if body.user_id is None:
             raise service.ChatError(422, "Choose a user.")
         uid = service.parse_object_id(body.user_id, "user")
-        return await service.mark_read_admin(db, current_user.id, uid)
+        up_to = service.parse_object_id(body.up_to_id, "message id")
+        return await service.mark_read_admin(db, current_user.id, uid, up_to)
 
     return {"marked": await _run(go())}
 
@@ -193,7 +199,7 @@ async def clear(body: ClearRequest, current_user: CurrentUser = Depends(require_
     n = await _run(go())
     if body.dry_run:
         return {"count": n}
-    await log_action(
+    await safe_log_action(
         current_user.id,
         "chat_cleared",
         {"scope": str(body.user_id), "range": body.older_than, "deleted": n},
@@ -211,7 +217,7 @@ async def clear_all(
     _hit(request, "chat_clear_all", CLEAR_ALL_PER_HOUR)
     user = await db.users.find_one({"_id": current_user.id}, {"passwordHash": 1})
     if not user or "passwordHash" not in user:
-        await log_action(current_user.id, "chat_clear_blocked", {"reason": "no_password"})
+        await safe_log_action(current_user.id, "chat_clear_blocked", {"reason": "no_password"})
         raise HTTPException(
             status_code=400,
             detail="This account uses Google Sign-In - there's no password to confirm with.",
@@ -221,12 +227,12 @@ async def clear_all(
         verify_password, password, user["passwordHash"]
     )
     if not ok:
-        await log_action(current_user.id, "chat_clear_blocked", {"reason": "wrong_password"})
+        await safe_log_action(current_user.id, "chat_clear_blocked", {"reason": "wrong_password"})
         raise HTTPException(status_code=400, detail="Incorrect password.")
     if body.dry_run:
         return {"count": await service.clear_all(db, current_user.id, True)}
     n = await service.clear_all(db, current_user.id, False)
-    await log_action(
+    await safe_log_action(
         current_user.id, "chat_cleared", {"scope": "all", "range": "all", "deleted": n}
     )
     return {"deleted": n}

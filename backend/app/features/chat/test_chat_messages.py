@@ -192,10 +192,12 @@ async def test_admin_reply_counts_for_user_and_read_clears(client: Any, make_use
     assert_created(await admin_send(client, a, u, "r1"))
     assert_created(await admin_send(client, a, u, "r2"))
     assert (await client.get(f"{BASE}/unread", headers=u.headers)).json() == {"count": 2}
-    r = await client.post(f"{BASE}/read", headers=u.headers)
+    last = (await thread(client, u)).json()["messages"][-1]["id"]
+    body = {"upToId": last}
+    r = await client.post(f"{BASE}/read", headers=u.headers, json=body)
     assert r.status_code == 200 and r.json() == {"marked": 2}
     assert (await client.get(f"{BASE}/unread", headers=u.headers)).json() == {"count": 0}
-    assert (await client.post(f"{BASE}/read", headers=u.headers)).json() == {"marked": 0}
+    assert (await client.post(f"{BASE}/read", headers=u.headers, json=body)).json() == {"marked": 0}
     msgs = (await thread(client, u)).json()["messages"]
     assert all(m["readAt"] for m in msgs)
 
@@ -214,12 +216,13 @@ async def test_admin_read_marks_only_messages_addressed_to_me(
     u, a, b = await make_user(), await make_user(role="admin"), await make_user(role="admin")
     await seed(db, u, "toA1", to_admin=a)
     await seed(db, u, "toA2", to_admin=a)
-    await seed(db, u, "toB", to_admin=b)
-    r = await client.post(f"{BASE}/read", headers=b.headers, json={"userId": str(u.id)})
+    last = await seed(db, u, "toB", to_admin=b)
+    body = {"userId": str(u.id), "upToId": str(last)}
+    r = await client.post(f"{BASE}/read", headers=b.headers, json=body)
     assert r.json() == {"marked": 1}
     assert (await client.get(f"{BASE}/unread", headers=a.headers)).json()["count"] == 2
     assert (await client.get(f"{BASE}/unread", headers=b.headers)).json()["count"] == 0
-    r = await client.post(f"{BASE}/read", headers=a.headers, json={"userId": str(u.id)})
+    r = await client.post(f"{BASE}/read", headers=a.headers, json=body)
     assert r.json() == {"marked": 2}
 
 
@@ -229,7 +232,7 @@ async def test_user_read_does_not_touch_user_messages_or_other_threads(
     u, v, a = await make_user(), await make_user(), await make_user(role="admin")
     mine = await seed(db, u, "from u", to_admin=a)
     theirs = await seed(db, v, "to v", sender=a, role="admin")
-    r = await client.post(f"{BASE}/read", headers=u.headers)
+    r = await client.post(f"{BASE}/read", headers=u.headers, json={"upToId": str(mine)})
     assert r.json() == {"marked": 0}
     assert (await db.chatmessages.find_one({"_id": mine}))["readAt"] is None
     assert (await db.chatmessages.find_one({"_id": theirs}))["readAt"] is None
@@ -237,7 +240,8 @@ async def test_user_read_does_not_touch_user_messages_or_other_threads(
 
 async def test_admin_read_requires_valid_user_id(client: Any, make_user: Any) -> None:
     a = await make_user(role="admin")
-    for body in (None, {}, {"userId": "bad"}, {"userId": {"$ne": ""}}):
+    up = str(ObjectId())
+    for body in (None, {}, {"userId": "bad", "upToId": up}, {"userId": {"$ne": ""}, "upToId": up}):
         r = await client.post(f"{BASE}/read", headers=a.headers, json=body)
         assert r.status_code == 422, body
 

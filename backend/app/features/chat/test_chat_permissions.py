@@ -203,6 +203,8 @@ async def test_user_cannot_edit_or_read_others_via_wrong_role_routes(
     """Admin-only POST /read body (userId) is not usable by a user to touch another thread."""
     a, b, adm = await make_user(), await make_user(), await make_user(role="admin")
     mid = await seed(db, b, "to b", sender=adm, role="admin")
-    r = await client.post(f"{BASE}/read", headers=a.headers, json={"userId": str(b.id)})
-    assert r.status_code in (403, 422)
+    r = await client.post(
+        f"{BASE}/read", headers=a.headers, json={"userId": str(b.id), "upToId": str(mid)}
+    )
+    assert r.status_code == 403
     assert (await db.chatmessages.find_one({"_id": mid}))["readAt"] is None

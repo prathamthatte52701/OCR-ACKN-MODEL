@@ -306,13 +306,30 @@ async def _mark(db: Any, query: dict) -> int:
     return res.modified_count
 
 
-async def mark_read_user(db: Any, user_id: ObjectId) -> int:
-    return await _mark(db, {"threadUserId": user_id, "fromRole": "admin"})
+async def _up_to(db: Any, thread_user_id: ObjectId, up_to_id: ObjectId) -> dict:
+    """Query for messages at or before `up_to_id` in the thread, by the (createdAt, _id) order
+    the `before` cursor uses."""
+    ref = await db.chatmessages.find_one({"_id": up_to_id, "threadUserId": thread_user_id})
+    if ref is None:
+        raise ChatError(404, "Message not found.")
+    return {
+        "threadUserId": thread_user_id,
+        "$or": [
+            {"createdAt": {"$lt": ref["createdAt"]}},
+            {"createdAt": ref["createdAt"], "_id": {"$lte": up_to_id}},
+        ],
+    }
 
 
-async def mark_read_admin(db: Any, admin_id: ObjectId, thread_user_id: ObjectId) -> int:
+async def mark_read_user(db: Any, user_id: ObjectId, up_to_id: ObjectId) -> int:
+    return await _mark(db, {**await _up_to(db, user_id, up_to_id), "fromRole": "admin"})
+
+
+async def mark_read_admin(
+    db: Any, admin_id: ObjectId, thread_user_id: ObjectId, up_to_id: ObjectId
+) -> int:
     await _thread_user(db, thread_user_id)
-    return await _mark(db, {"threadUserId": thread_user_id, "toAdminId": admin_id})
+    return await _mark(db, {**await _up_to(db, thread_user_id, up_to_id), "toAdminId": admin_id})
 
 
 async def unread_user(db: Any, user_id: ObjectId) -> dict:

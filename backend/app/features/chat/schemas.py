@@ -30,6 +30,7 @@ class EditMessageRequest(_Strict):
 
 class ReadRequest(_Strict):
     user_id: Any = None
+    up_to_id: Any  # required: newer messages the screen never fetched stay unread
 
 
 class ColorRequest(_Strict):

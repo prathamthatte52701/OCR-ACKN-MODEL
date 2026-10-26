@@ -104,10 +104,11 @@ async def test_unread_read_two_admins(db: Any, make_user: Any) -> None:
     assert (await service.unread_admin(db, a1.id))["count"] == 1
     assert (await service.unread_admin(db, a2.id))["byUser"] == [{"userId": str(u.id), "count": 1}]
     assert await service.unread_user(db, u.id) == {"count": 1}
-    assert await service.mark_read_admin(db, a1.id, u.id) == 1
-    assert await service.mark_read_admin(db, a1.id, u.id) == 0  # idempotent
+    newest = (await db.chatmessages.find_one({}, sort=[("createdAt", -1), ("_id", -1)]))["_id"]
+    assert await service.mark_read_admin(db, a1.id, u.id, newest) == 1
+    assert await service.mark_read_admin(db, a1.id, u.id, newest) == 0  # idempotent
     assert (await service.unread_admin(db, a2.id))["count"] == 1  # other admin untouched
-    assert await service.mark_read_user(db, u.id) == 1
+    assert await service.mark_read_user(db, u.id, newest) == 1
     assert await service.unread_user(db, u.id) == {"count": 0}
     threads = await service.list_threads(db, a2.id)
     assert [t["userId"] for t in threads] == [str(u.id)] and threads[0]["unreadCount"] == 1
@@ -223,7 +224,10 @@ async def test_http_flow(client: Any, make_user: Any, db: Any) -> None:
     assert (await client.get("/api/chat/messages?limit=0", headers=u.headers)).status_code == 422
     assert (await client.get("/api/chat/messages?limit=999", headers=u.headers)).status_code == 200
     assert (await client.get("/api/chat/messages?since=zzz", headers=u.headers)).status_code == 422
-    read = await client.post("/api/chat/read", headers=a.headers, json={"userId": str(u.id)})
+    last = (await db.chatmessages.find_one({}, sort=[("createdAt", -1), ("_id", -1)]))["_id"]
+    read = await client.post(
+        "/api/chat/read", headers=a.headers, json={"userId": str(u.id), "upToId": str(last)}
+    )
     assert read.json() == {"marked": 1}
     put = await client.put("/api/chat/settings/color", headers=u.headers, json={"color": "rose"})
     assert put.json() == {"chatColor": "rose"}
