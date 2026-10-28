@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { useLayoutState } from '../hooks/useLayoutState'
 import api from '../utils/api'
-import { COUNTS_CHANGED_EVENT, ADMIN_TICK_EVENT, dispatchAdminTick } from '../utils/events'
+import { COUNTS_CHANGED_EVENT } from '../utils/events'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 
@@ -94,5 +94,3 @@ export default function AdminLayout() {
     </div>
   )
 }
-
-

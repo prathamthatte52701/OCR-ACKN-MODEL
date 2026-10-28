@@ -2,6 +2,3 @@
 // dispatches this so the sidebar badges and the top-bar bell refresh at once.
 export const COUNTS_CHANGED_EVENT = 'admin:counts-changed'
 export const notifyCountsChanged = () => window.dispatchEvent(new Event(COUNTS_CHANGED_EVENT))
-
-export const ADMIN_TICK_EVENT = 'admin:tick'
-export const dispatchAdminTick = () => window.dispatchEvent(new Event(ADMIN_TICK_EVENT))
