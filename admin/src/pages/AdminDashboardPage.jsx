@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import useAutoRefresh from '../hooks/useAutoRefresh'
+import { computeNextPageAfterShrink } from '../utils/autoRefreshCore'
 import { Link } from 'react-router-dom'
 import api from '../utils/api'
 import { useAdminAuth } from '../context/AdminAuthContext'
@@ -239,11 +241,32 @@ export default function AdminDashboardPage() {
   const [busyId, setBusyId] = useState(null)
   const approving = useRef(new Set()) // synchronous guard: a double click is ignored, not re-sent
 
-  const load = useCallback(() => {
+  const load = useCallback((opts = {}) => {
+    const quiet = opts.quiet
     return api.get('/admin/telemetry')
-      .then((res) => { setData(res.data); setLoadError('') })
-      .catch((err) => setLoadError(err.userMessage || 'Could not load the dashboard.'))
-      .finally(() => setLoading(false))
+      .then((res) => {
+        if (quiet) {
+          setData((prev) => {
+            if (!prev) return res.data
+            // shallow compare key fields to avoid flicker
+            if (JSON.stringify(prev.pendingUsers) === JSON.stringify(res.data.pendingUsers) &&
+                prev.totalUsers === res.data.totalUsers &&
+                JSON.stringify(prev.activityFeed?.[0]) === JSON.stringify(res.data.activityFeed?.[0])) {
+              return prev
+            }
+            return res.data
+          })
+        } else {
+          setData(res.data)
+        }
+        setLoadError('')
+      })
+      .catch((err) => {
+        if (!quiet) setLoadError(err.userMessage || 'Could not load the dashboard.')
+      })
+      .finally(() => {
+        if (!quiet) setLoading(false)
+      })
   }, [])
 
   const retry = () => { setLoading(true); load() }
@@ -252,7 +275,14 @@ export default function AdminDashboardPage() {
     load()
   }, [load])
 
-  async function approve(u) {
+  const { bumpLocalChange } = useAutoRefresh({
+    load,
+    getBusy: () => Boolean(busyId),
+    getModalOpen: () => false,
+    dashboard: true,
+  })
+
+  async function approve(u) { bumpLocalChange();
     if (approving.current.has(u.id)) return
     approving.current.add(u.id)
     setBusyId(u.id)

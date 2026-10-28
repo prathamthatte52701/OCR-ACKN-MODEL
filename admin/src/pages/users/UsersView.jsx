@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import useAutoRefresh from '../../hooks/useAutoRefresh'
+import { computeNextPageAfterShrink } from '../../utils/autoRefreshCore'
 import { AnimatePresence } from 'framer-motion'
 import api from '../../utils/api'
 import PaginationControls from '../../components/PaginationControls'
@@ -104,10 +106,13 @@ export default function UsersView({ mode = 'users' }) {
   const page = pageState.key === filterKey ? pageState.page : 1
   const setPage = (p) => setPageState({ key: filterKey, page: p })
 
-  const load = useCallback(async (pageToLoad = page) => {
+  const load = useCallback(async (pageToLoad = page, opts = {}) => {
+    const quiet = opts.quiet
     const requestId = ++latestRequest.current
-    setLoading(true)
-    setLoadError('')
+    if (!quiet) {
+      setLoading(true)
+      setLoadError('')
+    }
     try {
       const params = { page: pageToLoad, limit: PAGE_SIZE }
       if (status) params.status = status
@@ -115,22 +120,51 @@ export default function UsersView({ mode = 'users' }) {
       if (role) params.role = role
       const res = await api.get('/admin/users', { params })
       if (requestId !== latestRequest.current) return
-      setUsers(res.data.users || [])
+      const nextUsers = res.data.users || []
+      if (quiet) {
+        setUsers((prev) => {
+          if (prev.length === nextUsers.length) {
+            let same = true
+            for (let i = 0; i < prev.length; i++) {
+              const p2 = prev[i]
+              const n = nextUsers[i]
+              if (p2.id !== n.id || p2.updatedAt !== n.updatedAt || p2.status !== n.status || p2.role !== n.role) {
+                same = false
+                break
+              }
+            }
+            if (same) return prev
+          }
+          return nextUsers
+        })
+      } else {
+        setUsers(nextUsers)
+      }
       setPendingCount(res.data.pendingCount || 0)
       setRequestCount(res.data.passwordRequestCount || 0)
       if (res.data.statusCounts) setCounts(res.data.statusCounts)
-      setTotalPages(res.data.totalPages || 1)
+      const tp = res.data.totalPages || 1
+      setTotalPages(tp)
       setTotalUsers(res.data.totalUsers || 0)
+      if (quiet && pageToLoad > tp && tp >= 1) {
+        setPage(computeNextPageAfterShrink(pageToLoad, tp))
+      }
     } catch (err) {
       if (requestId !== latestRequest.current) return
-      setLoadError(err.userMessage || 'Could not load users.')
+      if (!quiet) setLoadError(err.userMessage || 'Could not load users.')
     } finally {
-      if (requestId === latestRequest.current) setLoading(false)
+      if (requestId === latestRequest.current && !quiet) setLoading(false)
     }
-  }, [page, status, urlQ, role])
+  }, [page, status, urlQ, role, setPage])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
+
+  const { bumpLocalChange } = useAutoRefresh({
+    load: (opts) => load(page, opts),
+    getBusy: () => Boolean(busyId) || Boolean(editingUser) || Boolean(deletingUser) || Boolean(rejectingUser),
+    getModalOpen: () => Boolean(editingUser) || Boolean(deletingUser) || Boolean(rejectingUser),
+  })
 
   // Selected user: the list row is the source of truth; GET /admin/users/{id} adds
   // documentCount + lastActiveAt and is fetched only once a row is selected.

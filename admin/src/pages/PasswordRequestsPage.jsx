@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import useAutoRefresh from '../hooks/useAutoRefresh'
+import { computeNextPageAfterShrink } from '../utils/autoRefreshCore'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
 import Banner from '../components/Banner'
@@ -48,6 +50,7 @@ function TempPasswordModal({ request, onClose, onDone }) {
     setBusy(true)
     setError('')
     try {
+      bumpLocalChange()
       await api.post(`/admin/password-requests/${request.id}/temp-password`, { password })
       setPassword('')
       onDone(`Temporary password set for ${request.username}. Give it to them in person or by phone.`)
@@ -109,25 +112,53 @@ export default function PasswordRequestsPage() {
   const [busy, setBusy] = useState(false)
 
   const latestRequest = useRef(0)
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts = {}) => {
+    const quiet = opts.quiet
     const requestId = ++latestRequest.current
-    setLoading(true)
-    setLoadError('')
+    if (!quiet) {
+      setLoading(true)
+      setLoadError('')
+    }
     try {
       const res = await api.get('/admin/password-requests', { params: { status: showAll ? 'all' : 'open' } })
       if (requestId !== latestRequest.current) return
-      setRequests(res.data.requests || [])
+      const nextReq = res.data.requests || []
+      if (quiet) {
+        setRequests((prev) => {
+          if (prev.length === nextReq.length) {
+            let same = true
+            for (let i = 0; i < prev.length; i++) {
+              const p2 = prev[i]
+              const n = nextReq[i]
+              if (p2.id !== n.id || p2.status !== n.status) {
+                same = false
+                break
+              }
+            }
+            if (same) return prev
+          }
+          return nextReq
+        })
+      } else {
+        setRequests(nextReq)
+      }
       setOpenCount(res.data.openCount || 0)
     } catch (err) {
       if (requestId !== latestRequest.current) return
-      setLoadError(err.userMessage || 'Could not load password requests.')
+      if (!quiet) setLoadError(err.userMessage || 'Could not load password requests.')
     } finally {
-      if (requestId === latestRequest.current) setLoading(false)
+      if (requestId === latestRequest.current && !quiet) setLoading(false)
     }
   }, [showAll])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
   useEffect(() => { load() }, [load])
+
+  const { bumpLocalChange } = useAutoRefresh({
+    load,
+    getBusy: () => busy || Boolean(setting) || Boolean(dismissing),
+    getModalOpen: () => Boolean(setting) || Boolean(dismissing),
+  })
   useEffect(() => {
     api.get('/admin/users', { params: { limit: 1, status: 'pending' } })
       .then((res) => setPendingCount(res.data.pendingCount || 0))
