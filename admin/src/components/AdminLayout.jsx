@@ -3,13 +3,17 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAdminAuth } from '../context/AdminAuthContext'
 import { useLayoutState } from '../hooks/useLayoutState'
 import api from '../utils/api'
-import { COUNTS_CHANGED_EVENT } from '../utils/events'
+import { allowFocusBeat, createState } from '../utils/autoRefreshCore'
+import { COUNTS_CHANGED_EVENT, notifyAdminTick } from '../utils/events'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 
+const HEARTBEAT_MS = 15000
+
 // The shell of every admin page: fixed sidebar (a drawer below 1024px), top bar, page content.
 // Counts (pending approvals, orphaned files) and the system status are REAL: they come from the
-// API and refresh every 30-60 s or at once when a page announces a change.
+// API and refresh on the shell heartbeat (15 s, only while the tab is visible), the system status
+// every 60 s, or at once when a page announces a change. The heartbeat also tells pages to refresh.
 export default function AdminLayout() {
   const [drawerPath, setDrawerPath] = useState(null) // open only for the path it was opened on
   const [counts, setCounts] = useState({ pending: 0, passwordRequests: 0, orphaned: 0 })
@@ -44,12 +48,24 @@ export default function AdminLayout() {
   }, [])
 
   useEffect(() => {
+    const visible = () => document.visibilityState === 'visible'
+    const beat = () => { loadCounts(); notifyAdminTick() }
+    const focusGate = createState()
+    const wake = () => { if (visible() && allowFocusBeat(focusGate, Date.now())) beat() }
     loadCounts()
     loadSystem()
-    const t1 = setInterval(loadCounts, 30000)
-    const t2 = setInterval(loadSystem, 60000)
+    const t1 = setInterval(() => { if (visible()) beat() }, HEARTBEAT_MS)
+    const t2 = setInterval(() => { if (visible()) loadSystem() }, 60000)
     window.addEventListener(COUNTS_CHANGED_EVENT, loadCounts)
-    return () => { clearInterval(t1); clearInterval(t2); window.removeEventListener(COUNTS_CHANGED_EVENT, loadCounts) }
+    window.addEventListener('focus', wake)
+    document.addEventListener('visibilitychange', wake)
+    return () => {
+      clearInterval(t1)
+      clearInterval(t2)
+      window.removeEventListener(COUNTS_CHANGED_EVENT, loadCounts)
+      window.removeEventListener('focus', wake)
+      document.removeEventListener('visibilitychange', wake)
+    }
   }, [loadCounts, loadSystem])
 
   useEffect(() => {

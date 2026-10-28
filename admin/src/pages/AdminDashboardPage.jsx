@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../utils/api'
 import { useAdminAuth } from '../context/AdminAuthContext'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { notifyCountsChanged } from '../utils/events'
 import { describeActivity, relativeTime } from '../utils/activity'
 import { PALETTE } from '../utils/palette'
@@ -239,12 +240,20 @@ export default function AdminDashboardPage() {
   const [busyId, setBusyId] = useState(null)
   const approving = useRef(new Set()) // synchronous guard: a double click is ignored, not re-sent
 
+  const { markChanged, noteLoad } = useAutoRefresh({
+    fetchData: () => api.get('/admin/telemetry').then((res) => res.data),
+    applyData: (d) => { setData(d); setLoadError('') },
+    busy: loading || busyId !== null,
+    minIntervalMs: 55000, // beats are 15 s apart: 55 s keeps the period at 60 s despite timer drift
+  })
+
   const load = useCallback(() => {
+    noteLoad()
     return api.get('/admin/telemetry')
       .then((res) => { setData(res.data); setLoadError('') })
       .catch((err) => setLoadError(err.userMessage || 'Could not load the dashboard.'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [noteLoad])
 
   const retry = () => { setLoading(true); load() }
 
@@ -255,6 +264,7 @@ export default function AdminDashboardPage() {
   async function approve(u) {
     if (approving.current.has(u.id)) return
     approving.current.add(u.id)
+    markChanged()
     setBusyId(u.id)
     setNotice({ error: '', success: '' })
     try {

@@ -6,6 +6,8 @@ import BackButton from '../components/BackButton'
 import ConfirmModal from '../components/ConfirmModal'
 import Modal from '../components/Modal'
 import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader, Skeleton } from '../components/ui'
+import { useAutoRefresh } from '../hooks/useAutoRefresh'
+import { sameRows } from '../utils/autoRefreshCore'
 import { formatIST } from '../utils/formatDate'
 import { notifyCountsChanged } from '../utils/events'
 import UsersTabs from './users/UsersTabs'
@@ -34,8 +36,10 @@ function generatePassword() {
   return chars.join('')
 }
 
+const REQUEST_KEYS = ['status', 'updatedAt', 'note', 'resolution']
+
 // The temporary password lives ONLY in this component's state, which unmounts with the dialog.
-function TempPasswordModal({ request, onClose, onDone }) {
+function TempPasswordModal({ request, onClose, onDone, onWrite }) {
   const [password, setPassword] = useState('')
   const [shown, setShown] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -45,6 +49,7 @@ function TempPasswordModal({ request, onClose, onDone }) {
   async function submit(e) {
     e.preventDefault()
     if (busy || !password) return
+    onWrite()
     setBusy(true)
     setError('')
     try {
@@ -108,9 +113,28 @@ export default function PasswordRequestsPage() {
   const [dismissing, setDismissing] = useState(null)
   const [busy, setBusy] = useState(false)
 
+  const { markChanged, noteLoad } = useAutoRefresh({
+    fetchData: async () => {
+      const [reqs, users] = await Promise.all([
+        api.get('/admin/password-requests', { params: { status: showAll ? 'all' : 'open' } }),
+        api.get('/admin/users', { params: { limit: 1, status: 'pending' } }),
+      ])
+      return { requests: reqs.data.requests || [], openCount: reqs.data.openCount || 0, pendingCount: users.data.pendingCount || 0 }
+    },
+    applyData: (d) => {
+      setRequests((prev) => (sameRows(prev, d.requests, REQUEST_KEYS) ? prev : d.requests))
+      setOpenCount(d.openCount)
+      setPendingCount(d.pendingCount)
+      setLoadError('')
+    },
+    busy: loading || busy,
+    modalOpen: Boolean(setting || dismissing),
+  })
+
   const latestRequest = useRef(0)
   const load = useCallback(async () => {
     const requestId = ++latestRequest.current
+    noteLoad()
     setLoading(true)
     setLoadError('')
     try {
@@ -124,7 +148,7 @@ export default function PasswordRequestsPage() {
     } finally {
       if (requestId === latestRequest.current) setLoading(false)
     }
-  }, [showAll])
+  }, [showAll, noteLoad])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
   useEffect(() => { load() }, [load])
@@ -145,6 +169,7 @@ export default function PasswordRequestsPage() {
 
   async function dismiss() {
     const r = dismissing
+    markChanged()
     setBusy(true)
     try {
       await api.post(`/admin/password-requests/${r.id}/dismiss`)
@@ -221,7 +246,7 @@ export default function PasswordRequestsPage() {
       </Card>
 
       <AnimatePresence>
-        {setting && <TempPasswordModal key={setting.id} request={setting} onClose={() => setSetting(null)} onDone={afterChange} />}
+        {setting && <TempPasswordModal key={setting.id} request={setting} onClose={() => setSetting(null)} onDone={afterChange} onWrite={markChanged} />}
         {dismissing && (
           <ConfirmModal
             key={`d-${dismissing.id}`}

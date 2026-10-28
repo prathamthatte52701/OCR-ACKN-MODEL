@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import api from '../../utils/api'
+import { clampPage, sameRows } from '../../utils/autoRefreshCore'
+import { useAutoRefresh } from '../../hooks/useAutoRefresh'
 import PaginationControls from '../../components/PaginationControls'
 import Banner from '../../components/Banner'
 import ConfirmModal from '../../components/ConfirmModal'
@@ -27,6 +29,7 @@ const CHIPS = [
   { key: 'pending', label: 'Pending' },
   { key: 'rejected', label: 'Rejected' },
 ]
+const ROW_KEYS = ['status', 'role', 'username', 'email', 'updatedAt', 'decidedAt', 'documentCount']
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
 const icon = (d) => (
@@ -102,32 +105,52 @@ export default function UsersView({ mode = 'users' }) {
   const filterKey = `${status}|${urlQ}|${role}`
   const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
-  const setPage = (p) => setPageState({ key: filterKey, page: p })
+  const setPage = useCallback((p) => setPageState({ key: filterKey, page: p }), [filterKey])
+
+  const listParams = useCallback((pageToLoad) => {
+    const params = { page: pageToLoad, limit: PAGE_SIZE }
+    if (status) params.status = status
+    if (urlQ) params.q = urlQ
+    if (role) params.role = role
+    return params
+  }, [status, urlQ, role])
+
+  const applyList = useCallback((data) => {
+    setUsers((prev) => (sameRows(prev, data.users || [], ROW_KEYS) ? prev : data.users || []))
+    setPendingCount(data.pendingCount || 0)
+    setRequestCount(data.passwordRequestCount || 0)
+    if (data.statusCounts) setCounts(data.statusCounts)
+    setTotalPages(data.totalPages || 1)
+    setTotalUsers(data.totalUsers || 0)
+  }, [])
+
+  // Quiet refresh on the shell heartbeat: keeps page, filters, search, selection and open menus.
+  const { markChanged, noteLoad } = useAutoRefresh({
+    fetchData: async () => (await api.get('/admin/users', { params: listParams(page) })).data,
+    applyData: (data) => {
+      if (page > (data.totalPages || 1)) setPage(clampPage(page, data.totalPages || 1))
+      else applyList(data)
+    },
+    busy: loading || Boolean(busyId),
+    modalOpen: Boolean(editingUser || deletingUser || rejectingUser),
+  })
 
   const load = useCallback(async (pageToLoad = page) => {
     const requestId = ++latestRequest.current
+    noteLoad()
     setLoading(true)
     setLoadError('')
     try {
-      const params = { page: pageToLoad, limit: PAGE_SIZE }
-      if (status) params.status = status
-      if (urlQ) params.q = urlQ
-      if (role) params.role = role
-      const res = await api.get('/admin/users', { params })
+      const res = await api.get('/admin/users', { params: listParams(pageToLoad) })
       if (requestId !== latestRequest.current) return
-      setUsers(res.data.users || [])
-      setPendingCount(res.data.pendingCount || 0)
-      setRequestCount(res.data.passwordRequestCount || 0)
-      if (res.data.statusCounts) setCounts(res.data.statusCounts)
-      setTotalPages(res.data.totalPages || 1)
-      setTotalUsers(res.data.totalUsers || 0)
+      applyList(res.data)
     } catch (err) {
       if (requestId !== latestRequest.current) return
       setLoadError(err.userMessage || 'Could not load users.')
     } finally {
       if (requestId === latestRequest.current) setLoading(false)
     }
-  }, [page, status, urlQ, role])
+  }, [page, listParams, applyList, noteLoad])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, [load])
@@ -151,6 +174,7 @@ export default function UsersView({ mode = 'users' }) {
   async function toggleRole(user) {
     if (busyId) return
     const nextRole = user.role === 'admin' ? 'user' : 'admin'
+    markChanged()
     setBusyId(user.id)
     setError('')
     setSuccess('')
@@ -167,6 +191,7 @@ export default function UsersView({ mode = 'users' }) {
 
   async function setStatus(user, action, reason = null) {
     if (busyId) return // double-click safe
+    markChanged()
     setBusyId(user.id)
     setError('')
     setSuccess('')
@@ -186,6 +211,7 @@ export default function UsersView({ mode = 'users' }) {
 
   async function deleteUser(user) {
     if (busyId) return
+    markChanged()
     setBusyId(user.id)
     setError('')
     setSuccess('')
@@ -401,6 +427,7 @@ export default function UsersView({ mode = 'users' }) {
           <EditUserModal
             user={editingUser}
             onClose={() => setEditingUser(null)}
+            onWrite={markChanged}
             onSaved={(updated, message) => {
               mergeUser(updated)
               setEditingUser(null)

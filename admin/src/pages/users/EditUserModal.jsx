@@ -4,7 +4,7 @@ import { validateUsername, validateEmail } from '../../utils/validators'
 import Banner from '../../components/Banner'
 import Modal from '../../components/Modal'
 
-export default function EditUserModal({ user, onClose, onSaved }) {
+export default function EditUserModal({ user, onClose, onSaved, onWrite }) {
   const [username, setUsername] = useState(user.username)
   const [email, setEmail] = useState(user.email)
   const googleUser = (user.authProvider || '').includes('google')
@@ -18,6 +18,7 @@ export default function EditUserModal({ user, onClose, onSaved }) {
     if (err) { setError(err); return }
 
     setSubmitting(true)
+    onWrite()
     try {
       // A Google user's email is read-only, so it is left out of the request.
       const payload = googleUser ? { username } : { username, email: email.trim().toLowerCase() }
