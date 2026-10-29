@@ -45,7 +45,6 @@ All screenshots use made-up demo accounts and sample documents. No real data is 
 - [Operations](#operations)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
-- [Known limitations](#known-limitations)
 
 ---
 
@@ -393,14 +392,3 @@ The frontend and admin apps have small plain Node scripts in `frontend/tests/` a
 | "The AI answer was cut off" | Press **Reprocess**. If it repeats, raise `GROQ_MAX_TOKENS` (up to 4000) in `backend/.env` and restart. |
 | A save says the workbook is busy | Close the workbook in Excel and save again. |
 | A page looks old after an update | Run `setup.bat` again so both apps are rebuilt. |
-
-## Known limitations
-
-- **Windows, one PC.** The batch scripts and the setup are written for a single Windows PC. There is no hosted or multi-server deployment.
-- **Needs the internet.** MongoDB Atlas holds the data and Groq reads the header text. With either one unreachable, uploads or reading stop. The first document after a restart is slow while the reading model loads.
-- **One document at a time.** Reading is deliberately sequential, so bulk uploads are slow.
-- **Header only.** Only the top part of the page is read. A number or date placed elsewhere on the page is not found.
-- **No password email.** Password resets are handled by an admin in person or by phone.
-- **A crash in the OCR engine's native code** cannot be caught inside the app. If it happens, restart with `stop.bat` then `start.bat`; documents that were in progress are queued again.
-- **Excel rows have no ID.** To find an earlier row, the app matches on type, number and date, so two identical documents can be confused when one is re-saved.
-- **No test runner for the browser apps** beyond the plain scripts, and no automated pipeline: tests and checks are run by hand.
