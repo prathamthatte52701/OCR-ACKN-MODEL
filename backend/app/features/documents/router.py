@@ -623,6 +623,12 @@ async def documents_summary(current_user: CurrentUser = Depends(get_current_user
                 "processed": count(processed),
                 "failed": count({"$eq": ["$uploadStatus", "failed"]}),
                 "today": count(today),
+                "todayTaxInvoice": count(
+                    {"$and": [today, {"$eq": ["$documentType", "Tax Invoice"]}]}
+                ),
+                "todayChallan": count(
+                    {"$and": [today, {"$eq": ["$documentType", "Delivery Challan"]}]}
+                ),
                 "taxInvoice": count({"$eq": ["$documentType", "Tax Invoice"]}),
                 "challan": count({"$eq": ["$documentType", "Delivery Challan"]}),
                 "recent": [{"$sort": {"createdAt": -1, "_id": -1}}, {"$limit": 3}],
@@ -640,6 +646,10 @@ async def documents_summary(current_user: CurrentUser = Depends(get_current_user
         "processed": n("processed"),
         "failed": n("failed"),
         "processedToday": n("today"),
+        "processedTodayByType": {
+            "Tax Invoice": n("todayTaxInvoice"),
+            "Delivery Challan": n("todayChallan"),
+        },
         "byDocumentType": {"Tax Invoice": n("taxInvoice"), "Delivery Challan": n("challan")},
         "recent": [_serialize_document(d) for d in facet.get("recent", [])],
     }

@@ -6,7 +6,15 @@ from typing import Any
 
 from app.core.timezones import ist_midnight_utc, now_ist
 
-KEYS = {"total", "processed", "failed", "processedToday", "byDocumentType", "recent"}
+KEYS = {
+    "total",
+    "processed",
+    "failed",
+    "processedToday",
+    "processedTodayByType",
+    "byDocumentType",
+    "recent",
+}
 DAY = timedelta(days=1)
 
 
@@ -81,6 +89,7 @@ async def test_empty_user(client: Any, make_user: Any) -> None:
         "processed": 0,
         "failed": 0,
         "processedToday": 0,
+        "processedTodayByType": {"Tax Invoice": 0, "Delivery Challan": 0},
         "byDocumentType": {"Tax Invoice": 0, "Delivery Challan": 0},
         "recent": [],
     }
@@ -168,6 +177,34 @@ async def test_processed_today_boundaries(client: Any, db: Any, make_user: Any) 
     got = await _get(client, u)
     assert got["processedToday"] == sum(ok for _, ok in cases) == 5
     assert got["processedToday"] == _expected([c[0] for c in cases])["processedToday"]
+
+
+async def test_processed_today_by_type(client: Any, db: Any, make_user: Any) -> None:
+    a, b = await make_user(), await make_user()
+    start, end = _bounds()
+    mid = start + timedelta(hours=12)
+    tax, challan = "Tax Invoice", "Delivery Challan"
+    await db.documents.insert_many(
+        [
+            _doc(a, 1, documentType=tax, processedAt=mid),
+            _doc(a, 2, documentType=tax, processedAt=start),
+            _doc(a, 3, documentType=challan, processedAt=mid),
+            _doc(a, 4, documentType=tax, processedAt=start - timedelta(minutes=1)),  # 23:59 IST
+            _doc(a, 5, documentType=challan, processedAt=end),  # 00:00 IST tomorrow
+            _doc(a, 6, documentType=tax, uploadStatus="failed", processedAt=mid),
+            _doc(a, 7, documentType=challan, isDeleted=True, processedAt=mid),
+            _doc(a, 8, documentType="Weird Type", processedAt=mid),
+            _doc(a, 9, documentType="UNSET", processedAt=mid),
+            _doc(b, 10, documentType=tax, processedAt=mid),
+            _doc(b, 11, documentType=challan, processedAt=mid),
+        ]
+    )
+    got = await _get(client, a)
+    assert got["processedTodayByType"] == {tax: 2, challan: 1}
+    assert got["processedToday"] == 5  # the other-type and typeless docs count here only
+    assert got["byDocumentType"] == {tax: 4, challan: 2}
+    other = await _get(client, b)
+    assert other["processedTodayByType"] == {tax: 1, challan: 1}
 
 
 async def test_isolation(client: Any, db: Any, make_user: Any) -> None:
