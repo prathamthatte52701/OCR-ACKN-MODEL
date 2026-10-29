@@ -1,7 +1,8 @@
 export const SIDEBAR_HIDDEN_KEY = 'ackn.user.sidebarHidden'
 export const CHAT_OPEN_KEY = 'ackn.user.chatOpen'
 
-export const chatAdminKey = (userId) => `ackn.user.chatAdmin.${userId}`
+const CHAT_ADMIN_PREFIX = 'ackn.user.chatAdmin.'
+export const chatAdminKey = (userId) => `${CHAT_ADMIN_PREFIX}${userId}`
 
 // localStorage can throw on access itself (blocked cookies, private mode), so resolve it lazily.
 function resolve(storage) {
@@ -51,4 +52,22 @@ export function toggleAndPersist(ref, key = SIDEBAR_HIDDEN_KEY, storage) {
   ref.current = next
   writeSidebarHidden(next, key, storage)
   return next
+}
+
+// Logout (every path): the next person on this browser starts with no chat panel state and no
+// remembered admin choice from the previous user.
+export function removeChatKeys(storage) {
+  try {
+    const s = resolve(storage)
+    if (!s) return 0
+    const stale = []
+    for (let i = 0; i < s.length; i += 1) {
+      const key = s.key(i)
+      if (key === CHAT_OPEN_KEY || key?.startsWith(CHAT_ADMIN_PREFIX)) stale.push(key)
+    }
+    stale.forEach((key) => s.removeItem(key))
+    return stale.length
+  } catch {
+    return 0
+  }
 }

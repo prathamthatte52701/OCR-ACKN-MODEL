@@ -7,8 +7,8 @@ import {
 import { listDocumentsSummary } from '../api/documents'
 import { chatAdminKey, readStored, writeStored } from '../utils/layoutStorage'
 import {
-  buildSummaryText, clampText, editErrorText, incomingUnreadIds, mergeMessages, newestId, sendErrorText,
-  threadFromPage, threadWasCleared,
+  buildSummaryText, clampText, editErrorText, incomingUnreadIds, mergeMessages, newestId, nextEditExpiry,
+  sendErrorText, threadFromPage, threadWasCleared,
 } from '../utils/chatCore'
 import { colorById } from '../utils/chatColors'
 import { documentKeys } from './useDocumentsQueries'
@@ -86,21 +86,21 @@ function useThread(userId, enabled) {
   })
 }
 
-// Re-renders exactly when the next own message's edit window closes (no interval).
-function useEditClock(messages, offset, enabled) {
+// Re-renders exactly when the next own message's edit window closes (a timeout, no interval).
+// `now` is also refreshed when the panel opens and whenever a poll lands (polledAt changes), so a
+// message whose 15 minutes passed while the panel was closed never shows a stale Edit button.
+function useEditClock(messages, offset, enabled, polledAt) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!enabled) return undefined
-    const serverNow = Date.now() + offset
-    let next = Infinity
-    for (const m of messages) {
-      const t = m.mine && m.editableUntil ? Date.parse(m.editableUntil) : Infinity
-      if (t > serverNow && t < next) next = t
+    const refresh = setTimeout(() => setNow(Date.now()), 0)
+    const wait = nextEditExpiry(messages, offset, Date.now())
+    const expiry = wait === null ? null : setTimeout(() => setNow(Date.now()), wait + 50)
+    return () => {
+      clearTimeout(refresh)
+      clearTimeout(expiry)
     }
-    if (next === Infinity) return undefined
-    const id = setTimeout(() => setNow(Date.now()), next - serverNow + 50)
-    return () => clearTimeout(id)
-  }, [messages, offset, enabled, now])
+  }, [messages, offset, enabled, polledAt])
   return now
 }
 
@@ -148,7 +148,7 @@ export function useChat({ userId, canChat, open }) {
   const thread = useThread(userId, active)
   const messages = useMemo(() => thread.data?.messages ?? [], [thread.data])
   const offset = thread.data?.offset ?? 0
-  const now = useEditClock(messages, offset, active)
+  const now = useEditClock(messages, offset, active, thread.dataUpdatedAt)
 
   const admins = useQuery({ queryKey: chatKeys.admins(userId), queryFn: listChatAdmins, enabled: active, staleTime: 0, refetchOnWindowFocus: false, retry: false })
   const adminList = useMemo(() => admins.data ?? [], [admins.data])
@@ -244,7 +244,6 @@ export function useChat({ userId, canChat, open }) {
   // Mark read only what the screen showed: nothing while the tab is hidden or scrolled away from the
   // newest message, and never beyond the newest message in the list at the moment of the call.
   const lastMarked = useRef(null)
-  const polledAt = thread.dataUpdatedAt
   useEffect(() => {
     if (!active || !visible || !atBottom || incomingUnreadIds(messages).length === 0) return
     const upToId = newestId(messages)
@@ -254,7 +253,7 @@ export function useChat({ userId, canChat, open }) {
       () => qc.invalidateQueries({ queryKey: chatKeys.unread(userId) }),
       () => { lastMarked.current = null },
     )
-  }, [active, visible, atBottom, messages, polledAt, qc, userId])
+  }, [active, visible, atBottom, messages, thread.dataUpdatedAt, qc, userId])
 
   return {
     unread,

@@ -186,6 +186,32 @@ const throwing = (which) => ({
   assert.equal(writeStored(chatAdminKey('u1'), 'x', throwing('set')), false)
   assert.equal(readStored(chatAdminKey('u1')), null) // no storage at all
 
+  // removeChatKeys: logout leaves no chat panel state or admin choice behind
+  const { removeChatKeys } = mod
+  const withKeys = (init) => {
+    const st = fake(init)
+    st.key = (i) => [...st._m.keys()][i] ?? null
+    Object.defineProperty(st, 'length', { get: () => st._m.size })
+    return st
+  }
+  const ks = withKeys({
+    [CHAT_OPEN_KEY]: 'true',
+    [chatAdminKey('u1')]: 'adm1',
+    [chatAdminKey('u2')]: 'adm2',
+    [SIDEBAR_HIDDEN_KEY]: 'true',
+    ackintel_token: 'keepme',
+    'ackn.admin.chatOpen': 'true',
+  })
+  assert.equal(removeChatKeys(ks), 3)
+  assert.equal(ks._m.has(CHAT_OPEN_KEY), false)
+  assert.equal(ks._m.has(chatAdminKey('u1')), false)
+  assert.equal(ks._m.has(chatAdminKey('u2')), false) // every user's choice goes, not just the current one
+  assert.equal(ks._m.get(SIDEBAR_HIDDEN_KEY), 'true') // layout preference is not chat state
+  assert.equal(ks._m.get('ackn.admin.chatOpen'), 'true') // another app's keys stay
+  assert.equal(removeChatKeys(ks), 0)
+  assert.equal(removeChatKeys(undefined), 0) // no storage in Node
+  assert.equal(removeChatKeys({ get length() { throw new Error('blocked') }, key() {}, removeItem() {} }), 0)
+
   console.log('OK: layoutStorage (user app)')
 })().catch((e) => {
   console.error('FAIL:', e.message)
