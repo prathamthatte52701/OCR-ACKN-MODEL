@@ -16,7 +16,7 @@ import { UPLOAD_RANGES } from '../utils/uploadRange'
 
 function DocumentsSkeleton() {
   return (
-    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-5 @3xl:grid-cols-2 @5xl:grid-cols-3">
       {[0, 1, 2, 3, 4, 5].map((i) => (
         <div key={i} className="h-[250px] animate-pulse rounded-3xl border border-blue-300/10 bg-slate-900/60 p-5">
           <div className="flex gap-4">

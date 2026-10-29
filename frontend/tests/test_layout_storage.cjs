@@ -154,6 +154,38 @@ const throwing = (which) => ({
     delete globalThis.localStorage
   }
 
+  // chatOpen: same helpers with its own key
+  const { CHAT_OPEN_KEY, chatAdminKey, readStored, writeStored } = mod
+  assert.equal(CHAT_OPEN_KEY, 'ackn.user.chatOpen')
+  assert.notEqual(CHAT_OPEN_KEY, SIDEBAR_HIDDEN_KEY)
+  const cs = fake()
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, cs), false) // default closed
+  const cref = { current: false }
+  assert.equal(toggleAndPersist(cref, CHAT_OPEN_KEY, cs), true)
+  assert.equal(cs._m.get(CHAT_OPEN_KEY), 'true') // persisted inside the handler
+  assert.equal(cs._m.has(SIDEBAR_HIDDEN_KEY), false) // the sidebar flag is untouched
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, cs), true)
+  assert.equal(writeSidebarHidden(false, CHAT_OPEN_KEY, cs), true)
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, cs), false)
+  for (const g of garbage) {
+    const s = { getItem: () => g, setItem() {}, removeItem() {} }
+    assert.equal(readSidebarHidden(CHAT_OPEN_KEY, s), false, `chat garbage ${String(g).slice(0, 20)}`)
+  }
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, throwing('get')), false)
+  assert.equal(writeSidebarHidden(true, CHAT_OPEN_KEY, throwing('set')), false)
+
+  // per-user chat admin choice
+  assert.equal(chatAdminKey('u1'), 'ackn.user.chatAdmin.u1')
+  assert.notEqual(chatAdminKey('u1'), chatAdminKey('u2'))
+  const as = fake()
+  assert.equal(readStored(chatAdminKey('u1'), as), null)
+  assert.equal(writeStored(chatAdminKey('u1'), 'adm1', as), true)
+  assert.equal(readStored(chatAdminKey('u1'), as), 'adm1')
+  assert.equal(readStored(chatAdminKey('u2'), as), null) // another user sees nothing
+  assert.equal(readStored(chatAdminKey('u1'), throwing('get')), null)
+  assert.equal(writeStored(chatAdminKey('u1'), 'x', throwing('set')), false)
+  assert.equal(readStored(chatAdminKey('u1')), null) // no storage at all
+
   console.log('OK: layoutStorage (user app)')
 })().catch((e) => {
   console.error('FAIL:', e.message)

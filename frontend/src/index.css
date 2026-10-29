@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --chat-w: clamp(320px, 25vw, 440px);
+  }
   html {
     background-color: #030712;
     color: #f3f4f6;

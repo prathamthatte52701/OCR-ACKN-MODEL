@@ -24,6 +24,11 @@ export function isTodayIST(dateStr) {
   return fmt.format(new Date(dateStr)) === fmt.format(new Date())
 }
 
+// Calendar day in IST as YYYY-MM-DD (groups chat messages under date separators).
+export function dayKeyIST(dateStr) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(dateStr))
+}
+
 // "14 Oct 2026, 3:42 PM" in the viewer's own timezone (account decision dates).
 export function formatLocal(dateStr) {
   if (!dateStr) return ''

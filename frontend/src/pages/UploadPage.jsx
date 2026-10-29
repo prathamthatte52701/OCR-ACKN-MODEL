@@ -516,12 +516,12 @@ export default function UploadPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_14%,rgba(37,99,235,0.2),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(6,182,212,0.16),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.16),rgba(2,6,23,0.98))]" />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.035)_1px,transparent_1px)] bg-[size:56px_56px] opacity-55" />
 
-      <main className={`relative mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-6 xl:min-h-[calc(100vh-94px)] xl:items-center lg:px-10 xl:py-12 ${reviewActive ? 'xl:grid-cols-1' : 'xl:grid-cols-[0.75fr_1.25fr]'}`}>
+      <main className={`relative mx-auto grid max-w-[1440px] gap-8 px-4 py-8 sm:px-6 @5xl:min-h-[calc(100vh-94px)] @5xl:items-center lg:px-10 @5xl:py-12 ${reviewActive ? '@5xl:grid-cols-1' : '@5xl:grid-cols-[0.75fr_1.25fr]'}`}>
 
-        <BackButton fallback="/" className="justify-self-start xl:col-span-full" />
+        <BackButton fallback="/" className="justify-self-start @5xl:col-span-full" />
         <section className={`max-w-xl ${reviewActive ? 'hidden' : ''}`}>
           <p className="mb-6 text-[14.7px] font-bold text-blue-400">Upload Document</p>
-          <h1 className="text-4xl font-black leading-[1.16] tracking-[-0.035em] text-white sm:text-5xl xl:text-[56px]">
+          <h1 className="text-4xl font-black leading-[1.16] tracking-[-0.035em] text-white sm:text-5xl @5xl:text-[56px]">
             Extract. Verify.
             <span className="block">Number and date,</span>
             <span className="block text-blue-400 drop-shadow-[0_0_28px_rgba(59,130,246,0.55)]">in seconds.</span>
@@ -581,7 +581,7 @@ export default function UploadPage() {
                 </div>
 
                 {reviewItem && (
-                  <div className="grid w-full gap-6 text-left xl:grid-cols-2 xl:items-start">
+                  <div className="grid w-full gap-6 text-left @5xl:grid-cols-2 @5xl:items-start">
                   <div className="min-w-0 space-y-4">
                     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
                       <span className="min-w-0 truncate text-[13.6px] font-semibold text-slate-300" title={reviewItem.file.name}>{reviewItem.file.name}</span>

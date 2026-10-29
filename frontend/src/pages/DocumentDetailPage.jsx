@@ -247,7 +247,7 @@ export default function DocumentDetailPage() {
         </div>
       )}
 
-      <div className={doc.filePurged ? '' : 'grid gap-6 xl:grid-cols-2 xl:items-start'}>
+      <div className={doc.filePurged ? '' : 'grid gap-6 @5xl:grid-cols-2 @5xl:items-start'}>
       <div className="min-w-0">
       <div className="mb-6 flex flex-wrap gap-2">
         {doc.uploadStatus === 'processed' && (
@@ -308,7 +308,7 @@ export default function DocumentDetailPage() {
       {!doc.filePurged && (
         <div className="min-w-0">
           {fileQuery.isError ? (
-            <div className="grid h-[420px] place-items-center rounded-2xl border border-gray-800 bg-gray-900 px-4 text-center xl:h-[70vh]">
+            <div className="grid h-[420px] place-items-center rounded-2xl border border-gray-800 bg-gray-900 px-4 text-center @5xl:h-[70vh]">
               <div>
                 <p className="mb-3 text-[14.7px] text-gray-400">Could not load the original file.</p>
                 <button onClick={() => fileQuery.refetch()} className="rounded-lg bg-gray-800 px-4 py-2 text-[14.7px] text-gray-300 transition-colors hover:bg-gray-700">

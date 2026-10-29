@@ -24,7 +24,7 @@ export default function DocumentList({ documents, startIndex = 0 }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-5 @3xl:grid-cols-2 @5xl:grid-cols-3">
       {documents.map((doc, index) => (
         <DocumentCard key={doc._id} doc={doc} serialNumber={startIndex + index + 1} />
       ))}
