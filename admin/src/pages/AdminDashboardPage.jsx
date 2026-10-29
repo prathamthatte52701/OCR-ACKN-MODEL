@@ -136,7 +136,7 @@ function Dashboard({ data, onApprove, busyId }) {
 
   return (
     <div className="space-y-4">
-      <section aria-label="Key numbers" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Key numbers" className="grid grid-cols-1 gap-4 sm:grid-cols-2 @min-[1000px]:grid-cols-4">
         {isNum(data.totalUsers) && (
           <StatCard label="Total users" value={fmt(data.totalUsers)} tone="violet" icon={<Icon d={ICONS.users} />} to="/users"
             trend={data.trends?.users && <Trend current={data.trends.users.current} previous={data.trends.users.previous} suffix="vs previous 7 days" />}
@@ -157,9 +157,9 @@ function Dashboard({ data, onApprove, busyId }) {
         )}
       </section>
 
-      <section aria-label="Charts" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr]">
+      <section aria-label="Charts" className="grid grid-cols-1 gap-4 @min-[760px]:grid-cols-2 @min-[1000px]:grid-cols-[2fr_1fr_1fr]">
         {days.length > 1 && docSeries.length === days.length && (
-          <ChartCard title="Documents over time" className="md:col-span-2 xl:col-span-1">
+          <ChartCard title="Documents over time" className="@min-[760px]:col-span-2 @min-[1000px]:col-span-1">
             <div className="mb-2 flex flex-wrap items-baseline gap-x-3 text-[14px]">
               <span className="text-[30px] font-extrabold leading-none text-white">{fmt(seriesTotal)}</span>
               <span className="text-[var(--muted)]">in the last {days.length} days</span>
@@ -203,7 +203,7 @@ function Dashboard({ data, onApprove, busyId }) {
         )}
       </section>
 
-      <section aria-label="Activity and shortcuts" className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section aria-label="Activity and shortcuts" className="grid grid-cols-1 gap-4 @min-[760px]:grid-cols-2">
         {Array.isArray(data.activityFeed) && <ActivityCard feed={feed} />}
         <div className="flex flex-col gap-4">
           {pending && <PendingCard pending={pending} onApprove={onApprove} busyId={busyId} />}
@@ -222,11 +222,11 @@ function Dashboard({ data, onApprove, busyId }) {
 function LoadingSkeleton() {
   return (
     <div className="space-y-4" aria-busy="true" aria-label="Loading dashboard">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((i) => <CardSkeleton key={i} h="h-40" />)}</div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 @min-[1000px]:grid-cols-4">{[0, 1, 2, 3].map((i) => <CardSkeleton key={i} h="h-40" />)}</div>
+      <div className="grid grid-cols-1 gap-4 @min-[760px]:grid-cols-2 @min-[1000px]:grid-cols-[2fr_1fr_1fr]">
         <CardSkeleton h="h-72" /><CardSkeleton h="h-72" /><CardSkeleton h="h-72" />
       </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2"><CardSkeleton h="h-80" /><CardSkeleton h="h-80" /></div>
+      <div className="grid grid-cols-1 gap-4 @min-[760px]:grid-cols-2"><CardSkeleton h="h-80" /><CardSkeleton h="h-80" /></div>
     </div>
   )
 }

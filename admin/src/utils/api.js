@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { removeChatUserKeys } from './layoutStorage'
 
 // Separate storage key from the main app's token - the two are different
 // sessions even when both apps run in the same browser.
@@ -12,6 +13,7 @@ export function setToken(token) {
 }
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  removeChatUserKeys()
 }
 
 const api = axios.create({
@@ -66,6 +68,9 @@ function extractMessage(data) {
 api.interceptors.response.use(
   (res) => { setServerDown(false); return res },
   (err) => {
+    // A request the app cancelled itself (a chat poll for a thread that is no longer open) says
+    // nothing about the server.
+    if (axios.isCancel(err)) return Promise.reject(err)
     setServerDown(isUnreachable(err))
     const fallback = !err.response
       ? 'Could not connect to the server. Check your internet connection and try again.'

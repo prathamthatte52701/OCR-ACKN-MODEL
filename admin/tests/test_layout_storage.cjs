@@ -154,6 +154,46 @@ const throwing = (which) => ({
     delete globalThis.localStorage
   }
 
+  // chat panel flag: same helpers, own key; the sidebar flag is untouched
+  const { CHAT_OPEN_KEY, chatUserKey, readStored, writeStored, removeStored, removeChatUserKeys } = mod
+  assert.equal(CHAT_OPEN_KEY, 'ackn.admin.chatOpen')
+  const cs = fake()
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, cs), false)
+  assert.equal(toggleAndPersist({ current: false }, CHAT_OPEN_KEY, cs), true)
+  assert.equal(cs._m.get(CHAT_OPEN_KEY), 'true')
+  assert.equal(cs._m.has(SIDEBAR_HIDDEN_KEY), false)
+  assert.equal(readSidebarHidden(CHAT_OPEN_KEY, throwing('get')), false)
+
+  // remembered chat user, per admin id; logout removes every admin's entry
+  const withKeys = (init) => {
+    const st = fake(init)
+    st.key = (i) => [...st._m.keys()][i] ?? null
+    Object.defineProperty(st, 'length', { get: () => st._m.size })
+    return st
+  }
+  assert.equal(chatUserKey('a1'), 'ackn.admin.chatUser.a1')
+  assert.notEqual(chatUserKey('a1'), chatUserKey('a2'))
+  const us = withKeys({ [SIDEBAR_HIDDEN_KEY]: 'true', [CHAT_OPEN_KEY]: 'true' })
+  assert.equal(readStored(chatUserKey('a1'), us), null)
+  assert.equal(writeStored(chatUserKey('a1'), 'u9', us), true)
+  assert.equal(writeStored(chatUserKey('a2'), 'u7', us), true)
+  assert.equal(readStored(chatUserKey('a1'), us), 'u9')
+  assert.equal(readStored(chatUserKey('a2'), us), 'u7') // another admin has their own entry
+  assert.equal(removeChatUserKeys(us), 3) // both remembered users and the open-panel flag
+  assert.equal(readStored(chatUserKey('a1'), us), null)
+  assert.equal(readStored(chatUserKey('a2'), us), null)
+  assert.equal(us._m.get(SIDEBAR_HIDDEN_KEY), 'true') // unrelated keys stay
+  assert.equal(us._m.has(CHAT_OPEN_KEY), false) // the next admin does not inherit an open panel
+  assert.equal(removeChatUserKeys(us), 0)
+  assert.equal(removeChatUserKeys(undefined), 0) // no storage in Node: no throw
+  writeStored(chatUserKey('a1'), 'u9', us)
+  removeStored(chatUserKey('a1'), us)
+  assert.equal(readStored(chatUserKey('a1'), us), null)
+  assert.doesNotThrow(() => removeStored('x', throwing('get')))
+  assert.doesNotThrow(() => removeStored('x'))
+  assert.equal(readStored('x', throwing('get')), null)
+  assert.equal(writeStored('x', 'y', throwing('set')), false)
+
   console.log('OK: layoutStorage (admin app)')
 })().catch((e) => {
   console.error('FAIL:', e.message)

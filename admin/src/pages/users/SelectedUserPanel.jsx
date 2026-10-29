@@ -28,7 +28,7 @@ function Row({ label, children }) {
 export default function SelectedUserPanel({ user, detail, detailLoading, busy, onApprove, onReject }) {
   if (!user) {
     return (
-      <Card className="hidden p-5 xl:block" aria-label="Selected user">
+      <Card className="hidden p-5 @min-[1000px]:block" aria-label="Selected user">
         <h2 className="text-[18px] font-bold text-white">Selected user</h2>
         <p className="mt-3 text-[14px] text-[var(--muted)]">Select a user in the table to see their details.</p>
       </Card>

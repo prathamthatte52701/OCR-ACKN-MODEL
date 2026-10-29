@@ -106,7 +106,7 @@ export default function AdminProfilePage() {
     <div className="mx-auto max-w-[1000px] px-4 py-6 sm:px-6 lg:px-8">
       <BackButton fallback="/" />
       <PageHeader title="Account" />
-      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 @min-[760px]:grid-cols-2">
         <ProfileDetailsPanel user={user} />
         <ChangePasswordPanel changePassword={changePassword} />
       </div>

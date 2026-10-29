@@ -279,7 +279,7 @@ export default function UsersView({ mode = 'users' }) {
       <UsersTabs active={approvals ? 'approvals' : 'users'} pending={pendingCount} requests={requestCount} />
 
       {!approvals && (
-        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="mb-6 grid grid-cols-2 gap-4 @min-[760px]:grid-cols-4">
           <StatCard label="Total users" value={stat('total')} tone="violet" icon={ICONS.total} loading={!counts && loading} to="/users" />
           <StatCard label="Approved" value={stat('approved')} tone="teal" icon={ICONS.approved} loading={!counts && loading} to="/users?status=approved" />
           <StatCard label="Pending" value={stat('pending')} tone="amber" icon={ICONS.pending} loading={!counts && loading} to="/users?status=pending" />
@@ -289,7 +289,7 @@ export default function UsersView({ mode = 'users' }) {
 
       <Banner error={error} success={success} />
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-6 @min-[1000px]:grid-cols-[minmax(0,1fr)_340px]">
         <Card className="min-w-0 p-5" aria-label={approvals ? 'Pending requests' : 'User directory'}>
           <div className="mb-4 flex items-baseline gap-3">
             <h2 className="text-[20px] font-bold text-white">{approvals ? 'Pending requests' : 'User directory'}</h2>
@@ -410,7 +410,7 @@ export default function UsersView({ mode = 'users' }) {
           <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
         </Card>
 
-        <div className={`${selected ? '' : 'hidden xl:block'} xl:sticky xl:top-20`}>
+        <div className={`${selected ? '' : 'hidden @min-[1000px]:block'} @min-[1000px]:sticky @min-[1000px]:top-20`}>
           <SelectedUserPanel
             user={selected}
             detail={detail.id === selectedId ? detail.user : null}

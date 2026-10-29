@@ -42,6 +42,19 @@ export function isSubmitKey(e) {
   return e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing
 }
 
+// Milliseconds from `now` until the soonest still-open edit window among the viewer's own messages
+// closes (on the server clock), or null when none is open.
+export function nextEditExpiry(messages, serverOffsetMs, now) {
+  const serverNow = now + serverOffsetMs
+  let soonest = null
+  for (const m of messages) {
+    if (!m.mine || !m.editableUntil) continue
+    const closes = Date.parse(m.editableUntil)
+    if (closes > serverNow && (soonest === null || closes < soonest)) soonest = closes
+  }
+  return soonest === null ? null : soonest - serverNow
+}
+
 // Milliseconds to add to the browser clock to get the server clock.
 export function serverOffset(serverTime, now) {
   return Date.parse(serverTime) - now

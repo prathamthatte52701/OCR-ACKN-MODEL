@@ -104,6 +104,26 @@ const msg = (id, createdAt, extra = {}) => ({ id, createdAt, fromRole: 'user', r
   assert.equal(canEditNow(until, 0, Date.parse(until)), false)
   assert.equal(canEditNow(until, 0, Date.parse(until) - 1), true)
 
+  // nextEditExpiry: a stale clock must not keep Edit alive
+  const { nextEditExpiry } = core
+  const T0 = Date.parse('2026-10-01T12:00:00Z')
+  const own = (id, until) => ({ id, mine: true, editableUntil: until })
+  const theirs = { id: 't', mine: false, editableUntil: '2026-10-01T12:30:00Z' }
+  assert.equal(nextEditExpiry([], 0, T0), null)
+  assert.equal(nextEditExpiry([theirs], 0, T0), null) // other people's messages never count
+  assert.equal(nextEditExpiry([{ id: 'x', mine: true, editableUntil: null }], 0, T0), null)
+  assert.equal(nextEditExpiry([own('a', '2026-10-01T12:05:00Z')], 0, T0), 5 * 60_000)
+  assert.equal(nextEditExpiry([own('a', '2026-10-01T12:05:00Z'), own('b', '2026-10-01T12:02:00Z')], 0, T0), 2 * 60_000) // soonest wins
+  assert.equal(nextEditExpiry([own('a', '2026-10-01T11:59:00Z')], 0, T0), null) // already closed
+  assert.equal(nextEditExpiry([own('a', '2026-10-01T12:00:00Z')], 0, T0), null) // closes exactly now
+  // 16 minutes later the same message is closed: re-reading the clock on open/poll hides Edit
+  const sent = own('a', '2026-10-01T12:15:00Z')
+  assert.equal(nextEditExpiry([sent], 0, T0 + 14 * 60_000), 60_000)
+  assert.equal(nextEditExpiry([sent], 0, T0 + 16 * 60_000), null)
+  assert.equal(canEditNow(sent.editableUntil, 0, T0 + 16 * 60_000), false)
+  assert.equal(canEditNow(sent.editableUntil, 0, T0 + 1_000), true) // a stale (early) clock is the bug
+  assert.equal(nextEditExpiry([sent], 10 * 60_000, T0), 5 * 60_000) // server 10 min ahead
+
   // threadFromPage / threadWasCleared
   const { threadFromPage, threadWasCleared } = core
   const page = { nextSince: '2026-10-01T10:09:00Z', hasMore: true, serverTime: '2026-10-01T10:10:00Z' }

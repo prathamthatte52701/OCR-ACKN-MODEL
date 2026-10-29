@@ -19,3 +19,8 @@ export function formatIST(dateStr, opts = {}) {
 export function formatISTDate(dateStr) {
   return formatIST(dateStr, { hour: undefined, minute: undefined, hour12: undefined })
 }
+
+// Calendar day in IST as YYYY-MM-DD (groups chat messages under date separators).
+export function dayKeyIST(dateStr) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(dateStr))
+}
