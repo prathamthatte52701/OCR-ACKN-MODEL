@@ -4,7 +4,7 @@
 
 It is a Windows desktop-style tool, built for one office PC: private per-user accounts, an admin approval step for new users, and an admin panel for support and oversight. The app itself runs only on that PC and is not published on the internet. It does use two online services: MongoDB Atlas stores the data, and Groq receives the header text of each document to pick out the number and date (never the image or the rest of the page).
 
-### At a glance
+## At a glance
 
 **Upload** a document → **check** the number and date beside the original → **save** to Excel → find it in your yearly workbook, filed under the right month.
 
@@ -12,6 +12,20 @@ It is a Windows desktop-style tool, built for one office PC: private per-user ac
 - Excel files that are written safely, even while you have them open
 - Private accounts with admin approval and a full audit trail
 - Clear flags for anything that looks unusual, so nothing slips through quietly
+- A built-in chat between each user and the admins
+
+## Screenshots
+
+All screenshots use made-up demo accounts and sample documents. No real data is shown.
+
+| | |
+|---|---|
+| ![My Documents: a user's processed Tax Invoices](docs/images/user-documents.png) | ![Review page: extracted fields beside the original document](docs/images/user-review.png) |
+| **My Documents.** Filter by type, month and upload date, then save or download a whole page. | **Review.** Check or edit the number and date with the original always in view. |
+| ![User chat panel with a conversation with an admin](docs/images/user-chat.png) | ![Admin dashboard with totals, a 30-day chart and recent activity](docs/images/admin-dashboard.png) |
+| **Chat.** Ask an admin for help without leaving the page. | **Admin dashboard.** Totals, reading success and pending approvals. |
+| ![Admin approvals queue](docs/images/admin-approvals.png) | ![Admin chat panel replying to a user](docs/images/admin-chat.png) |
+| **Approvals.** New accounts wait here until an admin decides. | **Admin chat.** Reply to users and see unread counts. |
 
 ---
 
@@ -19,9 +33,11 @@ It is a Windows desktop-style tool, built for one office PC: private per-user ac
 
 - [What it does](#what-it-does)
 - [How a document is read](#how-a-document-is-read)
+- [Architecture](#architecture)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Using the app](#using-the-app)
+- [Chat](#chat)
 - [Excel export rules](#excel-export-rules)
 - [Data quality safeguards](#data-quality-safeguards)
 - [Admin panel](#admin-panel)
@@ -29,6 +45,7 @@ It is a Windows desktop-style tool, built for one office PC: private per-user ac
 - [Operations](#operations)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
 
 ---
 
@@ -37,18 +54,19 @@ It is a Windows desktop-style tool, built for one office PC: private per-user ac
 | Area | Details |
 |---|---|
 | **Reading documents** | Reads the **Tax Invoice No.** and **Reference No.** (Tax Invoice) or the **Delivery Challan No.** (Delivery Challan), plus the **date**. Accepts PDF, JPG, JPEG and PNG up to 5 MB each. PDFs can have up to 4 pages, and images up to 50 megapixels, which covers typical phone photos and scans. |
-| **Photos** | Phone photos are cropped to the page, straightened and turned upright before reading. |
+| **Photos** | Phone photos are cropped to the page, straightened (small tilts) before reading. |
 | **Upload** | Single upload, or bulk upload of up to 10 files at once. |
 | **Review** | The original file is shown next to the extracted values (zoom and pan for PDFs). Any value can be corrected by hand. |
 | **Excel** | One workbook per year, one sheet per month. Save one document or a whole page at once. |
-| **Accounts** | Email and password, or Google Sign-In. New accounts wait for admin approval |
-| **Admin panel** | Approve users, handle password requests, browse all documents and workbooks, read the audit log, and run maintenance. |
+| **Accounts** | Email and password, or Google Sign-In. New accounts wait for admin approval. |
+| **Chat** | A small text chat between each user and the admins, inside both apps. |
+| **Admin panel** | Approve users, handle password requests, browse all documents and workbooks, read the audit log, answer chat, and run maintenance. |
 
 Each person only ever sees their own documents, workbooks and export history.
 
 ## How a document is read
 
-```
+```text
  Upload (PDF / image)
         │
         ▼
@@ -74,6 +92,32 @@ Things worth knowing:
 - Documents are processed **one at a time**, on purpose, to keep memory use safe on a single PC. A bulk upload of 10 files takes about ten times as long as one file.
 - The AI step is treated as untrusted. Whatever it returns is cleaned and checked before it is stored (see [Data quality safeguards](#data-quality-safeguards)).
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph PC["Office PC (Windows, localhost only)"]
+        U["User app<br/>React, port 5174"]
+        A["Admin app<br/>React, port 5175"]
+        API["Backend API<br/>FastAPI, port 8000"]
+        OCR["PaddleOCR<br/>header crop, one job at a time"]
+        XLS[("backend/exports/<br/>per-user .xlsx workbooks")]
+    end
+    DB[("MongoDB Atlas<br/>users, documents, audit, chat<br/>files in GridFS")]
+    G["Groq<br/>header text only"]
+
+    U -->|"/api"| API
+    A -->|"/api"| API
+    API --> OCR
+    API -->|"header text"| G
+    API --> DB
+    API --> XLS
+```
+
+- The two web apps are static builds served on this PC. They call the backend through `/api`.
+- The backend keeps all records and uploaded files in MongoDB Atlas. Excel workbooks are real files on this PC.
+- Only the text of the page header is sent to Groq. The image and the rest of the page never leave the PC.
+
 ## Quick start
 
 This is the setup for the office PC. It runs everything locally on Windows.
@@ -90,7 +134,7 @@ This is the setup for the office PC. It runs everything locally on Windows.
 1. Create the Python environment once. Open a terminal in the project folder and run `python -m venv venv`.
 2. Copy `backend/.env.example` to `backend/.env` and fill it in. See [Configuration](#configuration).
 3. Double-click **`setup.bat`**. It installs the backend packages and builds both web apps. Run it once, and again after any frontend code change. Stop the app first with `stop.bat`, because Windows locks files that are in use.
-4. Create the admin accounts once. This is safe to repeat:
+4. Create the admin accounts once (needs the `ADMIN_*` values from step 2, and `setup.bat` refuses to run while `backend/.env` is missing or empty). This is safe to repeat:
 
    ```bash
    cd backend
@@ -98,13 +142,13 @@ This is the setup for the office PC. It runs everything locally on Windows.
    ```
 
 5. Double-click **`start.bat`** every day. It starts everything and opens the app.
-6. **First sign-in.** Open the admin app (http://localhost:5175) and sign in with the admin email and password you set in `.env`. Open **Approvals** to approve new users. Each user then signs in at http://localhost:5174.
+6. **First sign-in.** Open the admin app (<http://localhost:5175>) and sign in with the admin email and password you set in `.env`. Open **Approvals** to approve new users. Each user then signs in at <http://localhost:5174>.
 
 | Part | Address | Port |
 |---|---|---|
-| User app | http://localhost:5174 | 5174 |
-| Admin app | http://localhost:5175 | 5175 |
-| Backend API | http://127.0.0.1:8000 | 8000 |
+| User app | <http://localhost:5174> | 5174 |
+| Admin app | <http://localhost:5175> | 5175 |
+| Backend API | <http://127.0.0.1:8000> | 8000 |
 
 All three listen on this PC only (`127.0.0.1`). Other computers cannot reach them.
 
@@ -126,7 +170,7 @@ All settings live in `backend/.env`. A missing or invalid required setting stops
 | `GROQ_REASONING_EFFORT` | No | `high` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
 | `GROQ_MAX_TOKENS` | No | `2000` | Reply length limit, a whole number from 50 to 4000. If an answer is cut off it is retried once with double the limit (at most 4000); if it is still cut off the document fails with a message asking you to raise this value. |
 | `AUDIT_LOG_RETENTION_DAYS` | No | `365` | Audit entries older than this are deleted automatically. `0` keeps them forever. Whole number from 0 to 3650. |
-| `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. Put the same value in `frontend/.env` as `VITE_GOOGLE_CLIENT_ID=<value>` before running `setup.bat`, so the sign-in button is built into the user app. Without it the Google button is simply not shown. |
+| `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. Put the same value in `frontend/.env` as `VITE_GOOGLE_CLIENT_ID=<value>` (copy `frontend/.env.example`) before running `setup.bat`, so the sign-in button is built into the user app. Without it the Google button is simply not shown. |
 | `FRONTEND_ORIGIN` | No | `http://localhost:5174` | Allowed browser origin for the user app. |
 | `ADMIN_ORIGIN` | No | `http://localhost:5175` | Allowed browser origin for the admin app. |
 | `ADMIN_1_NAME`, `ADMIN_1_EMAIL`, `ADMIN_1_PASSWORD` | Seeding only | — | First admin account. Also `ADMIN_2_*` for the second. The password is used once; only its hash is stored. |
@@ -176,6 +220,20 @@ If a request is rejected, or access is later removed, the sign-in page shows the
 | **My Activity** | Review your own uploads, corrections, saves and deletes. |
 | **Help** | Short answers to common questions. |
 
+The user app has a left sidebar on screens 1024 px wide or more, and a slide-out menu below that. The button at the top left hides or shows the sidebar, and the app remembers your choice in this browser. The admin app works the same way.
+
+## Chat
+
+Both apps have a **Chat** button in the top bar. It opens a panel on the right (docked beside the page on wide screens, over the page on small ones).
+
+- A user writes to an admin; an admin replies to a user. Messages are plain text, up to 1,000 characters.
+- You can edit your own message for 15 minutes after sending it.
+- A red badge shows unread messages. The panel and the badge refresh on their own while the tab is open.
+- Users can pick the colour of their own messages (the palette button in the chat panel header).
+- **Insert today's summary** (user app) pastes how many documents you processed today, by type, into the message box.
+- Admins can delete one user's chat by age (**Clear chat…** in the chat panel). Deleting all chat is in **Maintenance** and asks for the admin's password.
+- Sending is rate-limited, and the admin audit log records chat clean-ups as counts only, never message text.
+
 ## Excel export rules
 
 - Each user gets **one workbook per year**, with **one sheet per month**.
@@ -208,7 +266,7 @@ The AI is helpful but not trusted. Every value goes through plain code before yo
 
 ## Admin panel
 
-Open http://localhost:5175 and sign in with an admin account.
+Open <http://localhost:5175> and sign in with an admin account. The dashboard, Users, Approvals and Password requests pages refresh quietly in the background while the tab is visible, so new requests appear without a reload. The refresh pauses while a dialog is open or a request is running, and backs off if the server stops answering.
 
 | Section | Purpose |
 |---|---|
@@ -217,6 +275,7 @@ Open http://localhost:5175 and sign in with an admin account.
 | **Approvals** | Approve, reject (with an optional reason), revoke or re-approve. This includes people who signed up with Google. |
 | **Password requests** | See who asked for a reset and set a temporary password. |
 | **Documents, Workbooks** | Browse every user's data. Admin access to another user's data is written to the audit log. |
+| **Chat** | The chat button in the top bar opens the admin chat panel. Reply to users, pick a thread, and clear one user's chat by age. |
 | **Activity** | The audit log. |
 | **Orphaned files** | Files left behind by a failed cleanup, for follow-up. |
 | **Maintenance** | Storage and uptime, plus a protected "danger zone" for permanent bulk deletes. These need a typed confirmation phrase and your own password, entered twice. |
@@ -234,6 +293,11 @@ Admins are created from the environment settings by the seed script and cannot b
 - **Upload safety.** Size, file type and image-size limits are checked before the file is processed, so a small file cannot expand into gigabytes of memory.
 - **Browser protections.** Strict security headers and a fixed list of allowed origins.
 - **Secrets stay out of the log.** Keys, tokens and passwords are masked before anything is written to it.
+- **Google Sign-In.** The Google token is verified on the server against your client ID, and the Google email must be verified. A new Google user still waits for approval.
+- **Downloads.** A user's workbook download is served only from the exports folder and only with the owner's user ID in its file name, so a crafted name cannot reach another file.
+- **Local only.** The servers listen on `127.0.0.1`. The API documentation pages are off unless `ENABLE_DOCS=true`.
+- **Login token storage.** The browser keeps the login token in local storage, so any script injected into the page could read it. Both apps avoid inserting raw HTML, and tokens end at once on password change, rejection or removal. Keep the PC itself trusted.
+- **Secrets in the repository.** `backend/.env` is ignored by git and never committed. `backend/.env.example` holds names only. Test files contain obviously fake keys used to test log masking.
 
 ## Operations
 
@@ -247,7 +311,7 @@ Get-Content backend\logs\app.log -Tail 100 -Wait
 
 ### Maintenance scripts
 
-Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scripts.<name>`. Scripts that change data do nothing unless you ask for it explicitly.
+Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scripts.<name>` (in cmd use backslashes: `..env\Scripts\python.exe`). Scripts that change data also require `--db <name>`, which must equal `MONGO_DB_NAME` (or the default name). Scripts that change data do nothing unless you ask for it explicitly.
 
 | Script | Purpose |
 |---|---|
@@ -255,8 +319,8 @@ Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scri
 | `reset_admin_password` | Set a new password for an admin. |
 | `migrate_user_status` | One-time step for an older database so existing users stay approved. Run with `--dry-run` first. |
 | `find_duplicate_workbooks` | Read-only report: lists any user who has two workbook records pointing at the same file. Changes nothing. |
-| `cleanup_orphan_corrections` | Remove correction history whose document no longer exists. Dry run by default; add `--apply` to delete. |
-| `wipe_all_except_admins` | Fresh start: remove all users, documents, files and workbooks except the admins. Dry run by default. Applying needs `--apply --i-have-a-backup`. Stop the app and take a `mongodump` backup first. |
+| `cleanup_orphan_corrections` | Remove correction history whose document no longer exists. Needs `--db <name>`. Dry run by default; add `--apply` to delete. |
+| `wipe_all_except_admins` | Fresh start: remove all users, documents, files and workbooks except the admins. Needs `--db <name>`. Dry run by default; applying needs `--apply --i-have-a-backup`. Stop the app and take a `mongodump` backup first. |
 
 ### Backups
 
@@ -274,9 +338,9 @@ Take regular `mongodump` backups of the database, and copy the `backend/exports/
 
 **Layout**
 
-```
+```text
 backend/    FastAPI app, one folder per feature under app/features
-            (auth, documents, ocr, excel, admin)
+            (auth, documents, ocr, excel, admin, chat)
 frontend/   User app (port 5174)
 admin/      Admin app (port 5175)
 docs/       Extra notes, such as the admin screen map
@@ -311,11 +375,11 @@ cd backend
 ../venv/Scripts/python.exe -m pytest app
 ```
 
-The suite has over 1,000 tests covering sign-in and approval, per-user isolation, the reading pipeline, Excel saving, admin actions and the maintenance scripts. A full run takes about two hours because the tests use a real MongoDB Atlas database (a separate `_test` one), so each step is a network round trip. Running one folder or file is much faster, for example `pytest app/features/auth`.
+The backend suite has close to 800 test functions (more cases once parametrised) covering sign-in and approval, per-user isolation, the reading pipeline, Excel saving, admin actions and the maintenance scripts. A full run is slow (hours) because the tests use a real MongoDB Atlas database (a separate `_test` one), so each step is a network round trip. Running one folder or file is much faster, for example `pytest app/features/auth`.
 
 Tests are safe by design. `backend/conftest.py` forces a database whose name ends in `_test` and a separate test-only signing secret, and stops immediately if that is ever not the case. Set `ACKN_TEST_DB` to choose a different `_test` database name, for example to run two test sessions side by side.
 
-Browser checks for the document viewer and the sign-in notices are in `frontend/tests/` (plain Playwright and Node scripts with the API mocked).
+The frontend and admin apps have small plain Node scripts in `frontend/tests/` and `admin/tests/`. Run one with `node frontend/tests/<file>.cjs`. Some of the frontend scripts drive a browser with Playwright and need the dev server running.
 
 ## Troubleshooting
 
@@ -329,3 +393,14 @@ Browser checks for the document viewer and the sign-in notices are in `frontend/
 | "The AI answer was cut off" | Press **Reprocess**. If it repeats, raise `GROQ_MAX_TOKENS` (up to 4000) in `backend/.env` and restart. |
 | A save says the workbook is busy | Close the workbook in Excel and save again. |
 | A page looks old after an update | Run `setup.bat` again so both apps are rebuilt. |
+
+## Known limitations
+
+- **Windows, one PC.** The batch scripts and the setup are written for a single Windows PC. There is no hosted or multi-server deployment.
+- **Needs the internet.** MongoDB Atlas holds the data and Groq reads the header text. With either one unreachable, uploads or reading stop. The first document after a restart is slow while the reading model loads.
+- **One document at a time.** Reading is deliberately sequential, so bulk uploads are slow.
+- **Header only.** Only the top part of the page is read. A number or date placed elsewhere on the page is not found.
+- **No password email.** Password resets are handled by an admin in person or by phone.
+- **A crash in the OCR engine's native code** cannot be caught inside the app. If it happens, restart with `stop.bat` then `start.bat`; documents that were in progress are queued again.
+- **Excel rows have no ID.** To find an earlier row, the app matches on type, number and date, so two identical documents can be confused when one is re-saved.
+- **No test runner for the browser apps** beyond the plain scripts, and no automated pipeline: tests and checks are run by hand.

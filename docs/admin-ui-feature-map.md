@@ -21,6 +21,9 @@ aggregate endpoint, DROP = no real feature, not shown.
 | Sidebar footer "All services running" + "Open Maintenance" | only if computed from a real check: `GET /admin/system` (DB ping + OCR lock) | ADAPT (shows real status; red/amber when a check fails) |
 | Top bar search "Search users, documents..." | no global search; user search is real (new `q` param on `GET /admin/users`) | ADAPT ("Search users by name or email", goes to `/users?q=`) |
 | Notification bell + red badge | `pendingCount` + `passwordRequestCount` of `GET /admin/users`, links to Approvals (or Password requests when only requests are waiting); no badge at 0 | ADAPT |
+| (not in mockup) Chat button + unread badge | `/api/chat/*` (`GET /chat/unread` polled while the tab is visible); opens the admin chat panel on the right: user picker, thread, reply box, edit within 15 minutes, "Clear chat..." (by age, one user). Global "delete all chat" lives in Maintenance (typed word + password) | ADD |
+| (not in mockup) Sidebar hide/show button | top-left toggle; state kept in the browser (`ackn.admin.sidebarHidden`) | ADD |
+| (not in mockup) Quiet auto-refresh | Dashboard, Users, Approvals and Password requests re-fetch in the background while the tab is visible; paused while a dialog is open or a request is running; backs off after repeated failures | ADD |
 | Admin name + role + avatar chevron | `useAdminAuth().user`; menu: Profile, Log out | KEEP (initials circle, colour from user id) |
 | Photos / avatars | the app has none | ADAPT (coloured initial circles, deterministic from user id) |
 
@@ -75,6 +78,7 @@ aggregate endpoint, DROP = no real feature, not shown.
 | System uptime 99.98% / 30 days | no history; only process uptime is real | ADAPT ("Server uptime" = time since the API process started) |
 | Storage overview donut Documents / Workbooks / Exports / Temporary files | real bytes: document files, workbook files. No exports/temp category | ADAPT (2 segments) |
 | Cleanup: Clear temporary files / Archive old exports / Rebuild OCR indexes | none of these exist | DROP |
+| Global chat delete | `GlobalChatDeletePanel` in the danger zone: deletes all chat messages after the typed word and the admin's password (5 attempts per hour); the audit log records counts only | ADD |
 | Real maintenance actions | Global delete by age and by year+month (`DELETE /admin/purge-range`, `/purge-months`) with the typed phrase + password twice; per-document file purge lives on Documents | KEEP (in the red "Danger zone" card, confirmation unchanged, never one click) |
 | Orphaned files | existing page + count | KEEP (link card) |
 | Maintenance activity timeline | last 5 real audit events: global nuke, file purge, orphaned-file actions, user delete (`recentMaintenance`) | NEW-API |
