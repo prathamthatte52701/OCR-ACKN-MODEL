@@ -311,7 +311,7 @@ Get-Content backend\logs\app.log -Tail 100 -Wait
 
 ### Maintenance scripts
 
-Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scripts.<name>` (in cmd use backslashes: `..env\Scripts\python.exe`). Scripts that change data also require `--db <name>`, which must equal `MONGO_DB_NAME` (or the default name). Scripts that change data do nothing unless you ask for it explicitly.
+Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scripts.<name>` (in cmd use backslashes: `..\venv\Scripts\python.exe`). Scripts that change data also require `--db <name>`, which must equal `MONGO_DB_NAME` (or the default name). Scripts that change data do nothing unless you ask for it explicitly.
 
 | Script | Purpose |
 |---|---|
