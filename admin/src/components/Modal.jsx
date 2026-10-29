@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 
 // Shared backdrop-fade + scale-in wrapper for the Edit User / Edit Document
@@ -13,6 +14,9 @@ import { motion } from 'framer-motion'
 // `handleClose`, which already no-ops while a delete is in flight, and
 // Enter-to-confirm is deliberately NOT wired here or anywhere nuke-related -
 // see ConfirmPurgeModal.jsx.
+// Rendered through a portal into the theme root (not into the page column, which is a size container:
+// a fixed element inside one would be placed against that column instead of the screen; and not into
+// <body>, which is outside .theme-admin and would lose every admin style).
 export default function Modal({ onClose, children, maxWidth = 'max-w-sm', ariaLabel }) {
   useEffect(() => {
     function handleKeyDown(e) {
@@ -22,8 +26,9 @@ export default function Modal({ onClose, children, maxWidth = 'max-w-sm', ariaLa
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  return (
+  return createPortal(
     <motion.div
+      data-admin-modal
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#03051a]/75 px-4"
       onClick={onClose}
       initial={{ opacity: 0 }}
@@ -44,6 +49,7 @@ export default function Modal({ onClose, children, maxWidth = 'max-w-sm', ariaLa
       >
         {children}
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.querySelector('.theme-admin') ?? document.body,
   )
 }

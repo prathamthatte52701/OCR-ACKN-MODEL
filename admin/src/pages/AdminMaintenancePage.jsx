@@ -4,6 +4,7 @@ import { Badge, Card, ChartCard, EmptyState, ErrorState, PageHeader, Skeleton, S
 import { Donut } from '../components/charts'
 import { PALETTE } from '../utils/palette'
 import { relativeTime } from '../utils/activity'
+import GlobalChatDeletePanel from './maintenance/GlobalChatDeletePanel'
 import GlobalNukePanel from './maintenance/GlobalNukePanel'
 import WarningIcon from './maintenance/WarningIcon'
 import useApi from './maintenance/useApi'
@@ -129,10 +130,10 @@ function ProcessedCard({ tel }) {
 }
 
 function UptimeCard({ sys }) {
-  if (sys.error && !sys.data) return <WidgetError message={sys.error} onRetry={sys.reload} className="sm:col-span-2 xl:col-span-1" />
+  if (sys.error && !sys.data) return <WidgetError message={sys.error} onRetry={sys.reload} className="sm:col-span-2 @min-[1000px]:col-span-1" />
   const since = sys.data?.serverStartedAt ? localDateTime(sys.data.serverStartedAt) : ''
   return (
-    <div className="sm:col-span-2 xl:col-span-1">
+    <div className="sm:col-span-2 @min-[1000px]:col-span-1">
       <StatCard
         label="Server uptime"
         tone="teal"
@@ -308,18 +309,18 @@ export default function AdminMaintenancePage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 @min-[1000px]:grid-cols-3">
         <StorageCard sys={sys} />
         <ProcessedCard tel={tel} />
         <UptimeCard sys={sys} />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-4 @min-[760px]:grid-cols-2">
         <StorageOverview sys={sys} />
         <MaintenanceTools tel={tel} />
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid gap-4 @min-[760px]:grid-cols-2">
         <ActivityTimeline tel={tel} />
         <Card variant="danger" className="p-5" aria-label="Danger zone">
           <div className="mb-4 flex items-start gap-3">
@@ -333,6 +334,9 @@ export default function AdminMaintenancePage() {
           </div>
           <div className="border-t border-rose-400/25 pt-4">
             <GlobalNukePanel onDeleted={refresh} />
+          </div>
+          <div className="mt-5 border-t border-rose-400/25 pt-4">
+            <GlobalChatDeletePanel />
           </div>
         </Card>
       </div>

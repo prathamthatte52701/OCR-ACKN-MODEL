@@ -11,7 +11,7 @@ function Empty({ children }) {
 // Presentational: data and callbacks arrive as props. `overlay` picks the dialog-with-backdrop
 // layout (narrow screens); otherwise it is a docked complementary region.
 export default function AdminChatPanel({
-  overlay, onClose, panelRef, threads, threadsReady, selected, onSelect, notice, list, composer,
+  overlay, onClose, panelRef, threads, threadsReady, selected, onSelect, notice, onClear, list, composer,
 }) {
   const hasUser = Boolean(selected)
   let body = (
@@ -50,6 +50,14 @@ export default function AdminChatPanel({
     >
       <header className="flex items-center gap-2 border-b border-white/10 px-3 py-3">
         <UserPicker threads={threads} selected={selected} onSelect={onSelect} />
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={!hasUser}
+          className={`shrink-0 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-white/[0.06] disabled:opacity-40 ${FOCUS}`}
+        >
+          Clear chat...
+        </button>
         <button
           type="button"
           onClick={onClose}

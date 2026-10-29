@@ -21,7 +21,12 @@ const ACTIONS = [
   'user_rejected',
   'user_email_changed',
   'admin_access',
+  'chat_cleared',
+  'chat_clear_blocked',
 ]
+
+// Readable names for the chat audit actions. Their context holds counts and ids only, never message text.
+const ACTION_LABELS = { chat_cleared: 'Chat cleared', chat_clear_blocked: 'Chat clear blocked' }
 
 function actionTone(a = '') {
   if (/deleted|rejected|purged/.test(a)) return 'red'
@@ -82,7 +87,7 @@ export default function AdminLogsPage() {
             <label htmlFor="log-action" className="ui-label mb-1 block">Action</label>
             <select id="log-action" value={action} onChange={(e) => setAction(e.target.value)} className="input [color-scheme:dark] sm:w-56">
               <option value="">All actions</option>
-              {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+              {ACTIONS.map((a) => <option key={a} value={a}>{ACTION_LABELS[a] ?? a}</option>)}
             </select>
           </div>
           <div className="min-w-[180px] flex-1 sm:flex-none">
@@ -118,7 +123,7 @@ export default function AdminLogsPage() {
                   <td className="whitespace-nowrap text-[var(--muted)]">{formatIST(l.createdAt)}</td>
                   <td><OwnerCell owner={l.user} /></td>
                   <td>
-                    <Badge tone={actionTone(l.action)}>{l.action}</Badge>
+                    <Badge tone={actionTone(l.action)}>{ACTION_LABELS[l.action] ?? l.action}</Badge>
                   </td>
                   <td className="max-w-[360px] truncate text-[var(--muted)]" title={JSON.stringify(l.context)}>
                     {JSON.stringify(l.context)}
