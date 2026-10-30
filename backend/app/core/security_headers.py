@@ -33,6 +33,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         for name, value in _HEADERS.items():
             response.headers[name] = value
-        if request.url.path not in _DOCS_PATHS:
+        # a route may set a stricter CSP of its own (the chat file route does): keep it
+        if (
+            request.url.path not in _DOCS_PATHS
+            and "Content-Security-Policy" not in response.headers
+        ):
             response.headers["Content-Security-Policy"] = _CSP
         return response

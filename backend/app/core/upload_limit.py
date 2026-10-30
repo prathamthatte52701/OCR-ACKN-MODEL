@@ -30,9 +30,12 @@ class _RequestTooLarge(Exception):
 
 
 class UploadSizeLimitMiddleware:
-    def __init__(self, app: ASGIApp, limits: dict[str, int]) -> None:
+    def __init__(
+        self, app: ASGIApp, limits: dict[str, int], details: dict[str, str] | None = None
+    ) -> None:
         self.app = app
         self.limits = limits  # exact path -> max request body bytes
+        self.details = details or {}  # exact path -> its own 413 message (default: 5 MB text)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         limit = self.limits.get(scope.get("path", "")) if scope["type"] == "http" else None
@@ -40,6 +43,7 @@ class UploadSizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
+        detail = self.details.get(scope["path"], TOO_BIG_DETAIL)
         declared = dict(scope["headers"]).get(b"content-length")
         if declared is not None:
             try:
@@ -47,9 +51,10 @@ class UploadSizeLimitMiddleware:
             except ValueError:
                 too_big = True
             if too_big:
-                await self._reject(scope, receive, send)
+                await self._reject(scope, receive, send, detail)
                 return
 
+        body = json.dumps({"detail": detail}).encode()
         received = 0
         exceeded = False
         body_sent = False
@@ -80,21 +85,21 @@ class UploadSizeLimitMiddleware:
                         "status": 413,
                         "headers": [
                             (b"content-type", b"application/json"),
-                            (b"content-length", str(len(_TOO_BIG_BODY)).encode()),
+                            (b"content-length", str(len(body)).encode()),
                         ],
                     }
                 )
             elif message["type"] == "http.response.body" and not body_sent:
                 body_sent = True
-                await send({"type": "http.response.body", "body": _TOO_BIG_BODY})
+                await send({"type": "http.response.body", "body": body})
 
         try:
             await self.app(scope, limited_receive, replacing_send)
         except _RequestTooLarge:
             if not body_sent:
-                await self._reject(scope, receive, send)
+                await self._reject(scope, receive, send, detail)
 
     @staticmethod
-    async def _reject(scope: Scope, receive: Receive, send: Send) -> None:
-        response = JSONResponse({"detail": TOO_BIG_DETAIL}, status_code=413)
+    async def _reject(scope: Scope, receive: Receive, send: Send, detail: str) -> None:
+        response = JSONResponse({"detail": detail}, status_code=413)
         await response(scope, receive, send)

@@ -8,6 +8,8 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from app.features.auth.dependencies import iso_utc
+from app.features.chat import files
+from app.features.chat.errors import ChatError
 
 CHAT_COLORS = ("blue", "violet", "teal", "green", "amber", "orange", "rose", "slate")
 DEFAULT_COLOR = "blue"
@@ -27,13 +29,6 @@ CLEAR_RANGES = {
 }
 MAX_LIMIT = 200
 _APPROVED = {"$or": [{"status": "approved"}, {"status": {"$exists": False}}]}
-
-
-class ChatError(Exception):
-    def __init__(self, status: int, detail: str) -> None:
-        super().__init__(detail)
-        self.status = status
-        self.detail = detail
 
 
 def utcnow() -> datetime:
@@ -77,6 +72,19 @@ def _name(user: dict | None, removed: str) -> str:
     return user["username"] if user else removed
 
 
+def _attachment(rec: dict | None, now: datetime) -> dict | None:
+    if rec is None:
+        return None
+    return {
+        "id": str(rec["_id"]),
+        "name": rec["name"],
+        "kind": rec["kind"],
+        "size": rec["size"],
+        # past expiresAt counts as expired even if the hourly sweep has not run yet
+        "expired": bool(rec.get("expired")) or aware(rec["expiresAt"]) <= now,
+    }
+
+
 async def serialize(
     db: Any, docs: list[dict], viewer_id: ObjectId, now: datetime | None = None
 ) -> list[dict]:
@@ -86,6 +94,10 @@ async def serialize(
     if ids:
         async for u in db.users.find({"_id": {"$in": list(ids)}}, {"username": 1}):
             users[u["_id"]] = u
+    atts: dict[ObjectId, dict] = {}
+    if docs:
+        async for a in db.chatattachments.find({"messageId": {"$in": [d["_id"] for d in docs]}}):
+            atts[a["messageId"]] = a
     out = []
     for d in docs:
         removed = "Removed admin" if d["fromRole"] == "admin" else "Removed user"
@@ -99,6 +111,7 @@ async def serialize(
                 "toAdminId": str(to_id) if to_id else None,
                 "toAdminName": _name(users.get(to_id), "Removed admin") if to_id else None,
                 "text": d["text"],
+                "attachment": _attachment(atts.get(d["_id"]), now),
                 "createdAt": iso_utc(d["createdAt"]),
                 "editedAt": iso_utc(d.get("editedAt")),
                 "readAt": iso_utc(d.get("readAt")),
@@ -238,10 +251,16 @@ async def fetch_messages(
 
 
 async def _insert(
-    db: Any, thread_user_id: ObjectId, sender: ObjectId, role: str, to: ObjectId | None, text: str
+    db: Any,
+    thread_user_id: ObjectId,
+    sender: ObjectId,
+    role: str,
+    to: ObjectId | None,
+    text: str,
+    msg_id: ObjectId | None = None,
 ) -> dict:
     now = utcnow()
-    doc = {
+    doc: dict[str, Any] = {
         "threadUserId": thread_user_id,
         "fromId": sender,
         "fromRole": role,
@@ -252,12 +271,13 @@ async def _insert(
         "editedAt": None,
         "readAt": None,
     }
+    if msg_id is not None:
+        doc["_id"] = msg_id
     doc["_id"] = (await db.chatmessages.insert_one(doc)).inserted_id
     return (await serialize(db, [doc], sender, now))[0]
 
 
-async def send_user_message(db: Any, user_id: ObjectId, to_admin_id: Any, text: Any) -> dict:
-    clean = clean_text(text)
+async def resolve_admin_recipient(db: Any, to_admin_id: Any) -> ObjectId:
     try:
         admin_id = parse_object_id(to_admin_id, "admin")
     except ChatError:
@@ -265,13 +285,24 @@ async def send_user_message(db: Any, user_id: ObjectId, to_admin_id: Any, text: 
     admin = await db.users.find_one({"_id": admin_id, "role": "admin", **_APPROVED}, {"_id": 1})
     if admin is None:
         raise ChatError(422, "Choose an admin to write to.")
+    return admin_id
+
+
+async def resolve_user_recipient(db: Any, user_id: Any) -> ObjectId:
+    target = parse_object_id(user_id, "user")
+    await _thread_user(db, target)
+    return target
+
+
+async def send_user_message(db: Any, user_id: ObjectId, to_admin_id: Any, text: Any) -> dict:
+    clean = clean_text(text)
+    admin_id = await resolve_admin_recipient(db, to_admin_id)
     return await _insert(db, user_id, user_id, "user", admin_id, clean)
 
 
 async def send_admin_message(db: Any, admin_id: ObjectId, user_id: Any, text: Any) -> dict:
     clean = clean_text(text)
-    target = parse_object_id(user_id, "user")
-    await _thread_user(db, target)
+    target = await resolve_user_recipient(db, user_id)
     return await _insert(db, target, admin_id, "admin", None, clean)
 
 
@@ -376,21 +407,73 @@ async def set_color(db: Any, user_id: ObjectId, color: Any) -> str:
     return color
 
 
-async def clear_thread(
+async def clear_thread_full(
     db: Any, admin_id: ObjectId, thread_user_id: ObjectId, older_than: Any, dry_run: bool
-) -> int:
+) -> dict:
+    """Messages deleted (or that would be) plus the chat files that go with them."""
     if older_than != "all" and (not isinstance(older_than, str) or older_than not in CLEAR_RANGES):
         raise ChatError(422, "Choose how old the messages should be.")
     await _thread_user(db, thread_user_id)
     query: dict[str, Any] = {"threadUserId": thread_user_id}
     if older_than != "all":
         query["createdAt"] = {"$lt": utcnow() - CLEAR_RANGES[older_than]}
+    ids = [m["_id"] async for m in db.chatmessages.find(query, {"_id": 1})]
+    attach = {"messageId": {"$in": ids}}
     if dry_run:
-        return await db.chatmessages.count_documents(query)
-    return (await db.chatmessages.delete_many(query)).deleted_count
+        return {"messages": len(ids), **await files.count_files(db, attach)}
+    freed = await files.delete_attachments(db, attach)
+    # by id, not by the time query: a message that arrived meanwhile keeps its file
+    deleted = (await db.chatmessages.delete_many({"_id": {"$in": ids}})).deleted_count
+    return {"messages": deleted, **freed}
+
+
+async def clear_thread(
+    db: Any, admin_id: ObjectId, thread_user_id: ObjectId, older_than: Any, dry_run: bool
+) -> int:
+    return (await clear_thread_full(db, admin_id, thread_user_id, older_than, dry_run))["messages"]
+
+
+async def clear_all_full(db: Any, admin_id: ObjectId, dry_run: bool) -> dict:
+    if dry_run:
+        return {
+            "messages": await db.chatmessages.count_documents({}),
+            **await files.count_files(db, {}),
+        }
+    freed = await files.delete_attachments(db, {})
+    deleted = (await db.chatmessages.delete_many({})).deleted_count
+    # a file message sent between the two steps lost its message: drop its file too
+    left = [m["_id"] async for m in db.chatmessages.find({}, {"_id": 1})]
+    late = await files.delete_attachments(db, {"messageId": {"$nin": left}})
+    return {"messages": deleted, **{k: freed[k] + late[k] for k in freed}}
 
 
 async def clear_all(db: Any, admin_id: ObjectId, dry_run: bool) -> int:
-    if dry_run:
-        return await db.chatmessages.count_documents({})
-    return (await db.chatmessages.delete_many({})).deleted_count
+    return (await clear_all_full(db, admin_id, dry_run))["messages"]
+
+
+async def send_file_message(
+    db: Any,
+    sender_id: ObjectId,
+    role: str,
+    recipient: Any,
+    text: Any,
+    upload: Any,
+) -> dict:
+    """One message with one attachment. Order: recipient, then the bytes are read and checked,
+    and only then is anything stored. A failure after the file is stored removes it again."""
+    caption = "" if text is None or text == "" or not text.strip() else clean_text(text)
+    if role == "admin":
+        thread_id, to = await resolve_user_recipient(db, recipient), None
+    else:
+        thread_id, to = sender_id, await resolve_admin_recipient(db, recipient)
+    checked = await files.read_and_validate(upload)
+    await files.check_capacity(db, len(checked.data))
+    msg_id = ObjectId()
+    stored_id = await files.store_bytes(checked)
+    try:
+        await files.insert_record(db, checked, stored_id, msg_id, thread_id, sender_id)
+        return await _insert(db, thread_id, sender_id, role, to, caption, msg_id)
+    except BaseException:
+        await db.chatattachments.delete_many({"messageId": msg_id})
+        await files.delete_stored(db, stored_id)
+        raise

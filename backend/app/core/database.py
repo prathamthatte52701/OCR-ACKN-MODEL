@@ -5,10 +5,11 @@ from app.core.config import settings
 _client: AsyncIOMotorClient | None = None
 _db: AsyncIOMotorDatabase | None = None
 _gridfs: AsyncIOMotorGridFSBucket | None = None
+_chat_gridfs: AsyncIOMotorGridFSBucket | None = None
 
 
 async def connect_to_mongo() -> None:
-    global _client, _db, _gridfs
+    global _client, _db, _gridfs, _chat_gridfs
     # tz_aware=True: without it, PyMongo/Motor decodes BSON dates as naive
     # datetimes (no tzinfo) even though they're stored as UTC - FastAPI then
     # serializes them with no offset suffix (e.g. "2026-07-24T03:47:22" instead
@@ -19,6 +20,9 @@ async def connect_to_mongo() -> None:
     _client = AsyncIOMotorClient(settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True)
     _db = _client[settings.mongo_db_name]
     _gridfs = AsyncIOMotorGridFSBucket(_db)
+    # chat files live in their own bucket (chatfs.*): document code, the orphaned-files page and
+    # storage counts only ever look at the default "fs" bucket, so they can never touch these.
+    _chat_gridfs = AsyncIOMotorGridFSBucket(_db, bucket_name="chatfs")
     await _client.admin.command("ping")
     await _ensure_indexes(_db)
 
@@ -45,6 +49,10 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.chatmessages.create_index([("threadUserId", 1), ("updatedAt", 1)])
     await db.chatmessages.create_index([("threadUserId", 1), ("createdAt", 1)])
     await db.chatmessages.create_index([("toAdminId", 1), ("readAt", 1)])
+    await db.chatattachments.create_index([("messageId", 1)])
+    await db.chatattachments.create_index([("threadUserId", 1)])
+    await db.chatattachments.create_index([("expired", 1), ("expiresAt", 1)])
+    await db.chatfileorphans.create_index([("storedFileId", 1)], unique=True)
     await db.auditlogs.create_index([("action", 1)])
     await _ensure_audit_ttl(db, settings.audit_log_retention_days)
     # unique on gridFsFileId - record_orphaned_file() upserts on this key so a
@@ -113,3 +121,9 @@ def get_gridfs() -> AsyncIOMotorGridFSBucket:
     if _gridfs is None:
         raise RuntimeError("GridFS not initialized - connect_to_mongo() must run first.")
     return _gridfs
+
+
+def get_chat_gridfs() -> AsyncIOMotorGridFSBucket:
+    if _chat_gridfs is None:
+        raise RuntimeError("GridFS not initialized - connect_to_mongo() must run first.")
+    return _chat_gridfs

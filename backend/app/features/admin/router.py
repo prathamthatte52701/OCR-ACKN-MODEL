@@ -34,6 +34,7 @@ from app.features.admin.schemas import (
 )
 from app.features.auth.dependencies import CurrentUser, require_admin
 from app.features.auth.schemas import TempPasswordRequest
+from app.features.chat.files import delete_attachments as chat_delete_attachments
 from app.features.documents.correction_rules import (
     CHANGED_MSG,
     apply_correction,
@@ -461,12 +462,15 @@ async def delete_user(
     await db.workbooks.delete_many({"userId": user_id})
     await db.settings.delete_many({"userId": user_id})
     await db.passwordresetrequests.delete_many({"userId": user_id})
+    chat_files = await chat_delete_attachments(db, {"threadUserId": user_id})
     await db.chatmessages.delete_many({"threadUserId": user_id})  # only this user's thread
 
     deleted_email = user["email"]
     await db.users.delete_one({"_id": user_id})
     await db.passwordresetrequests.delete_many({"userId": user_id})  # one that raced the delete
     await db.chatmessages.delete_many({"threadUserId": user_id})  # a message sent during the delete
+    late = await chat_delete_attachments(db, {"threadUserId": user_id})
+    chat_files = {k: chat_files[k] + late[k] for k in chat_files}
 
     await log_action(
         current_user.id,
@@ -476,6 +480,8 @@ async def delete_user(
             "targetEmail": deleted_email,
             "documentsDeleted": len(doc_ids),
             "workbooksDeleted": len(workbooks),
+            "chatFilesDeleted": chat_files["files"],
+            "chatBytesFreed": chat_files["bytes"],
         },
     )
     return {"message": "User and all associated data deleted successfully."}

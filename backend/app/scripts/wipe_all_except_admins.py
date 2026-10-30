@@ -31,8 +31,10 @@ DATA_COLLECTIONS = (
     "settings",
     "passwordresetrequests",
     "chatmessages",
+    "chatattachments",
+    "chatfileorphans",
 )
-GRIDFS_COLLECTIONS = ("fs.files", "fs.chunks")
+GRIDFS_COLLECTIONS = ("fs.files", "fs.chunks", "chatfs.files", "chatfs.chunks")
 EXPORT_SUFFIXES = (".xlsx", ".lock")  # also covers .tmp{pid}.xlsx swap files
 NON_ADMIN = {"role": {"$ne": "admin"}}
 
@@ -78,6 +80,8 @@ async def _snapshot(db: AsyncIOMotorDatabase, exports_dir: Path) -> dict[str, An
         "gridfs_files": await db["fs.files"].count_documents({}),
         "gridfs_chunks": await db["fs.chunks"].count_documents({}),
         "gridfs_bytes": agg[0]["n"] if agg else 0,
+        "chatfs_files": await db["chatfs.files"].count_documents({}),
+        "chatfs_chunks": await db["chatfs.chunks"].count_documents({}),
         "export_files": files,
         "export_refused": refused,
     }
@@ -93,6 +97,7 @@ def _print_table(s: dict[str, Any], exports_dir: Path, applied: bool) -> None:
         f"  GridFS: {s['gridfs_files']} files, {s['gridfs_chunks']} chunks, "
         f"{s['gridfs_bytes']} bytes {verb}"
     )
+    print(f"  Chat GridFS: {s['chatfs_files']} files, {s['chatfs_chunks']} chunks {verb}")
     print(f"  Export files {verb} in {exports_dir}: {len(s['export_files'])}")
     for p in s["export_files"]:
         print(f"    {p.name}")
@@ -178,6 +183,8 @@ async def run(argv: list[str], *, exports_dir: Path | None = None) -> int:
             problems.append(f"{after['non_admin']} non-admin users remain")
         if after["gridfs_files"] or after["gridfs_chunks"]:
             problems.append("GridFS is not empty")
+        if after["chatfs_files"] or after["chatfs_chunks"]:
+            problems.append("Chat GridFS is not empty")
         leftovers = [p.name for p in after["export_files"] if p.name not in failed]
         problems += [f"export file remains: {n}" for n in leftovers]
 

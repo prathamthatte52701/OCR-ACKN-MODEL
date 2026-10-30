@@ -19,6 +19,7 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.core.upload_limit import UploadSizeLimitMiddleware
 from app.features.admin.router import router as admin_router
 from app.features.auth.router import router as auth_router
+from app.features.chat.files import PDF_MAX_BYTES, run_expiry_forever
 from app.features.chat.router import router as chat_router
 from app.features.documents.router import MAX_BULK_FILES, MAX_FILE_SIZE, recover_interrupted_uploads
 from app.features.documents.router import router as documents_router
@@ -54,7 +55,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # runs in the background. Task is pinned to app.state so it isn't
     # garbage-collected mid-run.
     app.state.recovery_task = asyncio.create_task(_recover_interrupted_uploads_in_background())
+    app.state.chat_expiry_task = asyncio.create_task(run_expiry_forever())
     yield
+    app.state.chat_expiry_task.cancel()
     await close_mongo_connection()
     logger.info("MongoDB connection closed")
 
@@ -106,6 +109,7 @@ async def validation_exception_handler(
     return JSONResponse(status_code=422, content={"detail": detail})
 
 
+CHAT_FILE_PATH = "/api/chat/messages/file"
 # Whole-request ceilings for the upload routes (files + multipart framing). Runs before
 # FastAPI parses the multipart body, which is the point (a route-level check is too late).
 _MULTIPART_OVERHEAD = 1024 * 1024
@@ -114,7 +118,9 @@ app.add_middleware(
     limits={
         "/api/documents/upload": MAX_FILE_SIZE + _MULTIPART_OVERHEAD,
         "/api/documents/bulk-upload": MAX_BULK_FILES * MAX_FILE_SIZE + _MULTIPART_OVERHEAD,
+        CHAT_FILE_PATH: PDF_MAX_BYTES + _MULTIPART_OVERHEAD,
     },
+    details={CHAT_FILE_PATH: "This file is too large. Images can be up to 2 MB, PDFs up to 3 MB."},
 )
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)

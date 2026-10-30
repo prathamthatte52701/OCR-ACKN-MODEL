@@ -2,15 +2,17 @@ import asyncio
 from collections.abc import Awaitable
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from limits import RateLimitItemPerHour
+from starlette.datastructures import UploadFile
 
 from app.core.audit_log import safe_log_action
 from app.core.database import get_database
 from app.core.rate_limit import limiter, user_or_ip_key
 from app.core.security import verify_password
 from app.features.auth.dependencies import CurrentUser, get_current_user, iso_utc, require_admin
-from app.features.chat import service
+from app.features.chat import files, service
+from app.features.chat.errors import ChatError
 from app.features.chat.schemas import (
     ClearAllRequest,
     ClearRequest,
@@ -30,7 +32,7 @@ CLEAR_ALL_PER_HOUR = 5
 async def _run(coro: Awaitable[Any]) -> Any:
     try:
         return await coro
-    except service.ChatError as exc:
+    except ChatError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail) from None
 
 
@@ -117,6 +119,70 @@ async def send_message(
     return await _run(coro)
 
 
+_FORM_FIELDS = {"file", "text", "toAdminId", "userId"}
+
+
+@router.post("/messages/file", status_code=201)
+async def send_file_message(
+    request: Request, current_user: CurrentUser = Depends(get_current_user)
+) -> dict:
+    """multipart: file (exactly one), text (optional), toAdminId (users) / userId (admins)."""
+    is_admin = current_user.role == "admin"
+    role = "admin" if is_admin else "user"
+    _hit(request, "chat_send", SEND_LIMITS[role])
+    _hit(request, "chat_file", files.FILE_SENDS_PER_HOUR[role])
+    try:
+        form = await request.form(max_files=3, max_fields=10)
+    except Exception:  # noqa: BLE001 - malformed multipart or a client that went away
+        raise HTTPException(status_code=422, detail=files.BAD_FILE) from None
+    try:
+        if set(form.keys()) - _FORM_FIELDS:
+            raise HTTPException(status_code=422, detail="Unknown field.")
+        uploads = form.getlist("file")
+        if len(uploads) != 1 or not isinstance(uploads[0], UploadFile):
+            raise HTTPException(status_code=422, detail="Attach exactly one file.")
+        text = form.get("text")
+        if text is not None and not isinstance(text, str):
+            raise HTTPException(status_code=422, detail="Message must be text.")
+        if is_admin:
+            if "toAdminId" in form:
+                raise HTTPException(status_code=422, detail="Admins write to a user, not an admin.")
+            recipient = form.get("userId")
+        else:
+            if "userId" in form:
+                raise HTTPException(status_code=422, detail="Choose an admin to write to.")
+            recipient = form.get("toAdminId")
+        return await _run(
+            service.send_file_message(
+                get_database(), current_user.id, role, recipient, text, uploads[0]
+            )
+        )
+    finally:
+        await form.close()
+
+
+@router.get("/files/{attachment_id}")
+@limiter.limit("600/hour", key_func=user_or_ip_key)
+async def get_file(
+    request: Request, attachment_id: str, current_user: CurrentUser = Depends(get_current_user)
+) -> Response:
+    try:
+        aid = service.parse_object_id(attachment_id, "file id")
+    except ChatError:
+        raise HTTPException(status_code=404, detail="File not found.") from None
+    rec, data = await _run(files.open_file(get_database(), aid, current_user.id, current_user.role))
+    return Response(
+        content=data,
+        media_type=rec["contentType"],
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Content-Disposition": files.content_disposition(rec["kind"], rec["name"]),
+        },
+    )
+
+
 @router.patch("/messages/{message_id}")
 @limiter.limit("60/hour", key_func=user_or_ip_key)
 async def edit_message(
@@ -181,6 +247,13 @@ async def put_color(
     return {"chatColor": await _run(service.set_color(get_database(), current_user.id, body.color))}
 
 
+def _with_files(out: dict, res: dict) -> dict:
+    """files/bytes appear only when chat files were involved: text replies keep the old shape."""
+    if res["files"]:
+        out.update(files=res["files"], bytes=res["bytes"])
+    return out
+
+
 def _need_delete(dry_run: bool, confirm: Any) -> None:
     if not dry_run and confirm != "DELETE":
         raise HTTPException(status_code=422, detail='Type "DELETE" to confirm.')
@@ -190,21 +263,23 @@ def _need_delete(dry_run: bool, confirm: Any) -> None:
 async def clear(body: ClearRequest, current_user: CurrentUser = Depends(require_admin)) -> dict:
     _need_delete(body.dry_run, body.confirm)
 
-    async def go() -> int:
+    async def go() -> dict:
         uid = service.parse_object_id(body.user_id, "user")
-        return await service.clear_thread(
+        return await service.clear_thread_full(
             get_database(), current_user.id, uid, body.older_than, body.dry_run
         )
 
-    n = await _run(go())
+    res = await _run(go())
     if body.dry_run:
-        return {"count": n}
+        return _with_files({"count": res["messages"]}, res)
     await safe_log_action(
         current_user.id,
         "chat_cleared",
-        {"scope": str(body.user_id), "range": body.older_than, "deleted": n},
+        _with_files(
+            {"scope": str(body.user_id), "range": body.older_than, "deleted": res["messages"]}, res
+        ),
     )
-    return {"deleted": n}
+    return _with_files({"deleted": res["messages"]}, res)
 
 
 @router.post("/clear-all")
@@ -230,9 +305,12 @@ async def clear_all(
         await safe_log_action(current_user.id, "chat_clear_blocked", {"reason": "wrong_password"})
         raise HTTPException(status_code=400, detail="Incorrect password.")
     if body.dry_run:
-        return {"count": await service.clear_all(db, current_user.id, True)}
-    n = await service.clear_all(db, current_user.id, False)
+        res = await service.clear_all_full(db, current_user.id, True)
+        return _with_files({"count": res["messages"]}, res)
+    res = await service.clear_all_full(db, current_user.id, False)
     await safe_log_action(
-        current_user.id, "chat_cleared", {"scope": "all", "range": "all", "deleted": n}
+        current_user.id,
+        "chat_cleared",
+        _with_files({"scope": "all", "range": "all", "deleted": res["messages"]}, res),
     )
-    return {"deleted": n}
+    return _with_files({"deleted": res["messages"]}, res)

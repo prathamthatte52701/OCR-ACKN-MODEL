@@ -50,6 +50,19 @@ class Settings(BaseSettings):
         default=DEFAULT_AUDIT_LOG_RETENTION_DAYS, alias="AUDIT_LOG_RETENTION_DAYS"
     )
 
+    # Cap on the STORED bytes of all chat attachments together (MB). Blank = 75.
+    chat_files_max_total_mb: int = Field(default=75, alias="CHAT_FILES_MAX_TOTAL_MB")
+
+    @field_validator("chat_files_max_total_mb", mode="before")
+    @classmethod
+    def _clean_chat_cap(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return 75
+        text = str(value).strip()
+        if not text.isascii() or not text.isdigit() or not 1 <= int(text) <= 100000:
+            raise ValueError("CHAT_FILES_MAX_TOTAL_MB must be a whole number from 1 to 100000.")
+        return int(text)
+
     @field_validator("mongo_uri", mode="before")
     @classmethod
     def _require_mongo_uri(cls, value: object) -> object:
