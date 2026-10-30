@@ -28,6 +28,7 @@ export default function AdminChat({ adminId, open, overlay, onClose, panelRef, b
             messages: chat.messages,
             offset: chat.offset,
             now: chat.now,
+            files: chat.files,
             expiredEdits: chat.expiredEdits,
             edit: chat.edit,
             onStartEdit: chat.startEdit,
@@ -45,6 +46,10 @@ export default function AdminChat({ adminId, open, overlay, onClose, panelRef, b
             onSend: chat.send,
             sending: chat.sending,
             error: chat.sendError,
+            file: chat.file,
+            onFileChange: chat.chooseFile,
+            fileError: chat.fileError,
+            progress: chat.progress,
           }}
         />
       )}

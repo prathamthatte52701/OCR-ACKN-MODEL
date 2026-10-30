@@ -65,6 +65,10 @@ const contrast = (fg, bg) => {
   assert.equal(clearSummary('1w', 1), '1 message will be deleted (older than 1 week)')
   assert.equal(clearSummary('3m', 12), '12 messages will be deleted (older than 3 months)')
   assert.equal(clearSummary('all', 7), '7 messages will be deleted (all messages)')
+  assert.equal(clearSummary('all', 7, 1), '7 messages and 1 file will be deleted (all messages)')
+  assert.equal(clearSummary('1w', 2, 3), '2 messages and 3 files will be deleted (older than 1 week)')
+  assert.equal(core.filesPart(0), '')
+  assert.equal(core.filesPart(2), ' and 2 files')
   assert.deepEqual(CLEAR_RANGES.map((r) => r.id), ['24h', '3d', '1w', '1m', '3m', '6m', '1y', 'all'])
 
   // isTyped: exact, case-sensitive, no trim

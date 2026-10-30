@@ -81,6 +81,62 @@ export function threadWasCleared(messages, threadCount) {
   return threadCount < messages.length
 }
 
+// ---- file attachments (the server re-checks everything; this is only for fast feedback) ----
+
+export const IMAGE_MAX_BYTES = 2 * 1024 * 1024
+export const PDF_MAX_BYTES = 3 * 1024 * 1024
+export const ALLOWED_TYPES = {
+  'image/jpeg': 'image',
+  'image/png': 'image',
+  'image/webp': 'image',
+  'application/pdf': 'pdf',
+}
+const EXTENSIONS = { jpg: 'image', jpeg: 'image', png: 'image', webp: 'image', pdf: 'pdf' }
+
+// 'image' | 'pdf' | null. A browser hint only: the server decides from the file's bytes.
+export function fileKind(file) {
+  if (!file) return null
+  if (file.type) return ALLOWED_TYPES[file.type] ?? null
+  const ext = String(file.name || '').split('.').pop().toLowerCase()
+  return EXTENSIONS[ext] ?? null
+}
+
+// Plain error text, or null when the file looks fine.
+export function validateFile(file) {
+  if (!file) return null
+  const kind = fileKind(file)
+  if (!kind) return 'This file type is not allowed. Use JPG, PNG, WebP or PDF.'
+  if (!file.size) return 'This file could not be read.'
+  if (kind === 'image' && file.size > IMAGE_MAX_BYTES) return 'Images can be up to 2 MB.'
+  if (kind === 'pdf' && file.size > PDF_MAX_BYTES) return 'PDFs can be up to 3 MB.'
+  return null
+}
+
+export function formatBytes(n) {
+  if (!(n >= 0)) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function attachmentLabel(att) {
+  if (!att) return ''
+  return att.expired ? 'File expired' : `${att.name} (${formatBytes(att.size)})`
+}
+
+// A message needs text or a file; the text keeps the 1000 code point rule either way.
+export function canSend({ text = '', file = null }) {
+  if (countChars(text) > MAX_CHARS) return false
+  return text.trim() !== '' || Boolean(file)
+}
+
+export function fileSendErrorText(err) {
+  const status = err?.response?.status
+  if (!status) return couldNot('send')
+  if (status === 429) return 'Too many files. Try again in a while.'
+  return err.userMessage || couldNot('send')
+}
+
 const couldNot = (what) => `Could not ${what}. Your text is still here.`
 
 export function sendErrorText(err) {

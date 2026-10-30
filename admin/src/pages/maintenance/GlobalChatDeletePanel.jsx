@@ -5,7 +5,7 @@ import Banner from '../../components/Banner'
 import Modal from '../../components/Modal'
 import PasswordInput from '../../components/PasswordInput'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
-import { describeGlobalClearError, isTyped } from '../../utils/chatAdminCore'
+import { describeGlobalClearError, filesPart, isTyped } from '../../utils/chatAdminCore'
 import WarningIcon from './WarningIcon'
 
 // PasswordInput keeps its own (old) base classes; these override them to the admin tokens.
@@ -30,7 +30,7 @@ function DeleteAllChatsModal({ onClose, onDeleted }) {
     setError('')
     try {
       const res = await clearAllChats(attempt)
-      onDeleted(res.deleted)
+      onDeleted(res.deleted, res.files ?? 0)
     } catch (err) {
       setError(describeGlobalClearError(err))
       setBusy(false)
@@ -44,7 +44,7 @@ function DeleteAllChatsModal({ onClose, onDeleted }) {
       <div ref={bodyRef}>
         <h2 className="mb-2 text-lg font-extrabold text-white">Delete ALL chat messages</h2>
         <div className="mb-4 rounded-xl border border-amber-400/35 bg-amber-400/10 px-3.5 py-2.5 text-[13px] leading-5 text-amber-200">
-          This deletes every chat message between every user and every admin. It <span className="font-extrabold">CANNOT be undone</span>.
+          This deletes every chat message, and every file sent in chat, between every user and every admin. It <span className="font-extrabold">CANNOT be undone</span>.
         </div>
         <div className="space-y-3.5">
           <div>
@@ -72,16 +72,16 @@ export default function GlobalChatDeletePanel() {
   const [open, setOpen] = useState(false)
   const [success, setSuccess] = useState('')
 
-  function handleDeleted(count) {
+  function handleDeleted(count, files) {
     setOpen(false)
-    setSuccess(`Deleted ${count} chat ${count === 1 ? 'message' : 'messages'} across all users.`)
+    setSuccess(`Deleted ${count} chat ${count === 1 ? 'message' : 'messages'}${filesPart(files)} across all users.`)
   }
 
   return (
     <div>
       <h3 className="mb-1 text-[16px] font-bold text-white">Delete all chat messages</h3>
       <p className="mb-4 text-[14px] leading-6 text-rose-100/80">
-        Permanently deletes the chat between every user and every admin. Documents are not touched.
+        Permanently deletes the chat and all chat files between every user and every admin. Documents are not touched.
       </p>
       <Banner success={success} />
       <button type="button" onClick={() => { setSuccess(''); setOpen(true) }} className="btn btn-danger">

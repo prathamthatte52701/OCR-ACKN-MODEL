@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { editMessage, getMessages, listThreads, markRead, sendMessage } from '../api/chat'
+import { editMessage, fetchChatFile, getMessages, listThreads, markRead, sendChatFile, sendMessage } from '../api/chat'
+import { useChatFiles } from './useChatFiles'
 import { createState, markFinished, markStarted, recordFailure, recordSuccess, shouldRun } from '../utils/autoRefreshCore'
 import { createTokens, overlayUnread, pickSelected, unreadForAdmin } from '../utils/chatAdminCore'
 import {
-  clampText, editErrorText, mergeMessages, newestId, nextEditExpiry, sendErrorText,
-  threadFromPage, threadWasCleared,
+  clampText, editErrorText, fileSendErrorText, mergeMessages, newestId, nextEditExpiry, sendErrorText,
+  threadFromPage, threadWasCleared, validateFile,
 } from '../utils/chatCore'
 import { ADMIN_TICK_EVENT, notifyCountsChanged } from '../utils/events'
 import { chatUserKey, readStored, removeStored, writeStored } from '../utils/layoutStorage'
@@ -85,6 +86,8 @@ export function useAdminChat({ adminId, open, byUser }) {
   const [drafts, setDrafts] = useState({})
   const [sendFailure, setSendFailure] = useState(null)
   const [sending, setSending] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [fileByUser, setFileByUser] = useState({}) // userId -> { file, error }: one chip per thread
   const sendingRef = useRef(false)
   const [edit, setEdit] = useState({ id: null, error: null, saving: false })
   const [expiredEdits, setExpiredEdits] = useState(() => new Set())
@@ -201,6 +204,8 @@ export function useAdminChat({ adminId, open, byUser }) {
 
   const active = open && Boolean(selectedId) && thread.userId === selectedId
   const view = active ? thread : EMPTY_THREAD
+  // cache lives while this thread is open: closing the panel or switching thread revokes every URL
+  const files = useChatFiles(active ? `${adminId}:${selectedId}` : null, fetchChatFile)
   const now = useEditClock(view, active)
 
   // Mark read only what the screen showed, for the thread that was open: nothing while the tab is
@@ -244,21 +249,31 @@ export function useAdminChat({ adminId, open, byUser }) {
       sendingRef.current = true
       setSending(true)
       setSendFailure(null)
+      setProgress(0)
+      const file = fileByUser[forUser]?.file ?? null
       try {
-        putMessage(forUser, await sendMessage(forUser, text))
+        putMessage(forUser, file ? await sendChatFile(forUser, file, text, setProgress) : await sendMessage(forUser, text))
+        if (file) setFileByUser((f) => ({ ...f, [forUser]: { file: null, error: null } }))
         setDrafts((d) => (d[forUser]?.trim() === text ? { ...d, [forUser]: '' } : d)) // keep what was typed while sending
         loadThreads()
         return true
       } catch (err) {
-        setSendFailure({ userId: forUser, text: sendErrorText(err) })
+        setSendFailure({ userId: forUser, text: file ? fileSendErrorText(err) : sendErrorText(err) })
         return false
       } finally {
         sendingRef.current = false
         setSending(false)
       }
     },
-    [putMessage, loadThreads],
+    [putMessage, loadThreads, fileByUser],
   )
+
+  const chooseFile = useCallback((f) => {
+    const forUser = selectedRef.current
+    const error = f ? validateFile(f) : null
+    setSendFailure(null)
+    setFileByUser((all) => ({ ...all, [forUser]: { file: f && !error ? f : null, error } }))
+  }, [])
 
   const startEdit = useCallback((id) => setEdit({ id, error: null, saving: false }), [])
   const cancelEdit = useCallback(() => setEdit({ id: null, error: null, saving: false }), [])
@@ -329,6 +344,11 @@ export function useAdminChat({ adminId, open, byUser }) {
     setDraft: (text) => setDrafts((d) => ({ ...d, [selectedRef.current]: clampText(text) })),
     send,
     sending,
+    progress,
+    files,
+    file: fileByUser[selectedId]?.file ?? null,
+    fileError: fileByUser[selectedId]?.error ?? null,
+    chooseFile,
     sendError: sendFailure?.userId === selectedId ? sendFailure.text : null,
     edit,
     expiredEdits,

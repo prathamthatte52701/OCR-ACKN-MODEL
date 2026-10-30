@@ -63,6 +63,7 @@ export default function ChatPanel({ overlay, onClose, panelRef, color, onColorCh
       )}
       <MessageList
         color={color}
+        files={rest.files}
         messages={rest.messages}
         offset={rest.offset}
         now={rest.now}
@@ -90,6 +91,10 @@ export default function ChatPanel({ overlay, onClose, panelRef, color, onColorCh
         onSelectAdmin={rest.onSelectAdmin}
         onInsertSummary={insertSummary}
         summaryError={rest.summaryError}
+        file={rest.file}
+        onFileChange={rest.onFileChange}
+        fileError={rest.fileError}
+        progress={rest.progress}
       />
     </section>
   )

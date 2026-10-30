@@ -20,6 +20,7 @@ export default function AdminChatPanel({
       messages={list.messages}
       offset={list.offset}
       now={list.now}
+      files={list.files}
       expiredEdits={list.expiredEdits}
       edit={list.edit}
       onStartEdit={list.onStartEdit}
@@ -75,6 +76,10 @@ export default function AdminChatPanel({
         onSend={composer.onSend}
         sending={composer.sending}
         error={composer.error}
+        file={composer.file}
+        onFileChange={composer.onFileChange}
+        fileError={composer.fileError}
+        progress={composer.progress}
         disabled={!hasUser}
       />
     </section>

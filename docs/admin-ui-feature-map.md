@@ -78,6 +78,7 @@ aggregate endpoint, DROP = no real feature, not shown.
 | System uptime 99.98% / 30 days | no history; only process uptime is real | ADAPT ("Server uptime" = time since the API process started) |
 | Storage overview donut Documents / Workbooks / Exports / Temporary files | real bytes: document files, workbook files. No exports/temp category | ADAPT (2 segments) |
 | Cleanup: Clear temporary files / Archive old exports / Rebuild OCR indexes | none of these exist | DROP |
+| Chat files (admin side) | `POST /chat/messages/file`, `GET /chat/files/{id}`: paperclip in the reply box, chip with thumbnail or PDF icon, image thumbnails and PDF cards in messages, image viewer; "Clear chat..." and global delete also delete files and show file counts; files expire after 30 days ("File expired") | ADD |
 | Global chat delete | `GlobalChatDeletePanel` in the danger zone: deletes all chat messages after the typed word and the admin's password (5 attempts per hour); the audit log records counts only | ADD |
 | Real maintenance actions | Global delete by age and by year+month (`DELETE /admin/purge-range`, `/purge-months`) with the typed phrase + password twice; per-document file purge lives on Documents | KEEP (in the red "Danger zone" card, confirmation unchanged, never one click) |
 | Orphaned files | existing page + count | KEEP (link card) |

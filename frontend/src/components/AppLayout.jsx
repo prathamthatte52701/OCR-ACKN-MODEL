@@ -208,6 +208,11 @@ export default function AppLayout() {
           onSelectAdmin={chat.selectAdmin}
           onInsertSummary={chat.insertSummary}
           summaryError={chat.summaryError}
+          files={chat.files}
+          file={chat.file}
+          onFileChange={chat.chooseFile}
+          fileError={chat.fileError}
+          progress={chat.progress}
         />
       )}
     </div>

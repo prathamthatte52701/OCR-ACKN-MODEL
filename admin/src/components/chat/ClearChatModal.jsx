@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { clearThread } from '../../api/chat'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
-import { CLEAR_RANGES, clearSummary, createTokens, isTyped } from '../../utils/chatAdminCore'
+import { CLEAR_RANGES, clearSummary, createTokens, filesPart, isTyped } from '../../utils/chatAdminCore'
 import Modal from '../Modal'
 
 // Deletes one user's chat by age. Every range change asks the server for a dry-run count first; the
@@ -23,12 +23,13 @@ export default function ClearChatModal({ user, onClose, onCleared }) {
     setError('')
     const token = tokens.next()
     clearThread(user.userId, id, true).then(
-      (res) => { if (tokens.isCurrent(token)) setCount({ range: id, n: res.count }) },
+      (res) => { if (tokens.isCurrent(token)) setCount({ range: id, n: res.count, files: res.files ?? 0 }) },
       () => { if (tokens.isCurrent(token)) setCount({ range: id, failed: true }) },
     )
   }
 
   const counted = count && count.range === range && !count.failed ? count.n : null
+  const countedFiles = counted !== null ? count.files : 0
   const canDelete = counted > 0 && isTyped(typed) && !busy
 
   async function remove() {
@@ -37,7 +38,7 @@ export default function ClearChatModal({ user, onClose, onCleared }) {
     setError('')
     try {
       const res = await clearThread(user.userId, range, false)
-      setDeleted(res.deleted)
+      setDeleted({ messages: res.deleted, files: res.files ?? 0 })
       onCleared()
     } catch (err) {
       setError(err.userMessage || 'Could not delete the messages. Please try again.')
@@ -51,7 +52,7 @@ export default function ClearChatModal({ user, onClose, onCleared }) {
   }
 
   let status = ''
-  if (range && counted !== null) status = clearSummary(range, counted)
+  if (range && counted !== null) status = clearSummary(range, counted, countedFiles)
   else if (range && count?.failed) status = 'Could not count the messages. Pick the range again.'
   else if (range) status = 'Counting messages...'
 
@@ -62,13 +63,13 @@ export default function ClearChatModal({ user, onClose, onCleared }) {
         {deleted !== null ? (
           <>
             <p role="status" className="mb-5 text-[14px] text-teal-200">
-              Deleted {deleted} {deleted === 1 ? 'message' : 'messages'}.
+              Deleted {deleted.messages} {deleted.messages === 1 ? 'message' : 'messages'}{filesPart(deleted.files)}.
             </p>
             <button type="button" onClick={onClose} className="btn btn-ghost">Close</button>
           </>
         ) : (
           <>
-            <p className="mb-3 text-[13px] text-[var(--muted)]">Only this user&apos;s chat is affected. This cannot be undone.</p>
+            <p className="mb-3 text-[13px] text-[var(--muted)]">Only this user&apos;s chat is affected. Files sent in it are deleted too. This cannot be undone.</p>
             <div role="radiogroup" aria-label="Delete messages" className="mb-3 grid gap-1.5">
               {CLEAR_RANGES.map((r) => (
                 <label key={r.id} className="flex cursor-pointer items-center gap-2 text-[14px] text-white">

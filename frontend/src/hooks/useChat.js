@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { focusManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  editChatMessage, getChatMessages, getChatSettings, getChatUnread,
-  listChatAdmins, markChatRead, putChatColor, sendChatMessage,
+  editChatMessage, fetchChatFile, getChatMessages, getChatSettings, getChatUnread,
+  listChatAdmins, markChatRead, putChatColor, sendChatFile, sendChatMessage,
 } from '../api/chat'
 import { listDocumentsSummary } from '../api/documents'
 import { chatAdminKey, readStored, writeStored } from '../utils/layoutStorage'
 import {
-  buildSummaryText, clampText, editErrorText, incomingUnreadIds, mergeMessages, newestId, nextEditExpiry,
-  sendErrorText, threadFromPage, threadWasCleared,
+  buildSummaryText, clampText, editErrorText, fileSendErrorText, incomingUnreadIds, mergeMessages, newestId, nextEditExpiry,
+  sendErrorText, threadFromPage, threadWasCleared, validateFile,
 } from '../utils/chatCore'
 import { colorById } from '../utils/chatColors'
 import { documentKeys } from './useDocumentsQueries'
+import { useChatFiles } from './useChatFiles'
 
 const PAGE_SIZE = 100
 const MAX_CATCH_UP_PAGES = 10 // a poll that keeps reporting hasMore must still end
@@ -158,6 +159,12 @@ export function useChat({ userId, canChat, open }) {
   const [draft, setDraft] = useState('')
   const [sendError, setSendError] = useState(null)
   const [sending, setSending] = useState(false)
+  const [progress, setProgress] = useState(0)
+  // one chosen file per user: keyed by id so a logout/login never shows the last user's chip
+  const [fileState, setFileState] = useState({ userId: null, file: null, error: null })
+  const file = fileState.userId === userId ? fileState.file : null
+  const fileError = fileState.userId === userId ? fileState.error : null
+  const files = useChatFiles(active ? userId : null, fetchChatFile)
   const sendingRef = useRef(false)
   const [edit, setEdit] = useState({ id: null, error: null, saving: false })
   const [expiredEdits, setExpiredEdits] = useState(() => new Set())
@@ -179,20 +186,35 @@ export function useChat({ userId, canChat, open }) {
       sendingRef.current = true
       setSending(true)
       setSendError(null)
+      setProgress(0)
       try {
-        putMessage(await sendChatMessage(selectedAdminId, text))
+        putMessage(
+          file
+            ? await sendChatFile(selectedAdminId, file, text, setProgress)
+            : await sendChatMessage(selectedAdminId, text),
+        )
         writeStored(chatAdminKey(userId), selectedAdminId)
         setDraft('')
+        if (file) setFileState({ userId, file: null, error: null })
         return true
       } catch (err) {
-        setSendError(sendErrorText(err))
+        setSendError(file ? fileSendErrorText(err) : sendErrorText(err))
         return false
       } finally {
         sendingRef.current = false
         setSending(false)
       }
     },
-    [selectedAdminId, userId, putMessage],
+    [selectedAdminId, userId, putMessage, file],
+  )
+
+  const chooseFile = useCallback(
+    (f) => {
+      const error = f ? validateFile(f) : null
+      setSendError(null)
+      setFileState({ userId, file: f && !error ? f : null, error })
+    },
+    [userId],
   )
 
   const startEdit = useCallback((id) => setEdit({ id, error: null, saving: false }), [])
@@ -276,6 +298,11 @@ export function useChat({ userId, canChat, open }) {
     setDraft,
     send,
     sending,
+    progress,
+    file,
+    fileError,
+    chooseFile,
+    files,
     sendError,
     edit,
     expiredEdits,

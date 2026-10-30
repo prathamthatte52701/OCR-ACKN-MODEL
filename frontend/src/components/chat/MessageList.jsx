@@ -1,6 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import { MAX_CHARS, canEditNow, clampText, countChars, isSubmitKey } from '../../utils/chatCore'
 import { NEUTRAL_BUBBLE } from '../../utils/chatColors'
+import Attachment from './Attachment'
 import { dayKeyIST, formatIST } from '../../utils/formatDate'
 
 const NEAR_BOTTOM_PX = 40
@@ -49,21 +50,22 @@ function EditBox({ initial, saving, error, onSave, onCancel }) {
   )
 }
 
-function MessageItem({ message: m, color, canEdit, editing, edit, onStartEdit, onCancelEdit, onSaveEdit }) {
+function MessageItem({ message: m, color, files, canEdit, editing, edit, onStartEdit, onCancelEdit, onSaveEdit }) {
   const palette = m.mine ? color : NEUTRAL_BUBBLE
   return (
     <div className={`flex flex-col ${m.mine ? 'items-end' : 'items-start'}`}>
       {!m.mine && <span className="mb-0.5 px-1 text-xs font-semibold text-zinc-400">{m.fromName}</span>}
+      {m.attachment && <Attachment att={m.attachment} files={files} />}
       {editing ? (
         <EditBox initial={m.text} saving={edit.saving} error={edit.error} onSave={onSaveEdit} onCancel={onCancelEdit} />
-      ) : (
+      ) : m.text ? (
         <div
           style={{ backgroundColor: palette.bubble, color: palette.text }}
           className="max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm [overflow-wrap:anywhere]"
         >
           {m.text}
         </div>
-      )}
+      ) : null}
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 px-1 text-[11px] text-zinc-500">
         {m.mine && <span>To {m.toAdminName}</span>}
         <span>{formatIST(m.createdAt, TIME_ONLY)}</span>
@@ -80,7 +82,7 @@ function MessageItem({ message: m, color, canEdit, editing, edit, onStartEdit, o
 }
 
 export default function MessageList({
-  messages, offset, now, color, expiredEdits, edit, onStartEdit, onCancelEdit, onSaveEdit,
+  messages, offset, now, color, files, expiredEdits, edit, onStartEdit, onCancelEdit, onSaveEdit,
   hasOlder, loadingOlder, onLoadOlder, onAtBottomChange, loading,
 }) {
   const scrollRef = useRef(null)
@@ -163,6 +165,7 @@ export default function MessageList({
               <MessageItem
                 message={m}
                 color={color}
+                files={files}
                 canEdit={m.canEdit && !expiredEdits.has(m.id) && canEditNow(m.editableUntil, offset, now)}
                 editing={edit.id === m.id}
                 edit={edit}

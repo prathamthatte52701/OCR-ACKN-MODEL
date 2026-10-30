@@ -169,6 +169,7 @@ All settings live in `backend/.env`. A missing or invalid required setting stops
 | `GROQ_REASONING_EFFORT` | No | `high` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
 | `GROQ_MAX_TOKENS` | No | `2000` | Reply length limit, a whole number from 50 to 4000. If an answer is cut off it is retried once with double the limit (at most 4000); if it is still cut off the document fails with a message asking you to raise this value. |
 | `AUDIT_LOG_RETENTION_DAYS` | No | `365` | Audit entries older than this are deleted automatically. `0` keeps them forever. Whole number from 0 to 3650. |
+| `CHAT_FILES_MAX_TOTAL_MB` | No | `75` | Total size cap for all chat attachments together, counted on the bytes actually stored (images are shrunk first). When it is full, new uploads are refused with "File storage is full. Please ask an admin." and text messages still work. Whole number from 1 to 100000. |
 | `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. Put the same value in `frontend/.env` as `VITE_GOOGLE_CLIENT_ID=<value>` (copy `frontend/.env.example`) before running `setup.bat`, so the sign-in button is built into the user app. Without it the Google button is simply not shown. |
 | `FRONTEND_ORIGIN` | No | `http://localhost:5174` | Allowed browser origin for the user app. |
 | `ADMIN_ORIGIN` | No | `http://localhost:5175` | Allowed browser origin for the admin app. |
@@ -233,6 +234,18 @@ Both apps have a **Chat** button in the top bar. It opens a panel on the right (
 - Admins can delete one user's chat by age (**Clear chat…** in the chat panel). Deleting all chat is in **Maintenance** and asks for the admin's password.
 - Sending is rate-limited, and the admin audit log records chat clean-ups as counts only, never message text.
 
+**Files in chat.** The paperclip in the message box attaches one file to a message (the text is then optional).
+
+- **Allowed:** JPG, PNG and WebP images up to 2 MB, and PDFs up to 3 MB. Exactly the limit is accepted; one byte more is not. Nothing else (no GIF, SVG, Word, Excel or zip).
+- **Images are re-encoded.** The server shrinks anything larger than 1920 px on its longest side and saves a fresh copy with all metadata removed (camera data, GPS position, embedded comments). Animated images are refused. PDFs are stored exactly as sent and are never opened or rendered by the server.
+- **Who sees what.** A user opens only the files in their own chat. Every admin can open every user's chat files.
+- **Editing** changes the text only; the file cannot be replaced or removed by editing.
+- **Expiry.** A file is deleted 30 days after it was sent. The message text stays and shows "File expired".
+- **Storage.** All chat files together are capped (`CHAT_FILES_MAX_TOTAL_MB`, default 75 MB).
+- **Not supported:** more than one file per message, paste or drag and drop (use the paperclip), and virus scanning (see Security).
+- **Limits.** 20 file sends per hour for a user, 60 for an admin; these also count toward the normal message limits.
+- Deleting a user, clearing a chat (by age or all of it) or running the wipe script deletes the chat files too. The clear dialogs show how many messages and files will go.
+
 ## Excel export rules
 
 - Each user gets **one workbook per year**, with **one sheet per month**.
@@ -291,6 +304,7 @@ Admins are created from the environment settings by the seed script and cannot b
 - **Rate limits** on sign-in, signup, password-reset requests, upload and workbook creation.
 - **Upload safety.** Size, file type and image-size limits are checked before the file is processed, so a small file cannot expand into gigabytes of memory.
 - **Browser protections.** Strict security headers and a fixed list of allowed origins.
+- **Chat files.** The file type is decided from the file's bytes, never its name or the browser's claim. Images are re-encoded (which drops hidden data and anything appended to the file) and checked for oversized dimensions and animation. A file is served only with its own validated type, `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `Cache-Control: no-store`; images are shown inline and PDFs as downloads. A stranger, an unknown id and a malformed id all get the same "not found". **There is no antivirus scan**: a PDF is stored as sent, so treat PDFs from outside like any other download.
 - **Secrets stay out of the log.** Keys, tokens and passwords are masked before anything is written to it.
 - **Google Sign-In.** The Google token is verified on the server against your client ID, and the Google email must be verified. A new Google user still waits for approval.
 - **Downloads.** A user's workbook download is served only from the exports folder and only with the owner's user ID in its file name, so a crafted name cannot reach another file.
@@ -320,6 +334,10 @@ Run these from the `backend` folder with `../venv/Scripts/python.exe -m app.scri
 | `find_duplicate_workbooks` | Read-only report: lists any user who has two workbook records pointing at the same file. Changes nothing. |
 | `cleanup_orphan_corrections` | Remove correction history whose document no longer exists. Needs `--db <name>`. Dry run by default; add `--apply` to delete. |
 | `wipe_all_except_admins` | Fresh start: remove all users, documents, files and workbooks except the admins. Needs `--db <name>`. Dry run by default; applying needs `--apply --i-have-a-backup`. Stop the app and take a `mongodump` backup first. |
+
+### Chat files and storage
+
+Chat attachments live in their own database area (`chatfs`), separate from documents, so the Orphaned files page and the document storage numbers never include them. The Atlas free tier is 512 MB in total, shared with documents, so keep `CHAT_FILES_MAX_TOTAL_MB` modest. An hourly background job (and one run at start) deletes files older than 30 days, at most 200 per run, and retries any delete that failed.
 
 ### Backups
 

@@ -44,11 +44,16 @@ export function badgeText(n) {
   return n > BADGE_CAP ? `${BADGE_CAP}+` : String(n)
 }
 
-export function clearSummary(range, count) {
+// " and 2 files" when chat files go with the messages, nothing otherwise.
+export function filesPart(files) {
+  return files > 0 ? ` and ${files} ${files === 1 ? 'file' : 'files'}` : ''
+}
+
+export function clearSummary(range, count, files = 0) {
   if (count === 0) return 'No messages match this range.'
   const label = CLEAR_RANGES.find((r) => r.id === range)?.label ?? ''
   const scope = label ? ` (${label.charAt(0).toLowerCase()}${label.slice(1)})` : ''
-  return `${count} ${count === 1 ? 'message' : 'messages'} will be deleted${scope}`
+  return `${count} ${count === 1 ? 'message' : 'messages'}${filesPart(files)} will be deleted${scope}`
 }
 
 // Exact word, exact case, no trimming: "delete" and "DELETE " do not count.
