@@ -11,6 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # discipline alone.
 MIN_JWT_SECRET_LENGTH = 32
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+# PaddleOCR text detection / recognition models. v4 for a rollback: PP-OCRv4_mobile_det and
+# en_PP-OCRv4_mobile_rec (set OCR_DET_MODEL / OCR_REC_MODEL, no code change).
+DEFAULT_OCR_DET_MODEL = "PP-OCRv6_small_det"
+DEFAULT_OCR_REC_MODEL = "PP-OCRv6_small_rec"
 DEFAULT_DB_NAME = "ackn_AI_model"
 DEFAULT_FRONTEND_ORIGIN = "http://localhost:5174"
 DEFAULT_ADMIN_ORIGIN = "http://localhost:5175"
@@ -31,6 +35,10 @@ class Settings(BaseSettings):
     # (models without a reasoning mode reject it with a 400).
     groq_reasoning_effort: str | None = Field(default="high", alias="GROQ_REASONING_EFFORT")
     groq_max_tokens: int = Field(default=2000, alias="GROQ_MAX_TOKENS")
+    # Which PaddleOCR models read the header. Blank = the default. A wrong name is reported as an
+    # OCR engine error (see paddle_runner), never replaced by another model.
+    ocr_det_model: str = Field(default=DEFAULT_OCR_DET_MODEL, alias="OCR_DET_MODEL")
+    ocr_rec_model: str = Field(default=DEFAULT_OCR_REC_MODEL, alias="OCR_REC_MODEL")
     frontend_origin: str = Field(default=DEFAULT_FRONTEND_ORIGIN, alias="FRONTEND_ORIGIN")
     admin_origin: str = Field(default=DEFAULT_ADMIN_ORIGIN, alias="ADMIN_ORIGIN")
     admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
@@ -103,6 +111,22 @@ class Settings(BaseSettings):
         if len(value) > 100 or any(ch.isspace() for ch in value):
             raise ValueError(
                 "GROQ_MODEL must be a model name without spaces (at most 100 characters)."
+            )
+        return value
+
+    @field_validator("ocr_det_model", "ocr_rec_model", mode="before")
+    @classmethod
+    def _clean_ocr_model(cls, value: object, info: ValidationInfo) -> object:
+        default = (
+            DEFAULT_OCR_DET_MODEL if info.field_name == "ocr_det_model" else DEFAULT_OCR_REC_MODEL
+        )
+        if not isinstance(value, str) or not value.strip():
+            return default
+        value = value.strip()
+        if len(value) > 100 or any(ch.isspace() for ch in value):
+            env_name = "OCR_DET_MODEL" if info.field_name == "ocr_det_model" else "OCR_REC_MODEL"
+            raise ValueError(
+                f"{env_name} must be a model name without spaces (at most 100 characters)."
             )
         return value
 

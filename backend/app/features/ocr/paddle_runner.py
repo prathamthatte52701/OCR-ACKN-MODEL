@@ -30,6 +30,7 @@ from typing import Any
 
 from loguru import logger
 
+from app.core.config import settings
 from app.features.ocr.row_assembly import assemble_rows
 
 # Confirmed root cause of "all GET APIs are slow" (measured, not assumed):
@@ -140,19 +141,16 @@ def _load_ocr() -> Any:
                 from paddleocr import PaddleOCR
 
                 _ocr_instance = PaddleOCR(
-                    # Mobile/lite models instead of the PP-OCRv6 "server"
-                    # models this defaulted to - the server models are
-                    # meaningfully heavier on RAM/CPU, which is the suspected
-                    # driver behind repeated crashes on this CPU-only
-                    # i5-12th-gen machine. Accuracy tradeoff is acceptable
-                    # here since the app already has the character-confusion
-                    # auto-correction and G/P-prefix validation safety nets
-                    # layered on top of raw OCR output (see
-                    # ocr/extraction.py) - those exist precisely to catch
-                    # exactly the kind of noisier reads a lighter model
-                    # produces.
-                    text_detection_model_name="PP-OCRv4_mobile_det",
-                    text_recognition_model_name="en_PP-OCRv4_mobile_rec",
+                    # Model names are settings (OCR_DET_MODEL / OCR_REC_MODEL), default PP-OCRv6
+                    # small. Why: measured on 2026-11-22 on this machine (CPU only, 14 header
+                    # images, 2 runs each, 5 model sets compared), v6 small read as accurately as
+                    # the earlier v4 mobile set (the difference was inside run-to-run noise) and
+                    # was about 41% faster per image for OCR (6.7 s against 11.4 s), with about 580
+                    # MB peak RAM. Going back to v4 (PP-OCRv4_mobile_det + en_PP-OCRv4_mobile_rec)
+                    # is a config change only. The character-confusion correction and the G/P
+                    # prefix validation in ocr/extraction.py still catch the noisier reads.
+                    text_detection_model_name=settings.ocr_det_model,
+                    text_recognition_model_name=settings.ocr_rec_model,
                     # True at init so the (tiny, PP-LCNet_x1_0_doc_ori)
                     # classifier model is loaded once and available - but
                     # run_ocr always explicitly passes

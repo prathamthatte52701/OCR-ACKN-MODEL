@@ -251,6 +251,8 @@ All settings live in `backend/.env`. A missing or invalid required setting stops
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Model used for extraction. The app never switches models on its own. |
 | `GROQ_REASONING_EFFORT` | No | `high` | `low`, `medium` or `high`. Set it **blank** for a model that has no reasoning mode, so the setting is not sent. |
 | `GROQ_MAX_TOKENS` | No | `2000` | Reply length limit, a whole number from 50 to 4000. If an answer is cut off it is retried once with double the limit (at most 4000); if it is still cut off the document fails with a message asking you to raise this value. |
+| `OCR_DET_MODEL` | No | `PP-OCRv6_small_det` | PaddleOCR text **detection** model. Blank means the default. For the older v4 set use `PP-OCRv4_mobile_det`. |
+| `OCR_REC_MODEL` | No | `PP-OCRv6_small_rec` | PaddleOCR text **recognition** model. Blank means the default. For the older v4 set use `en_PP-OCRv4_mobile_rec`. |
 | `AUDIT_LOG_RETENTION_DAYS` | No | `365` | Audit entries older than this are deleted automatically. `0` keeps them forever. Whole number from 0 to 3650. |
 | `CHAT_FILES_MAX_TOTAL_MB` | No | `75` | Total size cap for all chat attachments together, counted on the bytes actually stored (images are shrunk first). When it is full, new uploads are refused with "File storage is full. Please ask an admin." and text messages still work. Whole number from 1 to 100000. |
 | `GOOGLE_CLIENT_ID` | No | — | Turns on Google Sign-In. Put the same value in `frontend/.env` as `VITE_GOOGLE_CLIENT_ID=<value>` (copy `frontend/.env.example`) before running `setup.bat`, so the sign-in button is built into the user app. Without it the Google button is simply not shown. |
@@ -258,6 +260,16 @@ All settings live in `backend/.env`. A missing or invalid required setting stops
 | `ADMIN_ORIGIN` | No | `http://localhost:5175` | Allowed browser origin for the admin app. |
 | `ADMIN_1_NAME`, `ADMIN_1_EMAIL`, `ADMIN_1_PASSWORD` | Seeding only | — | First admin account. Also `ADMIN_2_*` for the second. The password is used once; only its hash is stored. |
 | `ENABLE_DOCS` | No | off | `true` shows the API documentation pages (`/docs`, `/redoc`). Use on a developer machine only. |
+
+### OCR models: download, offline and rollback
+
+The reading step uses two PaddleOCR models, **PP-OCRv6 small** (`PP-OCRv6_small_det` and `PP-OCRv6_small_rec`). On a test of 14 header images it read as accurately as the older v4 mobile set (the difference was inside run-to-run noise) and was about 41% faster per image, using about 580 MB of memory.
+
+- **Download.** `setup.bat` downloads them once at the end (about 30 MB, from Hugging Face by default). To do it by hand: `cd backend`, then `..\venv\Scripts\python.exe -m app.scripts.download_models`. If this step is skipped or fails, the models are downloaded the first time a document is read, and that first document is slow.
+- **Where they are saved.** In your user profile: `C:\Users\<you>\.paddlex\official_models` (or the folder in `PADDLE_PDX_CACHE_HOME`, if you set it). Each model is one folder inside it.
+- **A different download source.** Set the environment variable `PADDLE_PDX_MODEL_SOURCE` (for example `huggingface`, `modelscope` or `bos`) before running `setup.bat`, if the default one is slow or blocked on your network.
+- **A PC with no internet.** On a PC that has internet, run the download step. Copy the whole `.paddlex` folder (`official_models` inside it, at least `PP-OCRv6_small_det`, `PP-OCRv6_small_rec` and `PP-LCNet_x1_0_doc_ori`) into the same place in the other PC's user profile. The app then finds the models and downloads nothing.
+- **Go back to v4.** Put `OCR_DET_MODEL=PP-OCRv4_mobile_det` and `OCR_REC_MODEL=en_PP-OCRv4_mobile_rec` in `backend/.env` and restart. No code change. (The v4 models are downloaded the first time they are used.) A wrong model name stops the reading step with a clear message in the log and on the document, and it is tried again after a minute, so fixing the name needs no reinstall.
 
 **Changing the Groq model:** set the new `GROQ_MODEL`, clear `GROQ_REASONING_EFFORT` if the model has no reasoning mode, restart the backend, then upload one test document to confirm it is read. If a model is retired by Groq, users see "The AI service is not set up correctly" and the log shows the reason.
 

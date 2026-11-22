@@ -56,6 +56,15 @@ call :webapp
 if not "%RC%"=="0" goto done
 
 echo.
+echo [3/3] Downloading the OCR models (one time, about 30 MB)...
+pushd "%ROOT%backend"
+"%PY%" -m app.scripts.download_models
+if errorlevel 1 (
+  echo WARNING: the OCR models were not downloaded. Setup is otherwise complete. They are downloaded
+  echo the first time a document is read, or run this setup again with the internet on.
+)
+popd
+echo.
 echo Setup complete. Now run start.bat
 goto done
 
