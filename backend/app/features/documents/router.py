@@ -712,12 +712,12 @@ async def my_activity(
     change to what gets logged or when. Always scoped to current_user.id
     from the JWT (re-verified via get_current_user, same as every other
     user-scoped route) - there is no id parameter here for a caller to
-    manipulate. Paginated at 40/page, distinct from the 30/page used
-    elsewhere - intentional, not a bug. Registered before GET /{doc_id} so
+    manipulate. Paginated at 30/page, the same page size as the document
+    list. Registered before GET /{doc_id} so
     "my-activity" is never matched as a doc_id (same reasoning as the
     former /purge-* routes)."""
     db = get_database()
-    lim = min(MAX_PAGE_SIZE, max(1, limit or 40))
+    lim = min(MAX_PAGE_SIZE, max(1, limit or 30))
     pg = min(MAX_PAGE_NUMBER, max(1, page or 1))
     skip = (pg - 1) * lim
     filt = {"userId": current_user.id, "action": {"$in": MY_ACTIVITY_ACTIONS}}

@@ -8,7 +8,7 @@ import { formatIST } from '../utils/formatDate'
 import { displayNumber } from '../utils/documentDisplay'
 import BackButton from '../components/BackButton'
 
-const PAGE_SIZE = 40
+const PAGE_SIZE = 30
 
 const ACTION_LABELS = {
   document_processed: 'Document processed',
