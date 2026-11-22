@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 import { toast } from 'sonner'
 import { Upload } from 'lucide-react'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
@@ -53,7 +55,8 @@ function DocumentsError({ message, onRetry }) {
   )
 }
 
-const PAGE_SIZE = 30
+// Download All sends at most this many ids: the server refuses more (MAX_DOWNLOAD_ALL_IDS = 50).
+const DOWNLOAD_ALL_MAX = 50
 const DOCUMENT_TYPES = ['Tax Invoice', 'Delivery Challan']
 const ALL_TYPES = 'all'
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -99,6 +102,11 @@ export default function DocumentsPage() {
 
   const dayKey = useLocalDay()
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('documents')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
   const newExcelFileMutation = useNewExcelFileMutation()
   const bulkSaveMutation = useBulkSaveDocumentsMutation()
   const downloadAllMutation = useDownloadAllDocumentsMutation()
@@ -115,7 +123,7 @@ export default function DocumentsPage() {
 
   const { data, isLoading, isError, error, refetch } = useDocumentsList({
     page,
-    limit: PAGE_SIZE,
+    limit: pageSize,
     ...(selectedType !== ALL_TYPES && { documentType: selectedType }),
     ...(numberQuery && { number: numberQuery }),
     ...(dateQuery && { date: dateQuery }),
@@ -255,10 +263,15 @@ export default function DocumentsPage() {
     if (documents.length === 0 || downloadAllBusyRef.current) return
     downloadAllBusyRef.current = true
     try {
-      const res = await downloadAllMutation.mutateAsync(documents.map((d) => d._id))
+      const ids = documents.slice(0, DOWNLOAD_ALL_MAX).map((d) => d._id)
+      const res = await downloadAllMutation.mutateAsync(ids)
       const included = Number(res.headers?.['x-download-included'] ?? 0)
       const skipped = Number(res.headers?.['x-download-skipped'] ?? 0)
-      const total = Number(res.headers?.['x-download-total'] ?? documents.length)
+      const total = Number(res.headers?.['x-download-total'] ?? ids.length)
+      const cut = documents.length - ids.length
+      if (cut > 0) {
+        toast.info(`Download All is limited to ${DOWNLOAD_ALL_MAX} documents at a time: the other ${cut} on this page were not included. Choose 30 or 50 per page to download them all.`)
+      }
       if (skipped === 0) {
         toast.success(`${included} of ${total} file${total !== 1 ? 's' : ''} downloaded.`)
       } else if (included === 0) {
@@ -449,7 +462,7 @@ export default function DocumentsPage() {
                 disabled={documents.length === 0 || downloadAllMutation.isPending}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-300/25 bg-blue-500/10 px-5 py-2.5 text-[13.6px] font-black text-blue-200 transition-all hover:border-blue-300/45 hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {downloadAllMutation.isPending ? 'Preparing...' : `Download All (${documents.length} on this page)`}
+                {downloadAllMutation.isPending ? 'Preparing...' : documents.length > DOWNLOAD_ALL_MAX ? `Download All (first ${DOWNLOAD_ALL_MAX} of ${documents.length} on this page)` : `Download All (${documents.length} on this page)`}
               </button>
               <button
                 type="button"
@@ -465,7 +478,7 @@ export default function DocumentsPage() {
                 Save All and Download All apply to this page only (page {page} of {totalPages})
               </p>
             )}
-            <DocumentList documents={documents} startIndex={(page - 1) * PAGE_SIZE} />
+            <DocumentList documents={documents} startIndex={(page - 1) * pageSize} />
             {totalPages > 1 && (
               <div className="mt-8 flex items-center justify-center gap-4">
                 <button
@@ -487,6 +500,7 @@ export default function DocumentsPage() {
                 </button>
               </div>
             )}
+            {documents.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
           </>
         )}
       </main>

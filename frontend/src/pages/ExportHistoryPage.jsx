@@ -8,6 +8,8 @@ import PageBackground from '../components/PageBackground'
 import { formatIST } from '../utils/formatDate'
 import { displayNumber } from '../utils/documentDisplay'
 import BackButton from '../components/BackButton'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 
 function HistoryError({ message, onRetry }) {
   return (
@@ -38,11 +40,15 @@ function EmptyHistory() {
   )
 }
 
-const PAGE_SIZE = 30
 
 export default function ExportHistoryPage() {
   const [page, setPage] = useState(1)
-  const { data, isLoading, isError, error, refetch } = useExportHistory({ page, limit: PAGE_SIZE })
+  const [pageSize, setPageSize] = usePageSize('exportHistory')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
+  const { data, isLoading, isError, error, refetch } = useExportHistory({ page, limit: pageSize })
   const exports = data?.exports || []
   const totalExports = data?.totalExports ?? exports.length
   const totalPages = data?.totalPages || 1
@@ -184,6 +190,7 @@ export default function ExportHistoryPage() {
             </button>
           </div>
         )}
+        {exports.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
       </main>
     </div>
   )

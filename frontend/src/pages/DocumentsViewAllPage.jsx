@@ -3,8 +3,9 @@ import { keepPreviousData } from '@tanstack/react-query'
 import { useDocumentsList } from '../hooks/useDocumentsQueries'
 import PageBackground from '../components/PageBackground'
 import BackButton from '../components/BackButton'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 
-const PAGE_SIZE = 30
 const EMPTY_DOCUMENTS = []
 
 // Mirrors backend/app/features/excel/service.py::_format_number_cell exactly -
@@ -30,11 +31,16 @@ export default function DocumentsViewAllPage() {
   const [sortKey, setSortKey] = useState(null)
   const [sortDir, setSortDir] = useState('asc')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('documentsViewAll')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
 
   // No sort/order params until a header is clicked, so the server default (createdAt desc) applies.
   const params = sortKey
-    ? { page, limit: PAGE_SIZE, sort: sortKey, order: sortDir }
-    : { page, limit: PAGE_SIZE }
+    ? { page, limit: pageSize, sort: sortKey, order: sortDir }
+    : { page, limit: pageSize }
   const { data, isLoading, isError, error, refetch } = useDocumentsList(params, {
     placeholderData: keepPreviousData,
   })
@@ -149,6 +155,7 @@ export default function DocumentsViewAllPage() {
                 </button>
               </div>
             )}
+            {documents.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
           </>
         )}
       </main>

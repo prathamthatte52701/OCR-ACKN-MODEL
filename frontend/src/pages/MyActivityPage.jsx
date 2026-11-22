@@ -7,8 +7,9 @@ import PageBackground from '../components/PageBackground'
 import { formatIST } from '../utils/formatDate'
 import { displayNumber } from '../utils/documentDisplay'
 import BackButton from '../components/BackButton'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 
-const PAGE_SIZE = 30
 
 const ACTION_LABELS = {
   document_processed: 'Document processed',
@@ -63,7 +64,12 @@ function EmptyActivity() {
 
 export default function MyActivityPage() {
   const [page, setPage] = useState(1)
-  const { data, isLoading, isError, error, refetch } = useMyActivity({ page, limit: PAGE_SIZE })
+  const [pageSize, setPageSize] = usePageSize('myActivity')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
+  const { data, isLoading, isError, error, refetch } = useMyActivity({ page, limit: pageSize })
 
   const activity = data?.activity || []
   const totalActivity = data?.totalActivity || 0
@@ -153,6 +159,7 @@ export default function MyActivityPage() {
                 </button>
               </div>
             )}
+            {activity.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
           </>
         )}
       </main>
