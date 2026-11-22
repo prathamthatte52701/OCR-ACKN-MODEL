@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 import Banner from '../components/Banner'
 import { formatIST } from '../utils/formatDate'
 import BackButton from '../components/BackButton'
@@ -8,11 +10,15 @@ import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../c
 import { OwnerCell, TableSkeleton } from '../components/pageparts'
 import { notifyCountsChanged } from '../utils/events'
 
-const PAGE_SIZE = 30
 
 export default function AdminOrphanedFilesPage() {
   const [records, setRecords] = useState([])
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('orphanedFiles')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -21,23 +27,29 @@ export default function AdminOrphanedFilesPage() {
   const [success, setSuccess] = useState('')
   const [busyId, setBusyId] = useState(null)
 
+  // A slow answer for an older page or size must never overwrite the newest one.
+  const latestRequest = useRef(0)
+
   async function load(pageToLoad = page) {
+    const requestId = ++latestRequest.current
     setLoading(true)
     setLoadError('')
     try {
-      const res = await api.get('/admin/orphaned-files', { params: { page: pageToLoad, limit: PAGE_SIZE } })
+      const res = await api.get('/admin/orphaned-files', { params: { page: pageToLoad, limit: pageSize } })
+      if (requestId !== latestRequest.current) return
       setRecords(res.data.orphanedFiles || [])
       setTotalPages(res.data.totalPages || 1)
       setTotal(res.data.totalOrphanedFiles || 0)
     } catch (err) {
+      if (requestId !== latestRequest.current) return
       setLoadError(err.userMessage || 'Could not load orphaned files.')
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { load(page) }, [page])
+  useEffect(() => { load(page) }, [page, pageSize])
 
   async function handleRetry(record) {
     setBusyId(record.id)
@@ -145,6 +157,7 @@ export default function AdminOrphanedFilesPage() {
       </Card>
 
       <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
+      {records.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
     </div>
   )
 }

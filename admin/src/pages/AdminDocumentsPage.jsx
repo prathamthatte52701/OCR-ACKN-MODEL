@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 import Banner from '../components/Banner'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -10,7 +12,6 @@ import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../c
 import { OwnerCell, TableSkeleton } from '../components/pageparts'
 import { statusTone } from '../utils/status'
 
-const PAGE_SIZE = 30
 
 const FIELDS_BY_TYPE = {
   'Tax Invoice': [
@@ -83,6 +84,11 @@ function EditDocumentModal({ doc, onClose, onSaved }) {
 export default function AdminDocumentsPage() {
   const [documents, setDocuments] = useState([])
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('documents')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
   const [totalPages, setTotalPages] = useState(1)
   const [totalDocuments, setTotalDocuments] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -94,23 +100,29 @@ export default function AdminDocumentsPage() {
   const [purgingDoc, setPurgingDoc] = useState(null)
   const [busyId, setBusyId] = useState(null)
 
+  // A slow answer for an older page or size must never overwrite the newest one.
+  const latestRequest = useRef(0)
+
   async function load(pageToLoad = page) {
+    const requestId = ++latestRequest.current
     setLoading(true)
     setLoadError('')
     try {
-      const res = await api.get('/admin/documents', { params: { page: pageToLoad, limit: PAGE_SIZE } })
+      const res = await api.get('/admin/documents', { params: { page: pageToLoad, limit: pageSize } })
+      if (requestId !== latestRequest.current) return
       setDocuments(res.data.documents || [])
       setTotalPages(res.data.totalPages || 1)
       setTotalDocuments(res.data.totalDocuments || 0)
     } catch (err) {
+      if (requestId !== latestRequest.current) return
       setLoadError(err.userMessage || 'Could not load documents.')
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { load(page) }, [page])
+  useEffect(() => { load(page) }, [page, pageSize])
 
   async function deleteDoc(doc) {
     setBusyId(doc._id)
@@ -226,6 +238,7 @@ export default function AdminDocumentsPage() {
       </Card>
 
       <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
+      {documents.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
 
       <AnimatePresence>
         {editingDoc && (

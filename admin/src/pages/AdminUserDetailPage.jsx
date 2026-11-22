@@ -4,6 +4,8 @@ import { useParams } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 import Banner from '../components/Banner'
 import ConfirmPurgeModal from '../components/ConfirmPurgeModal'
 import { formatIST, formatISTDate } from '../utils/formatDate'
@@ -12,7 +14,6 @@ import BackButton from '../components/BackButton'
 import { Avatar, Badge, Card, DataTable, EmptyState, ErrorState, Skeleton, StatCard } from '../components/ui'
 import SkeletonRows from './users/SkeletonRows'
 
-const SECTION_PAGE_SIZE = 10
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '')
 
@@ -171,22 +172,22 @@ function exportNumber(row) {
 // One paginated list of a user's records (documents / exports / logs). Fetch state is keyed
 // so a page/user change shows skeleton rows until the matching response lands, and a
 // failure shows a retry instead of silently leaving the table empty.
-function useUserSection(path, userId, page) {
+function useUserSection(path, userId, page, pageSize) {
   const [nonce, setNonce] = useState(0)
-  const key = `${userId}|${page}|${nonce}`
+  const key = `${userId}|${page}|${pageSize}|${nonce}`
   const [res, setRes] = useState({ key: '', data: null, error: '' })
   useEffect(() => {
     let off = false
-    api.get(path, { params: { userId, page, limit: SECTION_PAGE_SIZE } })
+    api.get(path, { params: { userId, page, limit: pageSize } })
       .then((r) => { if (!off) setRes({ key, data: r.data, error: '' }) })
       .catch((err) => { if (!off) setRes({ key, data: null, error: err.userMessage || 'Could not load this section.' }) })
     return () => { off = true }
-  }, [path, userId, page, key])
+  }, [path, userId, page, pageSize, key])
   const retry = useCallback(() => setNonce((n) => n + 1), [])
   return { data: res.data, error: res.key === key ? res.error : '', loading: res.key !== key, retry }
 }
 
-function Section({ title, count, state, page, onPageChange, cols, emptyTitle, head, children }) {
+function Section({ title, count, state, page, onPageChange, pageSize, onPageSizeChange, cols, emptyTitle, head, children }) {
   return (
     <section className="mb-8" aria-label={title}>
       <Card className="p-5">
@@ -206,6 +207,7 @@ function Section({ title, count, state, page, onPageChange, cols, emptyTitle, he
         )}
       </Card>
       <PaginationControls page={page} totalPages={state.data?.totalPages || 1} onChange={onPageChange} />
+      {!state.error && children.length > 0 && <PageSizeSelect value={pageSize} onChange={onPageSizeChange} />}
     </section>
   )
 }
@@ -221,9 +223,12 @@ export default function AdminUserDetailPage() {
   const [docPage, setDocPage] = useState(1)
   const [expPage, setExpPage] = useState(1)
   const [logPage, setLogPage] = useState(1)
-  const docs = useUserSection('/admin/documents', id, docPage)
-  const exps = useUserSection('/admin/exports', id, expPage)
-  const logs = useUserSection('/admin/logs', id, logPage)
+  const [docSize, setDocSize] = usePageSize('userDetail:documents')
+  const [expSize, setExpSize] = usePageSize('userDetail:exports')
+  const [logSize, setLogSize] = usePageSize('userDetail:logs')
+  const docs = useUserSection('/admin/documents', id, docPage, docSize)
+  const exps = useUserSection('/admin/exports', id, expPage, expSize)
+  const logs = useUserSection('/admin/logs', id, logPage, logSize)
   const docTotal = docs.data?.totalDocuments || 0
   const expTotal = exps.data?.totalExports || 0
   const logTotal = logs.data?.totalLogs || 0
@@ -296,7 +301,7 @@ export default function AdminUserDetailPage() {
       )}
 
       <Section
-        title="Documents" count={docTotal} state={docs} page={docPage} onPageChange={setDocPage} cols={5} emptyTitle="No documents."
+        title="Documents" count={docTotal} state={docs} page={docPage} onPageChange={setDocPage} pageSize={docSize} onPageSizeChange={(n) => { setDocSize(n); setDocPage(1) }} cols={5} emptyTitle="No documents."
         head={<><th>Type</th><th>Number</th><th>Date</th><th>Status</th><th>Uploaded</th></>}
       >
         {(docs.data?.documents || []).map((d) => (
@@ -311,7 +316,7 @@ export default function AdminUserDetailPage() {
       </Section>
 
       <Section
-        title="Export Activity" count={expTotal} state={exps} page={expPage} onPageChange={setExpPage} cols={5} emptyTitle="No exports."
+        title="Export Activity" count={expTotal} state={exps} page={expPage} onPageChange={setExpPage} pageSize={expSize} onPageSizeChange={(n) => { setExpSize(n); setExpPage(1) }} cols={5} emptyTitle="No exports."
         head={<><th>Type</th><th>Number</th><th>Date</th><th>Exported At</th><th>Workbook</th></>}
       >
         {(exps.data?.exports || []).map((row) => (
@@ -326,7 +331,7 @@ export default function AdminUserDetailPage() {
       </Section>
 
       <Section
-        title="Activity Log" count={logTotal} state={logs} page={logPage} onPageChange={setLogPage} cols={3} emptyTitle="No log entries."
+        title="Activity Log" count={logTotal} state={logs} page={logPage} onPageChange={setLogPage} pageSize={logSize} onPageSizeChange={(n) => { setLogSize(n); setLogPage(1) }} cols={3} emptyTitle="No log entries."
         head={<><th>Time</th><th>Action</th><th>Context</th></>}
       >
         {(logs.data?.logs || []).map((l) => (

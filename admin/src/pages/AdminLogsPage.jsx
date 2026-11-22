@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../utils/api'
 import PaginationControls from '../components/PaginationControls'
+import PageSizeSelect from '../components/PageSizeSelect'
+import { usePageSize } from '../hooks/usePageSize'
 import { formatIST } from '../utils/formatDate'
 import BackButton from '../components/BackButton'
 import { Badge, Card, DataTable, EmptyState, ErrorState, PageHeader } from '../components/ui'
 import { OwnerCell, TableSkeleton } from '../components/pageparts'
 
-const PAGE_SIZE = 30
 const ACTIONS = [
   'login',
   'signup',
@@ -39,6 +40,11 @@ function actionTone(a = '') {
 export default function AdminLogsPage() {
   const [logs, setLogs] = useState([])
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('logs')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
   const [totalPages, setTotalPages] = useState(1)
   const [totalLogs, setTotalLogs] = useState(0)
   const [action, setAction] = useState('')
@@ -46,26 +52,32 @@ export default function AdminLogsPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
+  // A slow answer for an older page or size must never overwrite the newest one.
+  const latestRequest = useRef(0)
+
   async function load(pageToLoad = page) {
+    const requestId = ++latestRequest.current
     setLoading(true)
     setLoadError('')
     try {
-      const params = { page: pageToLoad, limit: PAGE_SIZE }
+      const params = { page: pageToLoad, limit: pageSize }
       if (action) params.action = action
       if (userId.trim()) params.userId = userId.trim()
       const res = await api.get('/admin/logs', { params })
+      if (requestId !== latestRequest.current) return
       setLogs(res.data.logs || [])
       setTotalPages(res.data.totalPages || 1)
       setTotalLogs(res.data.totalLogs || 0)
     } catch (err) {
+      if (requestId !== latestRequest.current) return
       setLoadError(err.userMessage || 'Could not load logs.')
     } finally {
-      setLoading(false)
+      if (requestId === latestRequest.current) setLoading(false)
     }
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { load(page) }, [page])
+  useEffect(() => { load(page) }, [page, pageSize])
 
   function applyFilters(e) {
     e.preventDefault()
@@ -136,6 +148,7 @@ export default function AdminLogsPage() {
       </Card>
 
       <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
+      {logs.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
     </div>
   )
 }

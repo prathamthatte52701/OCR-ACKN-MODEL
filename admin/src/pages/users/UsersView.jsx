@@ -5,6 +5,8 @@ import api from '../../utils/api'
 import { clampPage, sameRows } from '../../utils/autoRefreshCore'
 import { useAutoRefresh } from '../../hooks/useAutoRefresh'
 import PaginationControls from '../../components/PaginationControls'
+import PageSizeSelect from '../../components/PageSizeSelect'
+import { usePageSize } from '../../hooks/usePageSize'
 import Banner from '../../components/Banner'
 import ConfirmModal from '../../components/ConfirmModal'
 import RejectReasonModal from '../../components/RejectReasonModal'
@@ -21,7 +23,6 @@ import SkeletonRows from './SkeletonRows'
 import UsersTabs from './UsersTabs'
 
 const ADMIN_LOCK_TIP = 'Admins can only be changed by themselves.'
-const PAGE_SIZE = 30
 const STATUSES = ['approved', 'pending', 'rejected']
 const CHIPS = [
   { key: '', label: 'All' },
@@ -106,14 +107,19 @@ export default function UsersView({ mode = 'users' }) {
   const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
   const setPage = useCallback((p) => setPageState({ key: filterKey, page: p }), [filterKey])
+  const [pageSize, setPageSize] = usePageSize('users')
+  function changePageSize(n) {
+    setPageSize(n)
+    setPage(1)
+  }
 
   const listParams = useCallback((pageToLoad) => {
-    const params = { page: pageToLoad, limit: PAGE_SIZE }
+    const params = { page: pageToLoad, limit: pageSize }
     if (status) params.status = status
     if (urlQ) params.q = urlQ
     if (role) params.role = role
     return params
-  }, [status, urlQ, role])
+  }, [status, urlQ, role, pageSize])
 
   const applyList = useCallback((data) => {
     setUsers((prev) => (sameRows(prev, data.users || [], ROW_KEYS) ? prev : data.users || []))
@@ -232,8 +238,8 @@ export default function UsersView({ mode = 'users' }) {
 
   const stat = (key) => (counts ? counts[key] : '-')
   const hasFilters = Boolean(status || urlQ || role)
-  const from = totalUsers === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
-  const to = (page - 1) * PAGE_SIZE + users.length
+  const from = totalUsers === 0 ? 0 : (page - 1) * pageSize + 1
+  const to = (page - 1) * pageSize + users.length
   const firstLoad = loading && users.length === 0
 
   function rowActions(u) {
@@ -408,6 +414,7 @@ export default function UsersView({ mode = 'users' }) {
             <p className="mt-4 text-[14px] text-[var(--muted)]">Showing {from}-{to} of {totalUsers} user{totalUsers !== 1 ? 's' : ''}</p>
           )}
           <PaginationControls page={page} totalPages={totalPages} onChange={setPage} />
+          {!loadError && users.length > 0 && <PageSizeSelect value={pageSize} onChange={changePageSize} />}
         </Card>
 
         <div className={`${selected ? '' : 'hidden @min-[1000px]:block'} @min-[1000px]:sticky @min-[1000px]:top-20`}>
