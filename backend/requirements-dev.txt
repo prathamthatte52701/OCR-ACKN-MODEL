@@ -6,3 +6,4 @@ isort==8.0.1
 mypy==2.3.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
+pytest-timeout==2.4.0

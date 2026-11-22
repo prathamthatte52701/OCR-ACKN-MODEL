@@ -15,6 +15,31 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+# Which MongoDB the tests use. DEFAULT: the in-process fake (backend/fake_mongo.py): fast, cannot
+# touch real data, cannot hang on a network. To run the SAME tests against a real MongoDB instead,
+# set TEST_MONGO_URI to a server and keep a database name ending in "_test" (ACKN_TEST_DB, default
+# ackn_AI_model_test).
+TEST_MONGO_URI = os.environ.get("TEST_MONGO_URI", "").strip()
+USE_FAKE_MONGO = not TEST_MONGO_URI
+# Always set explicitly so the real MONGO_URI from backend/.env is never read by a test run.
+os.environ["MONGO_URI"] = TEST_MONGO_URI or "mongodb://fake-mongo.invalid:27017/"
+
+import motor.motor_asyncio as _motor  # noqa: E402
+
+import fake_mongo  # noqa: E402
+
+# The real Motor classes, kept for the differential test (fake vs a real server) before patching.
+fake_mongo.REAL_ASYNC_CLIENT = _motor.AsyncIOMotorClient
+fake_mongo.REAL_GRIDFS_BUCKET = _motor.AsyncIOMotorGridFSBucket
+
+if USE_FAKE_MONGO:
+    # Patched BEFORE any app module is imported: they do `from motor.motor_asyncio import ...`.
+    import pymongo as _pymongo
+
+    _motor.AsyncIOMotorClient = fake_mongo.FakeAsyncClient  # type: ignore[misc,assignment]
+    _motor.AsyncIOMotorGridFSBucket = fake_mongo.FakeGridFSBucket  # type: ignore[misc,assignment]
+    _pymongo.MongoClient = fake_mongo.FakeSyncClient  # type: ignore[misc,assignment]
+
 SESSION_TEST_DB = os.environ.get("ACKN_TEST_DB", "ackn_AI_model_test")
 os.environ["MONGO_DB_NAME"] = SESSION_TEST_DB
 # Test-only signing secret: lets a pre-generated token fixture (made with the old
@@ -67,6 +92,8 @@ def drop_session_db(
 def pytest_sessionfinish(session: Any, exitstatus: Any) -> None:
     """The db fixture only empties collections, so each session would leave its (now empty)
     test database on Atlas. Drop exactly the one this session used."""
+    if USE_FAKE_MONGO:  # nothing outside this process was created
+        return
     try:
         from pymongo import MongoClient
 
@@ -88,14 +115,19 @@ TEST_PASSWORD = "Xq7!mZv#4Lp2"
 @pytest_asyncio.fixture
 async def db() -> AsyncIterator[Any]:
     assert settings.mongo_db_name.endswith("_test")
+    if USE_FAKE_MONGO:
+        fake_mongo.reset_store()  # every test starts from an empty fake
     await connect_to_mongo()
     database = get_database()
     try:
         yield database
     finally:
         assert database.name.endswith("_test")
-        for name in await database.list_collection_names():
-            await database[name].delete_many({})
+        if USE_FAKE_MONGO:
+            fake_mongo.reset_store()
+        else:
+            for name in await database.list_collection_names():
+                await database[name].delete_many({})
         await close_mongo_connection()
 
 

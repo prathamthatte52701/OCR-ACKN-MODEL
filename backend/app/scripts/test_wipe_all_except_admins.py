@@ -317,6 +317,11 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.mark.skipif(
+    not os.environ.get("TEST_MONGO_URI"),
+    reason="runs the real CLI in a SEPARATE process, which cannot see the in-process fake Mongo; "
+    "set TEST_MONGO_URI to a real *_test server to run it",
+)
 async def test_cli_subprocess(sub_db: Any, tmp_path: Path) -> None:
     await sub_db.users.insert_many(
         [
