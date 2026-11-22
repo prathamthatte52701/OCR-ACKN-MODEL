@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { FileSpreadsheet } from 'lucide-react'
-import { downloadWorkbook } from '../api/excel'
-import { useExportHistory } from '../hooks/useDocumentsQueries'
+import { downloadAllWorkbooks, downloadWorkbook } from '../api/excel'
+import { useExportHistory, useWorkbooks } from '../hooks/useDocumentsQueries'
 import LoadingState from '../components/LoadingState'
 import PageBackground from '../components/PageBackground'
 import { formatIST } from '../utils/formatDate'
@@ -48,17 +48,40 @@ export default function ExportHistoryPage() {
   const totalPages = data?.totalPages || 1
   // the server clamps a page past the end to the last real page and says which one it returned
   const currentPage = data?.currentPage || page
-  const [downloadingId, setDownloadingId] = useState(null)
+  // One download button per workbook (and a zip of all of them): independent of the history rows
+  // and of the page number below.
+  const { data: workbookData } = useWorkbooks()
+  const workbooks = workbookData?.workbooks || []
+  const [busy, setBusy] = useState(null)
 
-  async function handleDownload(row) {
-    if (!row.workbook?.year) return
-    setDownloadingId(row.id)
+  async function handleWorkbookDownload(wb) {
+    setBusy(wb.id)
     try {
-      await downloadWorkbook({ year: row.workbook.year })
+      await downloadWorkbook({ workbookId: wb.id })
     } catch (err) {
       toast.error(err.userMessage || 'Could not download the Excel workbook. Please try again.')
     } finally {
-      setDownloadingId(null)
+      setBusy(null)
+    }
+  }
+
+  async function handleDownloadAll() {
+    setBusy('all')
+    try {
+      const res = await downloadAllWorkbooks()
+      const skipped = Number(res?.headers?.['x-download-skipped'] ?? 0)
+      if (skipped > 0) {
+        const names = (res.headers['x-download-skipped-names'] || '')
+          .split(',')
+          .filter(Boolean)
+          .map((n) => decodeURIComponent(n))
+          .join(', ')
+        toast.warning(`${skipped} workbook${skipped !== 1 ? 's' : ''} skipped (file not found): ${names}`)
+      }
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not download the workbooks. Please try again.')
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -76,6 +99,30 @@ export default function ExportHistoryPage() {
             {isLoading ? 'Loading export history...' : `${totalExports} export${totalExports !== 1 ? 's' : ''}`}
           </p>
         </div>
+
+        {workbooks.length > 0 && (
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            {workbooks.map((wb) => (
+              <button
+                key={wb.id}
+                onClick={() => handleWorkbookDownload(wb)}
+                disabled={busy !== null}
+                className="inline-flex items-center justify-center rounded-xl border border-blue-300/18 bg-slate-950/32 px-3 py-1.5 text-[12.6px] font-bold text-blue-200 transition-all hover:border-blue-300/35 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy === wb.id ? 'Downloading...' : `Download ${wb.filename.replace(/\.xlsx$/i, '')}`}
+              </button>
+            ))}
+            {workbooks.length >= 2 && (
+              <button
+                onClick={handleDownloadAll}
+                disabled={busy !== null}
+                className="inline-flex items-center justify-center rounded-xl border border-blue-300/18 bg-slate-950/32 px-3 py-1.5 text-[12.6px] font-bold text-blue-200 transition-all hover:border-blue-300/35 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy === 'all' ? 'Preparing zip...' : 'Download all (zip)'}
+              </button>
+            )}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="rounded-[28px] border border-blue-300/12 bg-slate-900/68 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
@@ -96,7 +143,6 @@ export default function ExportHistoryPage() {
                     <th className="px-4 py-3 text-left font-bold text-slate-400">Date</th>
                     <th className="px-4 py-3 text-left font-bold text-slate-400">Exported At</th>
                     <th className="px-4 py-3 text-left font-bold text-slate-400">Workbook</th>
-                    <th className="px-4 py-3 text-right font-bold text-slate-400">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -108,15 +154,6 @@ export default function ExportHistoryPage() {
                       <td className="whitespace-nowrap px-4 py-3 text-slate-400">{formatIST(row.exportedAt)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-300">
                         {row.workbook?.filename || <span className="text-slate-600">Unknown</span>}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right">
-                        <button
-                          onClick={() => handleDownload(row)}
-                          disabled={!row.workbook?.year || downloadingId === row.id}
-                          className="inline-flex items-center justify-center rounded-xl border border-blue-300/18 bg-slate-950/32 px-3 py-1.5 text-[12.6px] font-bold text-blue-200 transition-all hover:border-blue-300/35 hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {downloadingId === row.id ? 'Downloading...' : 'Download Excel'}
-                        </button>
                       </td>
                     </tr>
                   ))}

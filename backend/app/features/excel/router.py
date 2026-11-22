@@ -1,5 +1,8 @@
 import asyncio
 import os
+import re
+import tempfile
+import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
@@ -7,11 +10,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from loguru import logger
+from starlette.background import BackgroundTask
 
 from app.core.database import get_database
 from app.core.object_id import PyObjectId
@@ -146,6 +151,88 @@ async def list_workbooks(current_user: CurrentUser = Depends(get_current_user)) 
         "active": settings.get("activeWorkbookName") if settings else None,
         "activeYear": settings.get("activeYear") if settings else None,
     }
+
+
+ZIP_TEMP_PREFIX = "workbooks-zip-"
+_ZIP_UNSAFE = re.compile(r"[^A-Za-z0-9 _()&+-]")  # no dots: a name can never hold "..")
+
+
+def _zip_entry_name(filename: str, year: int, used: set[str]) -> str:
+    """A safe, unique name for one workbook inside the zip: no path parts, no dots at the start,
+    always .xlsx. A clash with an earlier entry gets the year, then a number, added."""
+    stem = filename[:-5] if filename.lower().endswith(".xlsx") else filename
+    stem = _ZIP_UNSAFE.sub("_", stem).strip(" .") or "workbook"
+    candidate = f"{stem}.xlsx"
+    if candidate in used:
+        candidate = f"{stem}_{year}.xlsx"
+    n = 2
+    while candidate in used:
+        candidate = f"{stem}_{year}_{n}.xlsx"
+        n += 1
+    used.add(candidate)
+    return candidate
+
+
+@router.get("/workbooks/download-all")
+async def download_all_workbooks(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> FileResponse:
+    """One zip with ALL of the caller's own workbooks. Scoped by the userId from the login token
+    (there is no id parameter) and every file goes through _owned_workbook_file, so nothing outside
+    the caller's own files can enter the zip. A workbook whose file is missing is skipped and named
+    in X-Download-Skipped-Names; it never fails the whole download. The zip is built in a temp
+    file, one workbook at a time, and deleted after it was sent."""
+    db = get_database()
+    cursor = db.workbooks.find({"userId": current_user.id}).sort("year", 1)
+    records = [wb async for wb in cursor]
+    if not records:
+        raise HTTPException(status_code=404, detail="You have no workbooks to download yet.")
+
+    found: list[tuple[str, Path]] = []
+    skipped: list[str] = []
+    used: set[str] = set()
+    for wb in records:
+        try:
+            target = _owned_workbook_file(current_user.id, wb["filename"])
+        except HTTPException:
+            skipped.append(str(wb["filename"]))
+            continue
+        found.append((_zip_entry_name(str(wb["filename"]), int(wb["year"]), used), target))
+    if not found:
+        raise HTTPException(
+            status_code=404, detail="None of your workbook files were found on the server."
+        )
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix=ZIP_TEMP_PREFIX)
+    os.close(fd)
+
+    def build() -> None:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for arcname, source in found:
+                zf.write(source, arcname)
+
+    def remove_temp() -> None:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    try:
+        await asyncio.to_thread(build)
+    except BaseException:
+        remove_temp()
+        raise
+    return FileResponse(
+        path=tmp_path,
+        filename="workbooks.zip",
+        media_type="application/zip",
+        headers={
+            "X-Download-Included": str(len(found)),
+            "X-Download-Skipped": str(len(skipped)),
+            "X-Download-Skipped-Names": ",".join(quote(n, safe="") for n in skipped),
+        },
+        background=BackgroundTask(remove_temp),
+    )
 
 
 @router.get("/workbook/download")

@@ -10,6 +10,17 @@ export function downloadWorkbook({ year, workbookId } = {}) {
   })
 }
 
+// { workbooks: [{ id, year, filename, isActive, ... }], active, activeYear } - this user's own
+export function listWorkbooks() {
+  return api.get('/documents/workbooks').then((res) => res.data)
+}
+
+// One zip with every workbook of this user. The response headers say how many files were
+// included and which workbooks were skipped (file missing on the server).
+export function downloadAllWorkbooks() {
+  return downloadBlob('/documents/workbooks/download-all', { fallbackFilename: 'workbooks.zip' })
+}
+
 // { exports, totalExports, totalPages, currentPage } - 30 rows per page
 export function exportHistory(params = {}) {
   return api.get('/documents/export-history', { params }).then((res) => res.data)

@@ -205,3 +205,188 @@ async def test_export_history_pagination_never_mixes_users(
         r = await client.get(f"/api/documents/export-history?page={page}", headers=a.headers)
         assert r.json()["totalExports"] == 31
         assert b.email not in r.text and str(b.id) not in r.text
+
+
+# ---------------------------------------------------------------------------
+# GET /documents/workbooks/download-all : one zip with ALL of the caller's workbooks
+# ---------------------------------------------------------------------------
+import io  # noqa: E402
+import tempfile  # noqa: E402
+import zipfile  # noqa: E402
+
+ZIP_URL = "/api/documents/workbooks/download-all"
+ZIP_PREFIX = "workbooks-zip-"
+
+
+async def _wb(
+    db: Any, exports_dir: Path, user: Any, name: str, year: int, *, with_file: bool = True
+) -> ObjectId:
+    now = datetime.now(UTC)
+    res = await db.workbooks.insert_one(
+        {
+            "userId": user.id,
+            "year": year,
+            "filename": name,
+            "isActive": False,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    )
+    if with_file:
+        book = openpyxl.Workbook()
+        book.active["A1"] = f"owner:{user.id}:{name}:{year}"
+        book.save(exports_dir / f"{excel_service.physical_workbook_filename(user.id, name)}.xlsx")
+    return res.inserted_id
+
+
+def _zip_of(res: Any) -> zipfile.ZipFile:
+    return zipfile.ZipFile(io.BytesIO(res.content))
+
+
+def _leftover_zip_temps() -> set[str]:
+    return {p.name for p in Path(tempfile.gettempdir()).glob(f"{ZIP_PREFIX}*")}
+
+
+async def test_zip_has_all_own_workbooks_as_valid_xlsx(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    await _wb(db, exports_dir, a, "Bills_2025", 2025)
+    await _wb(db, exports_dir, a, "Bills_2026", 2026)
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"].startswith("application/zip")
+    assert res.headers["x-download-included"] == "2"
+    assert res.headers["x-download-skipped"] == "0"
+    disposition = res.headers["content-disposition"]
+    assert "workbooks.zip" in disposition
+    assert a.email not in disposition and a.username not in disposition
+    zf = _zip_of(res)
+    assert sorted(zf.namelist()) == ["Bills_2025.xlsx", "Bills_2026.xlsx"]
+    for name in zf.namelist():
+        book = openpyxl.load_workbook(io.BytesIO(zf.read(name)))  # a real, openable workbook
+        assert str(book.active["A1"].value).startswith(f"owner:{a.id}:")
+
+
+async def test_zip_never_contains_another_users_workbooks(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a, b = await make_user(), await make_user()
+    await _wb(db, exports_dir, a, "BooksA1", 2025)
+    await _wb(db, exports_dir, a, "BooksA2", 2026)
+    await _wb(db, exports_dir, b, "BooksB", 2026)
+    res = await client.get(ZIP_URL, headers=b.headers)
+    assert res.status_code == 200
+    zf = _zip_of(res)
+    assert zf.namelist() == ["BooksB.xlsx"]
+    assert f"owner:{b.id}:" in str(
+        openpyxl.load_workbook(io.BytesIO(zf.read("BooksB.xlsx"))).active["A1"].value
+    )
+    res_a = await client.get(ZIP_URL, headers=a.headers)
+    assert sorted(_zip_of(res_a).namelist()) == ["BooksA1.xlsx", "BooksA2.xlsx"]
+
+
+async def test_missing_file_is_skipped_and_reported(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    await _wb(db, exports_dir, a, "Present", 2025)
+    await _wb(db, exports_dir, a, "Gone", 2026, with_file=False)
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 200, res.text
+    assert res.headers["x-download-included"] == "1"
+    assert res.headers["x-download-skipped"] == "1"
+    assert "Gone" in res.headers["x-download-skipped-names"]
+    assert _zip_of(res).namelist() == ["Present.xlsx"]
+
+
+async def test_all_files_missing_gives_a_clean_error(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    await _wb(db, exports_dir, a, "Gone1", 2025, with_file=False)
+    before = _leftover_zip_temps()
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 404
+    assert isinstance(res.json()["detail"], str)
+    assert _leftover_zip_temps() == before
+
+
+async def test_zero_workbooks_gives_a_clean_error(client: Any, make_user: Any) -> None:
+    a = await make_user()
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 404
+    assert "workbook" in res.json()["detail"].lower()
+
+
+async def test_zip_route_needs_login(client: Any) -> None:
+    assert (await client.get(ZIP_URL)).status_code == 401
+
+
+async def test_duplicate_workbook_names_are_made_unique_in_the_zip(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    # two records with the same display name (same file on disk): entries must not overwrite
+    await _wb(db, exports_dir, a, "Books", 2025)
+    await _wb(db, exports_dir, a, "Books", 2026, with_file=False)
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 200
+    names = _zip_of(res).namelist()
+    assert len(names) == len(set(names)) == 2
+    assert all(n.endswith(".xlsx") for n in names)
+
+
+async def test_odd_workbook_names_cannot_escape_the_zip_or_the_folder(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    for i, name in enumerate(["../../evil", "a/b..c", "..\\x", "name with spaces & more", "...."]):
+        # a name with a backslash cannot even be created as a file here: its record stays file-less
+        await _wb(db, exports_dir, a, name, 2000 + i, with_file="\\" not in name)
+    res = await client.get(ZIP_URL, headers=a.headers)
+    assert res.status_code == 200, res.text
+    names = _zip_of(res).namelist()
+    assert len(names) == 4, (names, res.headers["x-download-skipped-names"])
+    assert res.headers["x-download-skipped"] == "1"
+    for n in names:
+        assert ".." not in n and "/" not in n and "\\" not in n and not n.startswith(".")
+        assert n.endswith(".xlsx")
+    assert len(set(names)) == len(names)
+
+
+async def test_twenty_workbooks_twice_leaves_no_temp_files(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    for i in range(20):
+        await _wb(db, exports_dir, a, f"Books{i:02d}", 2000 + i)
+    before = _leftover_zip_temps()
+    for _ in range(2):
+        res = await client.get(ZIP_URL, headers=a.headers)
+        assert res.status_code == 200
+        assert len(_zip_of(res).namelist()) == 20
+    assert _leftover_zip_temps() == before
+
+
+async def test_workbook_download_by_id_returns_that_exact_workbook(
+    client: Any, db: Any, make_user: Any, exports_dir: Path
+) -> None:
+    a = await make_user()
+    w25 = await _wb(db, exports_dir, a, "Bills_2025", 2025)
+    w26 = await _wb(db, exports_dir, a, "Bills_2026", 2026)
+    for wid, name in ((w25, "Bills_2025"), (w26, "Bills_2026")):
+        res = await client.get(
+            f"/api/documents/workbook/download?workbookId={wid}", headers=a.headers
+        )
+        assert res.status_code == 200
+        assert f"{name}.xlsx" in res.headers["content-disposition"]
+        book = openpyxl.load_workbook(io.BytesIO(res.content))
+        assert f":{name}:" in str(book.active["A1"].value)  # the right file, not the other year's
+    bad = await client.get(
+        "/api/documents/workbook/download?workbookId=not-an-id", headers=a.headers
+    )
+    assert bad.status_code == 400
+    assert (
+        await client.get(f"/api/documents/workbook/download?workbookId={w25}")
+    ).status_code == 401

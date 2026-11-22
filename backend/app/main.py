@@ -143,6 +143,7 @@ app.add_middleware(
         "Content-Disposition",
         "X-Download-Included",
         "X-Download-Skipped",
+        "X-Download-Skipped-Names",
         "X-Download-Total",
     ],
 )

@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { getDocument, listDocuments, listDocumentsSummary, myActivity, trainingStats } from '../api/documents'
-import { exportHistory } from '../api/excel'
+import { exportHistory, listWorkbooks } from '../api/excel'
 
 export const documentKeys = {
   list: (params) => ['documents', 'list', params],
@@ -73,6 +73,15 @@ export function useExportHistory(params = {}) {
     queryKey: ['exports', 'history', params],
     queryFn: () => exportHistory(params),
     placeholderData: keepPreviousData,
+  })
+}
+
+// This user's workbooks, for the download buttons on Export History. Under the ['exports'] prefix
+// so saving a document (which invalidates it) refreshes the list too.
+export function useWorkbooks() {
+  return useQuery({
+    queryKey: ['exports', 'workbooks'],
+    queryFn: listWorkbooks,
   })
 }
 
