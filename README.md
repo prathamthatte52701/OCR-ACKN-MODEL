@@ -119,52 +119,95 @@ flowchart LR
 
 ## Quick start
 
-This is the setup for a Windows PC. It runs everything locally. Follow the steps in order the first time. After that, only `start.bat` and `stop.bat` are needed.
+This takes about 20 to 30 minutes the first time, most of it waiting for downloads. It sets up the whole app on one Windows PC. Everything runs locally; only the database lives in the cloud (MongoDB Atlas). After the first setup you only ever use `start.bat` and `stop.bat`.
 
-**You need**
+**What you end up with:** a user app at <http://localhost:5174>, an admin app at <http://localhost:5175>, and a backend at <http://127.0.0.1:8000>, all running on your PC.
 
-- Windows 10 or 11
-- [Git](https://git-scm.com/download/win), to download the code
-- [Python 3.12](https://www.python.org/downloads/) (tick "Add python.exe to PATH" in the installer)
-- [Node.js](https://nodejs.org/) 20.19+ or 22.12+
-- A MongoDB Atlas connection string (see step 3)
-- Optional: one or more [Groq](https://console.groq.com/keys) API keys. Without them, documents upload but cannot be read.
+### 1. Install the prerequisites
 
-**First-time setup**
+| Tool | Version | Where to get it | Check it worked |
+|---|---|---|---|
+| Git | any recent | [git-scm.com](https://git-scm.com/download/win) | `git --version` |
+| Python | **3.12** | [python.org](https://www.python.org/downloads/). Tick **"Add python.exe to PATH"** on the first installer screen. | `python --version` |
+| Node.js | 20.19+ or 22.12+ | [nodejs.org](https://nodejs.org/) (use the LTS download) | `node --version` |
 
-1. **Download the code.** Open a terminal (cmd or PowerShell) in the folder where you want the project, then run:
+Open a new terminal (cmd or PowerShell) after installing, so the new tools are found. Run each check command above. If one says "not recognised", the tool is not on your PATH: reinstall it, or restart the terminal.
 
-   ```bash
-   git clone https://github.com/prathamthatte52701/OCR-ACKN-MODEL.git
-   cd OCR-ACKN-MODEL
-   ```
+You also need two online accounts, both free:
 
-   If you forked it, use your own fork's address instead.
+- **MongoDB Atlas**, for the database (step 3).
+- **Groq**, for reading the documents (step 4). Optional to start with: without a key, documents upload but cannot be read.
 
-2. **Create the Python environment** (once), inside the project folder:
+### 2. Download the code and create the Python environment
 
-   ```bash
-   python -m venv venv
-   ```
+In a terminal, go to the folder where you want the project, then run:
 
-3. **Get a database.** Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas), add a database user, and under **Network Access** allow your PC's IP address. Copy the connection string (it starts with `mongodb+srv://`). The app creates the database and its indexes by itself on first start.
+```bash
+git clone https://github.com/prathamthatte52701/OCR-ACKN-MODEL.git
+cd OCR-ACKN-MODEL
+python -m venv venv
+```
 
-4. **Create `backend/.env`.** Copy `backend/.env.example` to `backend/.env` and fill it in. These must be set: `MONGO_URI`, `JWT_SECRET` (generate one with the command in [Configuration](#configuration)), and the `ADMIN_1_*` values (name, email, password) for the first admin. Everything else is explained in [Configuration](#configuration).
+If you forked the project, use your own fork's address in the first line. `python -m venv venv` creates a private Python environment in a folder called `venv`. Do it once; `setup.bat` and `start.bat` use it automatically.
 
-5. **Install and build.** Double-click **`setup.bat`**. It installs the backend packages and builds both web apps, and can take several minutes the first time. It refuses to run while `backend/.env` is missing or empty. Run it again after any code update.
+### 3. Create the database (MongoDB Atlas)
 
-6. **Create the admin accounts** (once; safe to repeat), from the project folder:
+1. Sign up at [mongodb.com/atlas](https://www.mongodb.com/atlas) and create a free **M0** cluster. Any cloud region works; pick one close to you.
+2. **Database Access:** add a database user with a username and password. Note both. If the password has special characters such as `@`, `:` or `/`, either avoid them or URL-encode them in the connection string, or the connection will fail.
+3. **Network Access:** add your PC's IP address (the **Add Current IP Address** button does this). If your IP changes, for example on another network, add the new one too.
+4. **Connect, then Drivers:** copy the connection string. It looks like `mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority`. Replace `<user>` and `<password>` with the ones from step 2.
 
-   ```bash
-   cd backend
-   ..\venv\Scripts\python.exe -m app.scripts.seed_admin
-   ```
+You do not create the database or any collections yourself. The app creates `ackn_AI_model` and all its indexes the first time it starts.
 
-   In Git Bash use `../venv/Scripts/python.exe` instead.
+### 4. Get a Groq API key (for reading documents)
 
-7. **Start the app.** Double-click **`start.bat`**. It starts everything and opens the app. The first document you upload is slow (30 to 90 seconds) while the reading models load.
+Sign in at [console.groq.com/keys](https://console.groq.com/keys), create an API key and copy it. You can add more keys later, separated by commas, and the app spreads its calls across them.
 
-8. **First sign-in.** Open the admin app (<http://localhost:5175>) and sign in with the admin email and password from `.env`. Open **Approvals** to approve new users. Each user then signs in at <http://localhost:5174>.
+Only the text of each document's header is ever sent to Groq. The image and the rest of the page stay on your PC.
+
+### 5. Fill in `backend/.env`
+
+Copy `backend/.env.example` to `backend/.env` (same folder, new name) and open it in any text editor. Fill in at least these:
+
+| Setting | What to put |
+|---|---|
+| `MONGO_URI` | The connection string from step 3. |
+| `JWT_SECRET` | A long random secret, at least 32 characters. Generate one by running `python -c "import secrets; print(secrets.token_hex(48))"` and pasting the result. |
+| `GROQ_API_KEYS` | The key from step 4. Leave empty to add it later. |
+| `ADMIN_1_NAME`, `ADMIN_1_EMAIL`, `ADMIN_1_PASSWORD` | Your first admin account. Use a strong password. You sign in with this email and password. |
+| `ADMIN_2_NAME`, `ADMIN_2_EMAIL`, `ADMIN_2_PASSWORD` | The second admin. **Required:** the seed step in section 7 refuses to run unless both admin accounts are filled in. |
+
+Everything else has a safe default. The full list is in [Configuration](#configuration). Never share `backend/.env` or commit it; git ignores it already.
+
+### 6. Install and build: `setup.bat`
+
+Double-click **`setup.bat`** in the project folder. It checks your tools, installs the backend packages (the first run downloads a lot and can take several minutes), then installs and builds the user app and the admin app. When it ends with **"Setup complete. Now run start.bat"**, it worked. If it stops with an `ERROR:` line, the message says what is missing. Fix that and run `setup.bat` again; it is safe to repeat.
+
+Run `setup.bat` again after every update that changes code (see "Updating" below).
+
+### 7. Create the admin accounts (once)
+
+From the project folder, in a terminal:
+
+```bash
+cd backend
+..\venv\Scripts\python.exe -m app.scripts.seed_admin
+```
+
+(In Git Bash, write `../venv/Scripts/python.exe` instead.) This creates both admin accounts from your `.env`. It is safe to run again: an account that already exists is left alone. After this you may delete the `ADMIN_*_PASSWORD` values from `.env`, because only the password hash is stored.
+
+### 8. Start the app: `start.bat`
+
+Double-click **`start.bat`**. It starts the three parts, each in its own minimised window titled "ACKN Backend", "ACKN User App" and "ACKN Admin App". **Do not close those windows**; use `stop.bat` instead. When everything answers, your browser opens the user app. The first start can take a minute.
+
+Quick health check: open <http://127.0.0.1:8000/health> in a browser. `{"status":"ok"...}` means the backend is up and connected to the database.
+
+### 9. First sign-in and first document
+
+1. Open the **admin app**, <http://localhost:5175>, and sign in with the admin email and password from `.env`.
+2. People who sign up in the user app wait as **pending**. Open **Approvals** in the admin app to approve them.
+3. Approved users sign in at the **user app**, <http://localhost:5174>, and upload a Tax Invoice or Delivery Challan (image or PDF).
+4. **The very first document is slow, often 30 to 90 seconds,** while the reading models load. Later ones are much faster.
 
 | Part | Address | Port |
 |---|---|---|
@@ -174,11 +217,26 @@ This is the setup for a Windows PC. It runs everything locally. Follow the steps
 
 All three listen on this PC only (`127.0.0.1`). Other computers cannot reach them.
 
-**Daily use:** `start.bat` to start, `stop.bat` to stop. `stop.bat` only stops what `start.bat` started. A document that was being processed is queued again at the next start.
+### Daily use
 
-**Updating the app:** run `stop.bat`, then `git pull`, then `setup.bat`, then `start.bat`.
+- **Start:** double-click `start.bat`.
+- **Stop:** double-click `stop.bat`. It only stops what `start.bat` started. A document that was being read is queued again at the next start.
+- **Updating:** run `stop.bat`, then `git pull`, then `setup.bat`, then `start.bat`.
 
-**Something wrong?** See [Troubleshooting](#troubleshooting). To run the apps in development mode instead, see [Development](#development).
+### If something goes wrong on the first run
+
+| You see | Most likely cause and fix |
+|---|---|
+| `python` or `node` "is not recognized" | The tool is not installed or not on PATH. Reinstall it, tick the PATH option, open a new terminal. |
+| `setup.bat`: "venv not found" | Step 2 was skipped. Run `python -m venv venv` in the project folder. |
+| `setup.bat`: "backend\.env is missing or empty" | Step 5 was skipped. Copy `.env.example` to `.env` and fill it in. |
+| "Missing MONGO_URI" or a `JWT_SECRET` error when starting | A required value in `backend/.env` is empty or too short (`JWT_SECRET` needs 32+ characters). |
+| `/health` fails or the database cannot be reached | Check the connection string and password, and that your current IP is in Atlas **Network Access**. |
+| "port is already in use" | Another program uses 8000, 5174 or 5175. Close it, or run `stop.bat` if it is a leftover of this app. |
+| Admin sign-in fails | Run step 7 (`seed_admin`) and use the exact email and password from `.env`. |
+| Documents stay "uploaded" and are never read | No Groq key set, or the key is wrong. See `backend/logs/app.log`. |
+
+More cases are in [Troubleshooting](#troubleshooting). To run the apps in development mode with live reload instead, see [Development](#development).
 
 ## Configuration
 
