@@ -119,29 +119,52 @@ flowchart LR
 
 ## Quick start
 
-This is the setup for the office PC. It runs everything locally on Windows.
+This is the setup for a Windows PC. It runs everything locally. Follow the steps in order the first time. After that, only `start.bat` and `stop.bat` are needed.
 
 **You need**
 
-- Windows, with Python 3.12 installed
-- Node.js 20.19+ or 22.12+
-- A MongoDB Atlas connection string
-- Optional: one or more Groq API keys (without them, documents upload but cannot be read)
+- Windows 10 or 11
+- [Git](https://git-scm.com/download/win), to download the code
+- [Python 3.12](https://www.python.org/downloads/) (tick "Add python.exe to PATH" in the installer)
+- [Node.js](https://nodejs.org/) 20.19+ or 22.12+
+- A MongoDB Atlas connection string (see step 3)
+- Optional: one or more [Groq](https://console.groq.com/keys) API keys. Without them, documents upload but cannot be read.
 
-**Steps**
+**First-time setup**
 
-1. Create the Python environment once. Open a terminal in the project folder and run `python -m venv venv`.
-2. Copy `backend/.env.example` to `backend/.env` and fill it in. See [Configuration](#configuration).
-3. Double-click **`setup.bat`**. It installs the backend packages and builds both web apps. Run it once, and again after any frontend code change. Stop the app first with `stop.bat`, because Windows locks files that are in use.
-4. Create the admin accounts once (needs the `ADMIN_*` values from step 2, and `setup.bat` refuses to run while `backend/.env` is missing or empty). This is safe to repeat:
+1. **Download the code.** Open a terminal (cmd or PowerShell) in the folder where you want the project, then run:
+
+   ```bash
+   git clone https://github.com/prathamthatte52701/OCR-ACKN-MODEL.git
+   cd OCR-ACKN-MODEL
+   ```
+
+   If you forked it, use your own fork's address instead.
+
+2. **Create the Python environment** (once), inside the project folder:
+
+   ```bash
+   python -m venv venv
+   ```
+
+3. **Get a database.** Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas), add a database user, and under **Network Access** allow your PC's IP address. Copy the connection string (it starts with `mongodb+srv://`). The app creates the database and its indexes by itself on first start.
+
+4. **Create `backend/.env`.** Copy `backend/.env.example` to `backend/.env` and fill it in. These must be set: `MONGO_URI`, `JWT_SECRET` (generate one with the command in [Configuration](#configuration)), and the `ADMIN_1_*` values (name, email, password) for the first admin. Everything else is explained in [Configuration](#configuration).
+
+5. **Install and build.** Double-click **`setup.bat`**. It installs the backend packages and builds both web apps, and can take several minutes the first time. It refuses to run while `backend/.env` is missing or empty. Run it again after any code update.
+
+6. **Create the admin accounts** (once; safe to repeat), from the project folder:
 
    ```bash
    cd backend
-   ../venv/Scripts/python.exe -m app.scripts.seed_admin
+   ..\venv\Scripts\python.exe -m app.scripts.seed_admin
    ```
 
-5. Double-click **`start.bat`** every day. It starts everything and opens the app.
-6. **First sign-in.** Open the admin app (<http://localhost:5175>) and sign in with the admin email and password you set in `.env`. Open **Approvals** to approve new users. Each user then signs in at <http://localhost:5174>.
+   In Git Bash use `../venv/Scripts/python.exe` instead.
+
+7. **Start the app.** Double-click **`start.bat`**. It starts everything and opens the app. The first document you upload is slow (30 to 90 seconds) while the reading models load.
+
+8. **First sign-in.** Open the admin app (<http://localhost:5175>) and sign in with the admin email and password from `.env`. Open **Approvals** to approve new users. Each user then signs in at <http://localhost:5174>.
 
 | Part | Address | Port |
 |---|---|---|
@@ -151,9 +174,11 @@ This is the setup for the office PC. It runs everything locally on Windows.
 
 All three listen on this PC only (`127.0.0.1`). Other computers cannot reach them.
 
-To stop, double-click **`stop.bat`**. It only stops what `start.bat` started. A document that was being processed is queued again at the next start.
+**Daily use:** `start.bat` to start, `stop.bat` to stop. `stop.bat` only stops what `start.bat` started. A document that was being processed is queued again at the next start.
 
-**Updating the app:** run `stop.bat`, pull the new code, run `setup.bat`, then `start.bat`.
+**Updating the app:** run `stop.bat`, then `git pull`, then `setup.bat`, then `start.bat`.
+
+**Something wrong?** See [Troubleshooting](#troubleshooting). To run the apps in development mode instead, see [Development](#development).
 
 ## Configuration
 
