@@ -76,7 +76,10 @@ async def get_messages(
 ) -> dict:
     db = get_database()
     if current_user.role == "admin":
-        thread_id = service.parse_object_id(user_id, "user") if user_id else None
+        try:
+            thread_id = service.parse_object_id(user_id, "user") if user_id else None
+        except ChatError as exc:  # outside _run: a bad id was an unhandled 500
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from None
         if thread_id is None:
             raise HTTPException(status_code=422, detail="Choose a user.")
     else:
