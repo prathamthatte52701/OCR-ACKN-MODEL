@@ -53,3 +53,9 @@ def test_installed_versions_match_the_pins() -> None:
         if name.lower() == "opencv-python-headless":
             continue  # dev venv has the non-headless build of the same 5.0.0.93 release
         assert version(name) == pinned, f"{name}: installed {version(name)} != pinned {pinned}"
+
+
+def test_email_validator_is_not_a_requirement() -> None:
+    """ACKN validates emails with its own regex (core/validators.py) and never uses pydantic EmailStr,
+    so email-validator (an optional extra of pydantic/fastapi) must not come back as a pin."""
+    assert "email-validator" not in _names(_requirement_lines("requirements.txt"))
