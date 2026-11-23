@@ -258,7 +258,10 @@ async def test_reject_while_the_user_is_logging_in(client: Any, make_user: Any) 
 
 async def test_decided_at_is_recent_utc(client: Any, make_user: Any, db: Any) -> None:
     admin, u = await make_user(role="admin"), await make_user(status="pending")
+    # MongoDB stores dates in milliseconds (the fake does too), so a time stored right after
+    # `before` can read a little EARLIER than a microsecond `before`: compare in milliseconds.
     before = datetime.now(UTC).replace(tzinfo=None)
+    before = before.replace(microsecond=before.microsecond // 1000 * 1000)
     await _reject(client, admin, u, {"reason": "t"})
     stored = (await db.users.find_one({"_id": u.id}))["decidedAt"]
     assert 0 <= (stored.replace(tzinfo=None) - before).total_seconds() < 30

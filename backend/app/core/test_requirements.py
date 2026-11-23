@@ -56,6 +56,6 @@ def test_installed_versions_match_the_pins() -> None:
 
 
 def test_email_validator_is_not_a_requirement() -> None:
-    """ACKN validates emails with its own regex (core/validators.py) and never uses pydantic EmailStr,
-    so email-validator (an optional extra of pydantic/fastapi) must not come back as a pin."""
+    """ACKN validates emails with its own regex (core/validators.py) and never uses pydantic
+    EmailStr, so email-validator (an optional extra of pydantic/fastapi) must not come back."""
     assert "email-validator" not in _names(_requirement_lines("requirements.txt"))

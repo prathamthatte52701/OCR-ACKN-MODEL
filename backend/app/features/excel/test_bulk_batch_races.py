@@ -4,7 +4,7 @@ deadlock-freedom of overlapping bulk saves, and the small invariants (cap, dupli
 import asyncio
 import shutil
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +85,20 @@ async def _admin_route_edit(db: Any, client: Any, doc_id: ObjectId, user: Any) -
     assert r.status_code == 200, r.text
 
 
+async def _after_next_millisecond(db: Any, doc_id: ObjectId) -> None:
+    """The batch save detects an edit by comparing the document's updatedAt for equality. MongoDB
+    (and the fake) store dates in milliseconds, so an edit made in the SAME millisecond as the
+    document's creation leaves updatedAt unchanged and is invisible. A real server needs well over
+    a millisecond per round trip, so there the edit is always later; the fake has no latency.
+    Give the clock the same chance: yield to the event loop (no timed sleep) until it has moved
+    past the document's last write by one millisecond. Measured: every failure of this file had
+    captured updatedAt == current updatedAt to the millisecond."""
+    doc = await db.documents.find_one({"_id": doc_id}, {"updatedAt": 1})
+    floor = doc["updatedAt"] + timedelta(milliseconds=1)
+    while datetime.now(UTC) < floor:
+        await asyncio.sleep(0)
+
+
 def _edit_during_append(
     monkeypatch: pytest.MonkeyPatch, edit: Editor, db: Any, client: Any, target: ObjectId, user: Any
 ) -> None:
@@ -94,6 +108,7 @@ def _edit_during_append(
     real = excel_service.append_rows
 
     async def wrapper(filename: str, items: list) -> Path:
+        await _after_next_millisecond(db, target)
         await edit(db, client, target, user)
         return await real(filename, items)
 
