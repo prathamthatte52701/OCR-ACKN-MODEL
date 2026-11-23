@@ -26,6 +26,7 @@ Supported
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import datetime as _dt
 import re
@@ -53,6 +54,12 @@ def nope(what: str) -> NotImplementedError:
     return NotImplementedError(
         f"fake_mongo does not implement {what}; add it (from real usage) or use a real *_test database"
     )
+
+
+async def _yield() -> None:
+    """Every awaited database call is a point where other tasks may run, like a real server round
+    trip (each call still runs atomically once it starts). No timed sleep, just one loop turn."""
+    await asyncio.sleep(0)
 
 
 def reset_store() -> None:
@@ -947,16 +954,20 @@ class _AsyncCursor:
         self._it: Any = None
 
     def __aiter__(self) -> _AsyncCursor:
-        self._it = iter(self._items())
+        self._it = None  # the query runs on the first __anext__, after one yield (a real fetch)
         return self
 
     async def __anext__(self) -> dict:
+        if self._it is None:
+            await _yield()
+            self._it = iter(self._items())
         try:
             return next(self._it)
         except StopIteration:
             raise StopAsyncIteration from None
 
     async def to_list(self, length: int | None = None) -> list[dict]:
+        await _yield()
         items = self._items()
         return items if length is None else items[:length]
 
@@ -1032,6 +1043,7 @@ class _AsyncCollection:
 
 def _make_async_method(name: str) -> Callable[..., Any]:
     async def call(self: _AsyncCollection, *a: Any, **k: Any) -> Any:
+        await _yield()
         return getattr(self._core, name)(*a, **k)
 
     call.__name__ = name
@@ -1056,19 +1068,23 @@ class _AsyncDatabase:
         return _AsyncCollection(self, coll)
 
     async def list_collection_names(self, *a: Any, **k: Any) -> list[str]:
+        await _yield()
         with _LOCK:
             return list(_STORE.get(self.name, {}))
 
     async def create_collection(self, name: str, **k: Any) -> _AsyncCollection:
+        await _yield()
         with _LOCK:
             _STORE.setdefault(self.name, {}).setdefault(name, _CollData())
         return self[name]
 
     async def drop_collection(self, name: str) -> None:
+        await _yield()
         with _LOCK:
             _STORE.get(self.name, {}).pop(name, None)
 
     async def command(self, cmd: Any, *a: Any, **k: Any) -> dict:
+        await _yield()
         if cmd == "ping" or cmd == {"ping": 1}:
             return {"ok": 1.0}
         raise nope(f"database.command({cmd!r})")
@@ -1076,6 +1092,7 @@ class _AsyncDatabase:
 
 class _AsyncAdmin:
     async def command(self, cmd: Any, *a: Any, **k: Any) -> dict:
+        await _yield()
         if cmd == "ping" or cmd == {"ping": 1}:
             return {"ok": 1.0}
         raise nope(f"admin.command({cmd!r})")
@@ -1092,10 +1109,12 @@ class FakeAsyncClient:
         return _AsyncDatabase(self, name)
 
     async def list_database_names(self) -> list[str]:
+        await _yield()
         with _LOCK:
             return list(_STORE)
 
     async def drop_database(self, name: str) -> None:
+        await _yield()
         with _LOCK:
             _STORE.pop(name, None)
 
@@ -1182,6 +1201,7 @@ class FakeGridIn:
         self._closed = False
 
     async def write(self, data: bytes) -> None:
+        await _yield()
         if self._closed:
             raise ValueError("cannot write to a closed GridIn")
         self._buf.extend(data)
@@ -1189,6 +1209,7 @@ class FakeGridIn:
     async def close(self) -> None:
         if self._closed:
             return
+        await _yield()
         self._closed = True
         files, chunks = self._bucket._files, self._bucket._chunks
         data = bytes(self._buf)
@@ -1225,6 +1246,7 @@ class FakeGridOut:
         self._data, self._pos = data, 0
 
     async def read(self, size: int = -1) -> bytes:
+        await _yield()
         end = len(self._data) if size is None or size < 0 else self._pos + size
         out = self._data[self._pos : end]
         self._pos = min(end, len(self._data))
@@ -1270,6 +1292,7 @@ class FakeGridFSBucket:
         return grid_in._id
 
     async def open_download_stream(self, file_id: Any) -> FakeGridOut:
+        await _yield()
         doc = self._files.find_one({"_id": file_id})
         if doc is None:
             raise NoFile(f"no file in gridfs collection {self._bucket}.files with _id {file_id!r}")
@@ -1277,6 +1300,7 @@ class FakeGridFSBucket:
         return FakeGridOut(doc, b"".join(c["data"] for c in chunks))
 
     async def delete(self, file_id: Any) -> None:
+        await _yield()
         res = self._files.delete_one({"_id": file_id})
         self._chunks.delete_many({"files_id": file_id})
         if res.deleted_count == 0:

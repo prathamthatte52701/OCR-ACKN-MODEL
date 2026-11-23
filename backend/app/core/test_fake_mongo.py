@@ -7,6 +7,7 @@ Two groups:
   a *_test database) and must give the same results. Skipped when TEST_MONGO_URI is not set.
 """
 
+import asyncio
 import datetime as dt
 import os
 import re
@@ -272,6 +273,63 @@ async def test_sync_client_shares_the_same_store(fdb: Any) -> None:
     sync = fake_mongo.FakeSyncClient()
     sync["ackn_fake_unit_test"].c.update_one({"_id": 1}, {"$set": {"v": 2}})
     assert (await fdb.c.find_one({"_id": 1}))["v"] == 2
+
+
+async def test_concurrent_tasks_interleave_between_awaited_operations(fdb: Any) -> None:
+    """Like a real server, an awaited database call is a point where other tasks get to run (each
+    call itself stays atomic). Without that, asyncio.gather() of two requests ran one after the
+    other and a "race" test could never see a race."""
+    order: list[str] = []
+
+    async def worker(name: str) -> None:
+        for i in range(3):
+            await fdb.c.insert_one({"w": name, "i": i})
+            order.append(name)
+
+    await asyncio.gather(worker("a"), worker("b"))
+    assert order == ["a", "b", "a", "b", "a", "b"]
+    assert await fdb.c.count_documents({}) == 6
+
+
+async def test_interleaving_keeps_every_single_operation_atomic(fdb: Any) -> None:
+    await fdb.c.insert_one({"_id": 1, "used": False, "n": 0})
+
+    async def claim() -> Any:
+        return await fdb.c.find_one_and_update({"_id": 1, "used": False}, {"$set": {"used": True}})
+
+    results = await asyncio.gather(*[claim() for _ in range(8)])
+    assert sum(r is not None for r in results) == 1  # exactly one task wins the claim
+
+    async def bump() -> None:
+        for _ in range(10):
+            await fdb.c.update_one({"_id": 1}, {"$inc": {"n": 1}})
+
+    await asyncio.gather(*[bump() for _ in range(5)])
+    assert (await fdb.c.find_one({"_id": 1}))["n"] == 50  # no lost update between interleaved tasks
+
+
+async def test_cursors_gridfs_and_database_calls_also_yield(fdb: Any) -> None:
+    await fdb.c.insert_many([{"i": i} for i in range(3)])
+    bucket = fake_mongo.FakeGridFSBucket(fdb)
+    order: list[str] = []
+
+    async def cursor_user() -> None:
+        order.append("c0")
+        await fdb.c.find({}).to_list(None)
+        order.append("c1")
+        async for _ in fdb.c.aggregate([{"$match": {}}]):
+            pass
+        order.append("c2")
+
+    async def gridfs_user() -> None:
+        order.append("g0")
+        await bucket.upload_from_stream("f", b"x")
+        order.append("g1")
+        await fdb.list_collection_names()
+        order.append("g2")
+
+    await asyncio.gather(cursor_user(), gridfs_user())
+    assert order == ["c0", "g0", "c1", "c2", "g1", "g2"]
 
 
 # ---------------------------------------------------- differential: fake vs a real MongoDB
