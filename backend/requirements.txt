@@ -18,7 +18,7 @@ bcrypt==5.0.0
 slowapi==0.1.10
 loguru==0.7.3
 httpx==0.28.1
-groq==1.5.0
+groq==1.7.0
 Jinja2==3.1.6
 pymupdf==1.28.2
 Pillow==12.3.0
