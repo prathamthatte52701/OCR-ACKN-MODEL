@@ -232,8 +232,17 @@ async def google_login(request: Request, body: GoogleLoginRequest) -> TokenRespo
     if not payload.get("email_verified"):
         raise HTTPException(status_code=401, detail="Could not verify Google sign-in.")
 
-    email = normalize_email(payload["email"])
-    google_id = payload["sub"]
+    # A verified token without a usable email or sub (missing, empty, not text) is as unusable as
+    # one that fails verification: same generic 401, nothing created, no 500 on payload["email"].
+    raw_email, google_id = payload.get("email"), payload.get("sub")
+    if not (
+        isinstance(raw_email, str)
+        and raw_email.strip()
+        and isinstance(google_id, str)
+        and google_id.strip()
+    ):
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in.")
+    email = normalize_email(raw_email)
     await enforce_login_email_limit(request, email)
 
     db = get_database()
