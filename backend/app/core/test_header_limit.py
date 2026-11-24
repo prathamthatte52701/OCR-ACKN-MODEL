@@ -1,11 +1,11 @@
-"""The server must refuse absurdly large request headers. uvicorn's default parser here is httptools,
-which has no header-size option (a 3 MB header got 200 OK), so the start command selects the h11
-parser with --h11-max-incomplete-event-size 32768 (32 KB: a real request is under 3 KB, even with a
-JWT, cookies and browser headers).
+"""The server must refuse absurdly large request headers. uvicorn's default parser here is
+httptools, which has no header-size option (a 3 MB header got 200 OK), so the start command selects
+the h11 parser with --h11-max-incomplete-event-size 32768 (32 KB: a real request is under 3 KB, even
+with a JWT, cookies and browser headers).
 
-These tests read the flags from the REAL start commands (start.bat and the README developer command),
-so the documented command and the tested behavior cannot drift apart, and run a real uvicorn with
-exactly those flags in front of a tiny app (no database needed)."""
+These tests read the flags from the REAL start commands (start.bat and the README developer
+command), so the documented command and the tested behavior cannot drift apart, and run a real
+uvicorn with exactly those flags in front of a tiny app (no database needed)."""
 
 import re
 import shlex
@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,8 @@ async def app(scope, receive, send):
             else:
                 await send({"type": "lifespan.shutdown.complete"})
                 return
-    await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/plain")]})
+    head = {"type": "http.response.start", "status": 200, "headers": [(b"x-t", b"1")]}
+    await send(head)
     await send({"type": "http.response.body", "body": b"ok"})
 """
 
@@ -70,7 +72,7 @@ def _request(port: int, headers: bytes) -> str:
 
 
 @pytest.fixture
-def server(tmp_path: Path) -> int:
+def server(tmp_path: Path) -> Iterator[int]:
     (tmp_path / "tiny.py").write_text(TINY_APP, encoding="utf-8")
     port = _free_port()
     flags = [f for f in _start_bat_flags()]
