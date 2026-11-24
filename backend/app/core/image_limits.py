@@ -10,7 +10,7 @@ import math
 import re
 import warnings
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 from PIL import Image
 
 MAX_PIXELS = 50_000_000
@@ -66,7 +66,7 @@ def check_pdf_page(buffer: bytes) -> None:
     MAX_PIXELS or has an invalid size. Page rects only - nothing is rendered.
     Encrypted/broken PDFs pass through (handled as before)."""
     try:
-        with fitz.open(stream=buffer, filetype="pdf") as doc:
+        with pymupdf.open(stream=buffer, filetype="pdf") as doc:
             if doc.needs_pass or doc.page_count == 0:
                 return
             # ponytail: pages past the cap are unchecked; uploads allow 4 pages, raise if that grows

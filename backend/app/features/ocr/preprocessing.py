@@ -2,8 +2,8 @@ import asyncio
 import io
 
 import cv2
-import fitz  # PyMuPDF
 import numpy as np
+import pymupdf  # PyMuPDF
 from PIL import Image
 
 from app.features.ocr.row_assembly import assemble_rows
@@ -57,7 +57,7 @@ def crop_header(image_bytes: bytes, ratio: float = HEADER_CROP_RATIO) -> bytes:
 
 def _pdf_page_count_sync(buffer: bytes) -> int | None:
     try:
-        with fitz.open(stream=buffer, filetype="pdf") as doc:
+        with pymupdf.open(stream=buffer, filetype="pdf") as doc:
             return doc.page_count
     except Exception:  # noqa: BLE001
         return None
@@ -78,7 +78,7 @@ def _pdf_extract_text_sync(buffer: bytes) -> str | None:
     never went through OCR in the first place, since a digital PDF with an
     embedded text layer skips the OCR branch entirely (see
     get_pdf_header_text_or_image below)."""
-    with fitz.open(stream=buffer, filetype="pdf") as doc:
+    with pymupdf.open(stream=buffer, filetype="pdf") as doc:
         if doc.page_count == 0:
             return None
         words = doc[0].get_text("words")
@@ -91,9 +91,9 @@ def _pdf_extract_text_sync(buffer: bytes) -> str | None:
 
 
 def _pdf_render_page_to_png_sync(buffer: bytes) -> bytes:
-    with fitz.open(stream=buffer, filetype="pdf") as doc:
+    with pymupdf.open(stream=buffer, filetype="pdf") as doc:
         page = doc[0]
-        matrix = fitz.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
+        matrix = pymupdf.Matrix(PDF_RENDER_SCALE, PDF_RENDER_SCALE)
         pix = page.get_pixmap(matrix=matrix)
         return pix.tobytes("png")
 

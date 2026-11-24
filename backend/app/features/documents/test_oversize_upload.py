@@ -4,7 +4,7 @@ import asyncio
 import io
 from typing import Any
 
-import fitz
+import pymupdf
 from bson import ObjectId
 from PIL import Image
 
@@ -56,7 +56,7 @@ async def test_single_upload_oversized_pdf_is_400(
 ) -> None:
     _mock_ocr(monkeypatch)
     u = await make_user()
-    pdf = fitz.open()
+    pdf = pymupdf.open()
     pdf.new_page(width=14400, height=14400)
     res = await client.post(
         "/api/documents/upload",

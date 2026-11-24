@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import cv2
-import fitz
+import pymupdf
 import pytest
 from bson import ObjectId
 from loguru import logger
@@ -279,7 +279,7 @@ async def test_bad_image_bytes_skip_engine(fake: Fake, db: Any, make_user: Any, 
 
 
 def _blank_pdf() -> bytes:
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page(width=300, height=300)
     out: bytes = doc.tobytes()
     doc.close()

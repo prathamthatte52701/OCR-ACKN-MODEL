@@ -9,7 +9,7 @@ import time
 import zlib
 from pathlib import Path
 
-import fitz
+import pymupdf
 import pytest
 from PIL import Image
 
@@ -104,20 +104,20 @@ def test_zero_size_png_not_a_crash() -> None:
 
 
 def test_pdf_a4_passes() -> None:
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page(width=595, height=842)
     check_pdf_page(doc.tobytes())
 
 
 def test_pdf_largest_page_rejected() -> None:
-    doc = fitz.open()
-    doc.new_page(width=14400, height=14400)  # fitz's maximum
+    doc = pymupdf.open()
+    doc.new_page(width=14400, height=14400)  # pymupdf's maximum
     with pytest.raises(ImageTooLarge, match="PDF page is too large"):
         check_pdf_page(doc.tobytes())
 
 
 def test_pdf_any_page_too_large_rejected() -> None:
-    doc = fitz.open()
+    doc = pymupdf.open()
     for _ in range(6):
         doc.new_page(width=595, height=842)
     doc.new_page(width=14400, height=14400)  # page 7
@@ -126,7 +126,7 @@ def test_pdf_any_page_too_large_rejected() -> None:
 
 
 def test_pdf_many_normal_pages_pass_fast() -> None:
-    doc = fitz.open()
+    doc = pymupdf.open()
     for _ in range(200):
         doc.new_page(width=595, height=842)
     data = doc.tobytes()
@@ -145,9 +145,14 @@ def test_pdf_weird_boxes_no_crash(box: str) -> None:
 
 def test_pdf_garbage_and_encrypted_pass_through() -> None:
     check_pdf_page(b"%PDF-not really")
-    doc = fitz.open()
+    doc = pymupdf.open()
     doc.new_page()
-    enc = doc.tobytes(encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="o", user_pw="u", permissions=0)
+    enc = doc.tobytes(
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,  # type: ignore[attr-defined]  # exists at runtime
+        owner_pw="o",
+        user_pw="u",
+        permissions=0,
+    )
     check_pdf_page(enc)
 
 

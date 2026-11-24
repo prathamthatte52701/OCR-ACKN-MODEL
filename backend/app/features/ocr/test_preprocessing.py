@@ -402,11 +402,11 @@ def test_pdf_text_layer_groups_label_with_its_own_row_not_reading_order() -> Non
     # right below the first (same layout as the real Tax Invoice template) -
     # and assert the fixed word-bbox + assemble_rows path keeps each label
     # on the same line as its own value, not the other row's.
-    import fitz
+    import pymupdf
 
     from app.features.ocr.preprocessing import _pdf_extract_text_sync
 
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page(width=600, height=200)
     page.insert_text((50, 40), "Reference No.", fontsize=11)
     page.insert_text((250, 40), "9800532362", fontsize=11)
