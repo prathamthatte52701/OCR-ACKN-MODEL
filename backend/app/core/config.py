@@ -22,12 +22,15 @@ DEFAULT_AUDIT_LOG_RETENTION_DAYS = 365
 
 
 class Settings(BaseSettings):
+    # Secrets (Mongo URI with its password, JWT secret, Groq keys, admin seed passwords) are
+    # repr=False: printing, logging or f-stringing the settings object must never show them.
+    # Their types stay plain str.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    mongo_uri: str = Field(alias="MONGO_URI")
+    mongo_uri: str = Field(alias="MONGO_URI", repr=False)
     mongo_db_name: str = Field(default=DEFAULT_DB_NAME, alias="MONGO_DB_NAME")
-    jwt_secret: str = Field(alias="JWT_SECRET")
-    groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
+    jwt_secret: str = Field(alias="JWT_SECRET", repr=False)
+    groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS", repr=False)
     # Groq has already retired a model once; the model name must be changeable without a deploy.
     # Blank = the default. A bad name is NOT replaced by another model: the failure is reported.
     groq_model: str = Field(default=DEFAULT_GROQ_MODEL, alias="GROQ_MODEL")
@@ -41,8 +44,8 @@ class Settings(BaseSettings):
     ocr_rec_model: str = Field(default=DEFAULT_OCR_REC_MODEL, alias="OCR_REC_MODEL")
     frontend_origin: str = Field(default=DEFAULT_FRONTEND_ORIGIN, alias="FRONTEND_ORIGIN")
     admin_origin: str = Field(default=DEFAULT_ADMIN_ORIGIN, alias="ADMIN_ORIGIN")
-    admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD")
-    admin_2_password: str = Field(default="", alias="ADMIN_2_PASSWORD")
+    admin_1_password: str = Field(default="", alias="ADMIN_1_PASSWORD", repr=False)
+    admin_2_password: str = Field(default="", alias="ADMIN_2_PASSWORD", repr=False)
     # Seed-only identities (see app/scripts/seed_admin.py) - kept out of source so
     # no real person's name/email is committed to the repo.
     admin_1_name: str = Field(default="", alias="ADMIN_1_NAME")
