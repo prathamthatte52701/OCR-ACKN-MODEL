@@ -4,13 +4,14 @@ import re
 import threading
 import unicodedata
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import openpyxl
-from filelock import FileLock
+from filelock import FileLock, Timeout
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -173,6 +174,28 @@ def _lock_path(target: Path) -> Path:
     return target.with_suffix(".lock")
 
 
+LOCK_TIMEOUT_SECONDS = 30
+
+
+@contextmanager
+def _workbook_lock(target: Path) -> Iterator[None]:
+    """The cross-process lock on one workbook file. A lock that stays busy past the timeout is the
+    same situation as a workbook open in Excel, so it raises FileLockedError (every route already
+    answers that with its 409) - never a raw filelock.Timeout (an OSError: a 500, or on create a
+    misleading "name can't be used")."""
+    lock = FileLock(str(_lock_path(target)), timeout=LOCK_TIMEOUT_SECONDS)
+    try:
+        lock.acquire()
+    except Timeout as exc:
+        raise FileLockedError(
+            f'"{target.name}" is open in Excel. Close it and try saving again.'
+        ) from exc
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 def _create_workbook_sync(filename: str, month: str, exclusive: bool = False) -> Path:
     """Assumes the caller already holds this filename's cross-process
     FileLock - does not acquire it itself, so it can be called both
@@ -205,7 +228,7 @@ def _create_workbook_sync(filename: str, month: str, exclusive: bool = False) ->
 def _create_workbook_locked_sync(filename: str, month: str, exclusive: bool = False) -> Path:
     _ensure_export_dir()
     target = file_path(filename)
-    with FileLock(str(_lock_path(target)), timeout=30):
+    with _workbook_lock(target):
         return _create_workbook_sync(filename, month, exclusive)
 
 
@@ -260,7 +283,7 @@ def _append_rows_sync(filename: str, items: list[tuple[str, dict]]) -> Path:
     # otherwise let both processes load-modify-save concurrently, each
     # unaware of the other's write, silently dropping whichever row lost the
     # race to os.replace.
-    with FileLock(str(_lock_path(target)), timeout=30):
+    with _workbook_lock(target):
         if not target.exists():
             # Settings can point at a file that was deleted from disk - recreate it.
             _create_workbook_sync(filename, items[0][0])
@@ -418,7 +441,7 @@ def _remove_rows_core(
     # Cross-process lock, same as _append_rows_sync - a concurrent save/remove
     # against this same physical file must never interleave with this
     # read-modify-write.
-    with FileLock(str(_lock_path(target)), timeout=30):
+    with _workbook_lock(target):
         if not target.exists():
             return 0, False, [False] * len(rows_to_remove)
         workbook = openpyxl.load_workbook(target)
