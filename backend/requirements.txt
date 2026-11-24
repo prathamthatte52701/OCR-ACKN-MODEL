@@ -4,7 +4,7 @@
 
 # Runtime dependencies, exact versions (pinned from the working venv). Dev/test tools
 # live in requirements-dev.txt so they are not installed in production.
-fastapi==0.139.2
+fastapi==0.163.2
 uvicorn[standard]==0.54.0
 motor==3.7.1
 pymongo==4.20.1
