@@ -44,6 +44,41 @@ async def _recover_interrupted_uploads_in_background() -> None:
         logger.error(f"Interrupted-upload recovery failed: class={type(exc).__name__}")
 
 
+SHUTDOWN_TASK_TIMEOUT = (
+    10  # seconds the startup background tasks get to stop before Mongo is closed
+)
+
+
+async def _stop_background_tasks(app: FastAPI) -> None:
+    """Cancels the startup background tasks and waits for them, so none is still inside a database
+    call when the client is closed (PyMongo Async's close() is stricter than Motor's was). Never
+    hangs: asyncio.wait() with a timeout, because wait_for(gather(...)) would wait forever for a
+    task that ignores cancellation."""
+    tasks = [
+        t
+        for t in (
+            getattr(app.state, "recovery_task", None),
+            getattr(app.state, "chat_expiry_task", None),
+        )
+        if t is not None
+    ]
+    for task in tasks:
+        task.cancel()
+    if not tasks:
+        return
+    done, pending = await asyncio.wait(tasks, timeout=SHUTDOWN_TASK_TIMEOUT)
+    for task in done:
+        if not task.cancelled() and task.exception() is not None:
+            logger.error(
+                f"Background task ended with an error: class={type(task.exception()).__name__}"
+            )
+    if pending:
+        logger.warning(
+            f"{len(pending)} background task(s) did not stop within {SHUTDOWN_TASK_TIMEOUT}s; "
+            "closing Mongo anyway"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
@@ -57,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.recovery_task = asyncio.create_task(_recover_interrupted_uploads_in_background())
     app.state.chat_expiry_task = asyncio.create_task(run_expiry_forever())
     yield
-    app.state.chat_expiry_task.cancel()
+    await _stop_background_tasks(app)
     await close_mongo_connection()
     logger.info("MongoDB connection closed")
 
