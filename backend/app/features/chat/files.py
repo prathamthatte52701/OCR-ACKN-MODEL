@@ -7,12 +7,10 @@ Files are checked by their BYTES (never the file name or browser type). Images a
 import asyncio
 import io
 import re
-import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
@@ -23,6 +21,7 @@ from PIL import Image, ImageOps
 
 from app.core.config import settings
 from app.core.database import get_chat_gridfs, get_database
+from app.core.filenames import NO_USABLE_NAME_MESSAGE, base_name, has_usable_name
 from app.features.chat.errors import ChatError
 
 MB = 1024 * 1024
@@ -85,9 +84,7 @@ def clean_name(raw: str | None, kind: str, ext: str | None = None) -> str:
     """Display name only: no path, no control or bidi characters, 100 characters at most. With
     `ext` (from the detected type) the extension is forced, so a script can never keep a .hta name.
     """
-    name = PurePosixPath((raw or "").replace("\\", "/")).name
-    name = "".join(c for c in name if unicodedata.category(c) not in ("Cc", "Cf", "Zl", "Zp"))
-    name = re.sub(r"\s+", " ", name).strip()
+    name = base_name(raw)
     if not name.strip(". "):
         return "image" if kind == "image" else "document"
     if ext is not None:
@@ -161,6 +158,8 @@ async def read_upload(upload: Any, limit: int) -> bytes | None:
 
 
 async def read_and_validate(upload: Any) -> Checked:
+    if not has_usable_name(upload.filename):
+        raise ChatError(422, NO_USABLE_NAME_MESSAGE)
     raw = await read_upload(upload, PDF_MAX_BYTES)
     if raw is None:
         raise ChatError(413, "This file is too large. Images can be up to 2 MB, PDFs up to 3 MB.")

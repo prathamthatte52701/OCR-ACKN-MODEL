@@ -128,6 +128,12 @@ async def validation_exception_handler(
         is_path_error = error.get("loc") and error["loc"][0] == "path"
         if is_path_error and "Invalid ObjectId" in str(error.get("msg", "")):
             return JSONResponse(status_code=400, content={"detail": "Invalid id."})
+        # A file part with an empty file name (an unselected file input) or a plain text field
+        # where the file should be: the same answer as the route's own "no file" check.
+        is_body_error = error.get("loc") and error["loc"][0] == "body"
+        msg = str(error.get("msg", "")).removeprefix("Value error, ")
+        if is_body_error and msg.startswith("Expected UploadFile"):
+            return JSONResponse(status_code=400, content={"detail": "No file uploaded."})
     # errors() carries the raw exception from custom validators under "ctx"
     # (e.g. ValueError('Workbook name cannot...')), which JSONResponse can't
     # serialize - every such validation failure used to crash into a 500.

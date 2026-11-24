@@ -31,6 +31,7 @@ from starlette.background import BackgroundTask
 
 from app.core.audit_log import log_action, safe_log_action
 from app.core.database import get_database
+from app.core.filenames import NO_USABLE_NAME_MESSAGE, has_usable_name
 from app.core.image_limits import ImageTooLarge, check_upload
 from app.core.object_id import PyObjectId
 from app.core.orphaned_files import record_orphaned_file
@@ -186,6 +187,8 @@ async def _validate_and_store(
 ) -> dict:
     """Raises HTTPException on validation failure; otherwise creates the
     Document row and returns it (uploadStatus 'uploaded', not yet processed)."""
+    if not has_usable_name(original_name):
+        raise HTTPException(status_code=400, detail=NO_USABLE_NAME_MESSAGE)
     if document_type not in DOCUMENT_TYPES:
         raise HTTPException(
             status_code=400,
