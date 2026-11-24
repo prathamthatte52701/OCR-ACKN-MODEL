@@ -461,7 +461,7 @@ docs/       Extra notes, such as the admin screen map
 **Developer mode** (for the developer only, not for daily use; `--reload` can hang on Windows):
 
 ```bash
-cd backend && ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000
+cd backend && ../venv/Scripts/python.exe -m uvicorn app.main:app --port 8000 --http h11 --h11-max-incomplete-event-size 32768
 cd frontend && npm install && npm run dev
 cd admin && npm install && npm run dev
 ```

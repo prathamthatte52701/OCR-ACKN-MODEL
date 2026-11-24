@@ -77,7 +77,7 @@ if not exist "%RUN%" mkdir "%RUN%"
 rem Each app runs in its own minimized, titled cmd window (start "TITLE" /min). The PID recorded
 rem in .run is that window's cmd.exe; stop.bat kills its whole tree. No PowerShell here: on some
 rem PCs it needs 20 seconds just to start.
-start "ACKN Backend" /min /d "%ROOT%backend" cmd /s /c ""%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+start "ACKN Backend" /min /d "%ROOT%backend" cmd /s /c ""%PY%" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --http h11 --h11-max-incomplete-event-size 32768"
 call :recordpid backend "ACKN Backend"
 if errorlevel 1 goto launchfail
 start "ACKN User App" /min /d "%ROOT%frontend" cmd /s /c ""%NODE%" "%ROOT%frontend\node_modules\vite\bin\vite.js" preview --port 5174 --strictPort --host 127.0.0.1"
