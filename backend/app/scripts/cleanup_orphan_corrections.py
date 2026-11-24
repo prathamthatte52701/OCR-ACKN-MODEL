@@ -10,13 +10,14 @@ import argparse
 import asyncio
 import sys
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
 
 from app.core.config import settings
 
 
-async def _orphan_ids(db: AsyncIOMotorDatabase) -> list:
+async def _orphan_ids(db: AsyncDatabase) -> list:
     doc_ids = {d["documentId"] async for d in db.corrections.find({}, {"documentId": 1})}
     existing = {
         d["_id"] async for d in db.documents.find({"_id": {"$in": list(doc_ids)}}, {"_id": 1})
@@ -38,7 +39,7 @@ async def run(argv: list[str]) -> int:
         return 2
 
     print(f"Database: {args.db}  mode: {'APPLY' if args.apply else 'dry-run'}")
-    client: AsyncIOMotorClient = AsyncIOMotorClient(
+    client: AsyncMongoClient = AsyncMongoClient(
         settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True
     )
     try:
@@ -59,7 +60,7 @@ async def run(argv: list[str]) -> int:
             return 1
         return 0
     finally:
-        client.close()
+        await client.close()
 
 
 if __name__ == "__main__":

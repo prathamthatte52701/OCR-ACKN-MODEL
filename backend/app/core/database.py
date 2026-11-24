@@ -1,33 +1,37 @@
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorGridFSBucket
+from gridfs.asynchronous import AsyncGridFSBucket
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.config import settings
 
-_client: AsyncIOMotorClient | None = None
-_db: AsyncIOMotorDatabase | None = None
-_gridfs: AsyncIOMotorGridFSBucket | None = None
-_chat_gridfs: AsyncIOMotorGridFSBucket | None = None
+_client: AsyncMongoClient | None = None
+_db: AsyncDatabase | None = None
+_gridfs: AsyncGridFSBucket | None = None
+_chat_gridfs: AsyncGridFSBucket | None = None
 
 
 async def connect_to_mongo() -> None:
     global _client, _db, _gridfs, _chat_gridfs
-    # tz_aware=True: without it, PyMongo/Motor decodes BSON dates as naive
+    # The async client is bound to the event loop it is created in, so this runs inside the app's
+    # lifespan (the running loop) - never at import time - and close_mongo_connection() awaits it.
+    # tz_aware=True: without it, PyMongo decodes BSON dates as naive
     # datetimes (no tzinfo) even though they're stored as UTC - FastAPI then
     # serializes them with no offset suffix (e.g. "2026-07-24T03:47:22" instead
     # of "...+00:00"), and `new Date(...)` in the browser silently treats that
     # ambiguous string as LOCAL time instead of UTC, corrupting every IST
     # timestamp display in the frontend. This makes every datetime read back
     # as a proper UTC-aware datetime, so serialization includes the offset.
-    _client = AsyncIOMotorClient(settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True)
+    _client = AsyncMongoClient(settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True)
     _db = _client[settings.mongo_db_name]
-    _gridfs = AsyncIOMotorGridFSBucket(_db)
+    _gridfs = AsyncGridFSBucket(_db)
     # chat files live in their own bucket (chatfs.*): document code, the orphaned-files page and
     # storage counts only ever look at the default "fs" bucket, so they can never touch these.
-    _chat_gridfs = AsyncIOMotorGridFSBucket(_db, bucket_name="chatfs")
+    _chat_gridfs = AsyncGridFSBucket(_db, bucket_name="chatfs")
     await _client.admin.command("ping")
     await _ensure_indexes(_db)
 
 
-async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
+async def _ensure_indexes(db: AsyncDatabase) -> None:
     """No index existed on any collection except users.email (a leftover
     unique constraint) - confirmed by listing indexes directly. Every list/
     search query filters by userId and sorts by createdAt, so without this
@@ -82,13 +86,13 @@ async def _ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         )
 
 
-async def _ensure_audit_ttl(db: AsyncIOMotorDatabase, days: int) -> None:
+async def _ensure_audit_ttl(db: AsyncDatabase, days: int) -> None:
     """Single-field createdAt TTL index on auditlogs (TTL only works on a single field and on real
     datetimes; audit_log.py writes datetime.now(UTC)). A changed retention is applied by dropping
     and recreating it; 0 = keep forever = no TTL index. Never crashes startup."""
     try:
         existing = None
-        async for ix in db.auditlogs.list_indexes():
+        async for ix in await db.auditlogs.list_indexes():
             if list(ix["key"]) == ["createdAt"]:
                 existing = ix
         seconds = days * 86400
@@ -108,22 +112,22 @@ async def _ensure_audit_ttl(db: AsyncIOMotorDatabase, days: int) -> None:
 async def close_mongo_connection() -> None:
     global _client
     if _client is not None:
-        _client.close()
+        await _client.close()
 
 
-def get_database() -> AsyncIOMotorDatabase:
+def get_database() -> AsyncDatabase:
     if _db is None:
         raise RuntimeError("Database not initialized - connect_to_mongo() must run first.")
     return _db
 
 
-def get_gridfs() -> AsyncIOMotorGridFSBucket:
+def get_gridfs() -> AsyncGridFSBucket:
     if _gridfs is None:
         raise RuntimeError("GridFS not initialized - connect_to_mongo() must run first.")
     return _gridfs
 
 
-def get_chat_gridfs() -> AsyncIOMotorGridFSBucket:
+def get_chat_gridfs() -> AsyncGridFSBucket:
     if _chat_gridfs is None:
         raise RuntimeError("GridFS not initialized - connect_to_mongo() must run first.")
     return _chat_gridfs

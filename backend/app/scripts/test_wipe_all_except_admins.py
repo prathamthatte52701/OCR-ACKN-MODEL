@@ -17,8 +17,9 @@ import openpyxl
 import pytest
 import pytest_asyncio
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
+from gridfs.asynchronous import AsyncGridFSBucket
 from PIL import Image
+from pymongo import AsyncMongoClient
 
 from app.core.config import settings
 from app.core.database import _ensure_indexes
@@ -92,7 +93,7 @@ async def _seed(db: Any, make_user: Any, tmp_path: Path) -> dict[str, Any]:
                 row["key"] = f"k{n}"
             rows.append(row)
         await db[name].insert_many(rows)
-    bucket = AsyncIOMotorGridFSBucket(db)
+    bucket = AsyncGridFSBucket(db)
     for i in range(3):
         await bucket.upload_from_stream(f"f{i}.png", FILE_MARK * (i + 1))
     exports = tmp_path / "exports"
@@ -121,7 +122,7 @@ def _tree(path: Path) -> list[tuple[str, bytes | None]]:
 
 
 async def _indexes(db: Any) -> dict[str, set[str]]:
-    return {c: {i["name"] async for i in db[c].list_indexes()} for c in INDEXED}
+    return {c: {i["name"] async for i in await db[c].list_indexes()} for c in INDEXED}
 
 
 def _line(out: str, name: str) -> str:
@@ -294,7 +295,7 @@ async def test_output_has_no_secrets(db: Any, make_user: Any, tmp_path: Path, ca
 
 @pytest_asyncio.fixture
 async def sub_db() -> AsyncIterator[Any]:
-    client: Any = AsyncIOMotorClient(settings.mongo_uri)
+    client: Any = AsyncMongoClient(settings.mongo_uri)
     database = client[_guard(SUB_DB)]
     try:
         yield database
@@ -302,7 +303,7 @@ async def sub_db() -> AsyncIterator[Any]:
         assert database.name == SUB_DB
         for name in await database.list_collection_names():
             await database[name].delete_many({})
-        client.close()
+        await client.close()
 
 
 def _cli(*args: str) -> subprocess.CompletedProcess[str]:

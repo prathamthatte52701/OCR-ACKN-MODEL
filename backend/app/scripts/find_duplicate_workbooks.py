@@ -11,7 +11,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 from pymongo.errors import PyMongoError
 
 from app.core.config import settings
@@ -33,7 +33,7 @@ async def run(argv: list[str]) -> int:
 
     exports = Path(args.exports_dir) if args.exports_dir else excel_service.EXPORT_DIR
     print(f"Database: {args.db}  mode: report-only (nothing is changed)")
-    client: AsyncIOMotorClient = AsyncIOMotorClient(
+    client: AsyncMongoClient = AsyncMongoClient(
         settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True
     )
     try:
@@ -73,7 +73,7 @@ async def run(argv: list[str]) -> int:
         print(f"users with duplicates: {len(users)}, duplicate groups: {n_groups}")
         return 0
     finally:
-        client.close()
+        await client.close()
 
 
 if __name__ == "__main__":

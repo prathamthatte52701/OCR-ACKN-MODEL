@@ -13,7 +13,7 @@ DAY = 86400
 
 
 async def _single_created_at(db: Any) -> dict | None:
-    async for ix in db.auditlogs.list_indexes():
+    async for ix in await db.auditlogs.list_indexes():
         if list(ix["key"]) == ["createdAt"]:
             return ix
     return None
@@ -28,7 +28,7 @@ async def _clear_created_at(db: Any) -> None:
 async def test_exportedrows_document_user_index_exists(db: Any) -> None:
     await _ensure_indexes(db)
     await _ensure_indexes(db)  # idempotent
-    keys = [list(ix["key"].items()) async for ix in db.exportedrows.list_indexes()]
+    keys = [list(ix["key"].items()) async for ix in await db.exportedrows.list_indexes()]
     assert [("documentId", 1), ("userId", 1)] in keys
     assert [("userId", 1), ("date", 1)] in keys
     assert [("userId", 1), ("exportedAt", -1)] in keys  # existing one kept
@@ -40,7 +40,7 @@ async def test_default_creates_ttl_on_single_field_created_at(db: Any) -> None:
     ix = await _single_created_at(db)
     assert ix is not None and ix["expireAfterSeconds"] == 365 * DAY
     # the existing compound indexes are untouched
-    names = [list(i["key"]) async for i in db.auditlogs.list_indexes()]
+    names = [list(i["key"]) async for i in await db.auditlogs.list_indexes()]
     assert ["userId", "createdAt"] in names and ["action"] in names
 
 

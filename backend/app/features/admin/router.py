@@ -7,7 +7,7 @@ from typing import Any, Literal
 from bson import ObjectId
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from app.core.audit_log import log_action, log_admin_access
@@ -122,9 +122,9 @@ async def ping(current_user: CurrentUser = Depends(require_admin)) -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def _document_counts(db: AsyncIOMotorDatabase, user_ids: list[ObjectId]) -> dict:
+async def _document_counts(db: AsyncDatabase, user_ids: list[ObjectId]) -> dict:
     """Non-deleted documents per owner, for a whole page of users in ONE aggregation."""
-    rows = db.documents.aggregate(
+    rows = await db.documents.aggregate(
         [
             {"$match": {"userId": {"$in": user_ids}, "isDeleted": {"$ne": True}}},
             {"$group": {"_id": "$userId", "n": {"$sum": 1}}},
@@ -293,7 +293,7 @@ async def get_user(user_id: PyObjectId, current_user: CurrentUser = Depends(requ
     }
 
 
-async def _validated_new_email(db: AsyncIOMotorDatabase, user: dict, raw: str) -> str | None:
+async def _validated_new_email(db: AsyncDatabase, user: dict, raw: str) -> str | None:
     """Normalizes + validates a new email for `user`. Returns None when it equals
     the current one (nothing to change); raises 400 when invalid or taken."""
     email = normalize_email(raw)
@@ -520,7 +520,7 @@ async def list_password_requests(
     return {"requests": [_serialize_password_request(r) for r in rows], "openCount": open_count}
 
 
-async def _open_request_or_error(db: AsyncIOMotorDatabase, request_id: ObjectId) -> dict:
+async def _open_request_or_error(db: AsyncDatabase, request_id: ObjectId) -> dict:
     req = await db.passwordresetrequests.find_one({"_id": request_id})
     if not req:
         raise HTTPException(status_code=404, detail="Request not found.")
@@ -1391,7 +1391,7 @@ async def _gather_untyped(*aws: Any) -> list[Any]:
 
 
 async def _daily_series(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     collection: str,
     field: str,
     days: list[str],
@@ -1399,7 +1399,7 @@ async def _daily_series(
 ) -> list[int]:
     """Per-day counts for the given IST day strings via ONE aggregation; missing days are 0."""
     start = ist_midnight_utc(datetime.fromisoformat(days[0]))
-    rows = db[collection].aggregate(
+    rows = await db[collection].aggregate(
         [
             {"$match": {**(extra or {}), field: {"$gte": start}}},
             {
@@ -1592,13 +1592,10 @@ async def system_status(current_user: CurrentUser = Depends(require_admin)) -> d
     ping_ms = round((time.perf_counter() - t0) * 1000)
     files = {"bytes": 0, "count": 0}
     try:
-        agg = (
-            await db["fs.files"]
-            .aggregate(
-                [{"$group": {"_id": None, "bytes": {"$sum": "$length"}, "count": {"$sum": 1}}}]
-            )
-            .to_list(1)
+        cursor = await db["fs.files"].aggregate(
+            [{"$group": {"_id": None, "bytes": {"$sum": "$length"}, "count": {"$sum": 1}}}]
         )
+        agg = await cursor.to_list(1)
         if agg:
             files = {"bytes": int(agg[0]["bytes"]), "count": int(agg[0]["count"])}
     except Exception:  # noqa: BLE001

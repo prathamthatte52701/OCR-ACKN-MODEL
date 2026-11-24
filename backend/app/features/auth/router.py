@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.audit_log import log_action
 from app.core.config import settings
@@ -137,7 +137,7 @@ async def password_reset_request(
     return MessageResponse(message=GENERIC_RESET_MESSAGE)
 
 
-async def _consume_approval_notice(db: AsyncIOMotorDatabase, user: dict) -> bool:
+async def _consume_approval_notice(db: AsyncDatabase, user: dict) -> bool:
     """One-time "you're approved" notice, shared by password and Google login. Call only after
     the approval gate. find_one_and_update is atomic: of two concurrent logins only one matches."""
     consumed = await db.users.find_one_and_update(
@@ -201,7 +201,7 @@ async def login(request: Request, body: LoginRequest) -> TokenResponse:
     )
 
 
-async def _derive_google_username(db: AsyncIOMotorDatabase, email: str) -> str:
+async def _derive_google_username(db: AsyncDatabase, email: str) -> str:
     """New Google signups have no username to collect (GSI hands us email +
     name/sub, not a username) - derive one from the email local-part,
     deduped against existing usernames the same way a manual signup would

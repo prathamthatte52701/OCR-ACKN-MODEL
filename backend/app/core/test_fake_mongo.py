@@ -54,9 +54,9 @@ async def test_unsupported_update_operator_raises(fdb: Any) -> None:
 async def test_unsupported_stage_expression_and_method_raise(fdb: Any) -> None:
     await fdb.c.insert_one({"a": 1})
     with pytest.raises(NotImplementedError, match=r"\$lookup"):
-        await fdb.c.aggregate([{"$lookup": {}}]).to_list(None)
+        await (await fdb.c.aggregate([{"$lookup": {}}])).to_list(None)
     with pytest.raises(NotImplementedError, match=r"\$toUpper"):
-        await fdb.c.aggregate([{"$addFields": {"x": {"$toUpper": "$a"}}}]).to_list(None)
+        await (await fdb.c.aggregate([{"$addFields": {"x": {"$toUpper": "$a"}}}])).to_list(None)
     with pytest.raises(NotImplementedError, match="bulk_write"):
         await fdb.c.bulk_write([])
     with pytest.raises(NotImplementedError, match="options"):
@@ -233,35 +233,57 @@ async def test_aggregate_group_facet_and_expr(fdb: Any) -> None:
             },
         ]
     )
-    grouped = await fdb.c.aggregate(
-        [{"$group": {"_id": "$u", "n": {"$sum": 1}, "t": {"$max": "$d"}, "tot": {"$sum": "$n"}}}]
+    grouped = await (
+        await fdb.c.aggregate(
+            [
+                {
+                    "$group": {
+                        "_id": "$u",
+                        "n": {"$sum": 1},
+                        "t": {"$max": "$d"},
+                        "tot": {"$sum": "$n"},
+                    }
+                }
+            ]
+        )
     ).to_list(None)
     by = {g["_id"]: g for g in grouped}
     assert by[1]["n"] == 2 and by[1]["tot"] == 12 and by[2]["n"] == 1
-    days = await fdb.c.aggregate(
-        [
-            {
-                "$group": {
-                    "_id": {
-                        "$dateToString": {"format": "%Y-%m-%d", "date": "$d", "timezone": "+05:30"}
-                    },
-                    "n": {"$sum": 1},
+    days = await (
+        await fdb.c.aggregate(
+            [
+                {
+                    "$group": {
+                        "_id": {
+                            "$dateToString": {
+                                "format": "%Y-%m-%d",
+                                "date": "$d",
+                                "timezone": "+05:30",
+                            }
+                        },
+                        "n": {"$sum": 1},
+                    }
                 }
-            }
-        ]
+            ]
+        )
     ).to_list(None)
     assert {g["_id"]: g["n"] for g in days} == {"2026-01-01": 1, "2026-01-02": 2}
-    facet = await fdb.c.aggregate(
-        [
-            {"$match": {"u": 1}},
-            {
-                "$facet": {
-                    "all": [{"$count": "n"}],
-                    "proc": [{"$match": {"$expr": {"$eq": ["$s", "processed"]}}}, {"$count": "n"}],
-                    "none": [{"$match": {"u": 9}}, {"$count": "n"}],
-                }
-            },
-        ]
+    facet = await (
+        await fdb.c.aggregate(
+            [
+                {"$match": {"u": 1}},
+                {
+                    "$facet": {
+                        "all": [{"$count": "n"}],
+                        "proc": [
+                            {"$match": {"$expr": {"$eq": ["$s", "processed"]}}},
+                            {"$count": "n"},
+                        ],
+                        "none": [{"$match": {"u": 9}}, {"$count": "n"}],
+                    }
+                },
+            ]
+        )
     ).to_list(1)
     assert (
         facet[0]["all"] == [{"n": 2}] and facet[0]["proc"] == [{"n": 1}] and facet[0]["none"] == []
@@ -317,7 +339,7 @@ async def test_cursors_gridfs_and_database_calls_also_yield(fdb: Any) -> None:
         order.append("c0")
         await fdb.c.find({}).to_list(None)
         order.append("c1")
-        async for _ in fdb.c.aggregate([{"$match": {}}]):
+        async for _ in await fdb.c.aggregate([{"$match": {}}]):
             pass
         order.append("c2")
 
@@ -329,7 +351,7 @@ async def test_cursors_gridfs_and_database_calls_also_yield(fdb: Any) -> None:
         order.append("g2")
 
     await asyncio.gather(cursor_user(), gridfs_user())
-    assert order == ["c0", "g0", "c1", "c2", "g1", "g2"]
+    assert order == ["c0", "g0", "c1", "g1", "c2", "g2"]
 
 
 # ---------------------------------------------------- differential: fake vs a real MongoDB
@@ -433,7 +455,7 @@ async def test_differential_fake_vs_real() -> None:
             {"$group": {"_id": "$n", "c": {"$sum": 1}, "m": {"$max": "$d"}}},
             {"$sort": {"_id": 1}},
         ]
-        aggs = [await db[coll].aggregate(pipe).to_list(None) for db in (real_db, fake_db)]
+        aggs = [await (await db[coll].aggregate(pipe)).to_list(None) for db in (real_db, fake_db)]
         assert aggs[0] == aggs[1]
         # GridFS: upload / download / delete
         real_bucket = fake_mongo.REAL_GRIDFS_BUCKET(real_db, bucket_name="difftest")

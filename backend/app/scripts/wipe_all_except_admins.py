@@ -15,7 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
 
 from app.core.config import settings
@@ -64,12 +65,9 @@ def _list_export_files(exports_dir: Path) -> tuple[list[Path], list[str]]:
     return sorted(files), sorted(refused)
 
 
-async def _snapshot(db: AsyncIOMotorDatabase, exports_dir: Path) -> dict[str, Any]:
-    agg = (
-        await db["fs.files"]
-        .aggregate([{"$group": {"_id": None, "n": {"$sum": "$length"}}}])
-        .to_list(1)
-    )
+async def _snapshot(db: AsyncDatabase, exports_dir: Path) -> dict[str, Any]:
+    cursor = await db["fs.files"].aggregate([{"$group": {"_id": None, "n": {"$sum": "$length"}}}])
+    agg = await cursor.to_list(1)
     files, refused = _list_export_files(exports_dir)
     return {
         "admins": sorted(
@@ -108,7 +106,7 @@ def _print_table(s: dict[str, Any], exports_dir: Path, applied: bool) -> None:
         print(f"    {a.get('email')}")
 
 
-async def _wipe(db: AsyncIOMotorDatabase, files: list[Path]) -> list[str]:
+async def _wipe(db: AsyncDatabase, files: list[Path]) -> list[str]:
     """Order: non-admin users (kills their tokens at once), data, GridFS, export files.
     Returns names of export files that could not be deleted."""
     await db.users.delete_many(NON_ADMIN)
@@ -146,7 +144,7 @@ async def run(argv: list[str], *, exports_dir: Path | None = None) -> int:
 
     print("STOP THE BACKEND FIRST (it must not be writing while this runs).")
     print(f"Database: {args.db}  mode: {'APPLY' if args.apply else 'dry-run'}")
-    client: AsyncIOMotorClient = AsyncIOMotorClient(
+    client: AsyncMongoClient = AsyncMongoClient(
         settings.mongo_uri, serverSelectionTimeoutMS=10000, tz_aware=True
     )
     try:
@@ -198,7 +196,7 @@ async def run(argv: list[str], *, exports_dir: Path | None = None) -> int:
         print("Restart the backend (clears in-memory login rate limits).")
         return 0
     finally:
-        client.close()
+        await client.close()
 
 
 if __name__ == "__main__":

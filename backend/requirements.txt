@@ -7,7 +7,6 @@
 fastapi==0.163.2
 starlette==1.10.0  # the engine inside FastAPI (request.form limits, multipart, middleware); was unpinned/floating, so two PCs could differ
 uvicorn[standard]==0.54.0
-motor==3.7.1
 pymongo==4.20.1
 dnspython==2.9.2  # pymongo needs it for mongodb+srv:// (SRV/TXT lookups); pinned so the lookup code never changes silently
 pydantic==2.14.4  # pydantic-core is pinned by pydantic itself (do not pin it here); was unpinned, 2.14.0 was installed

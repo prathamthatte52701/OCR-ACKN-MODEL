@@ -4,7 +4,7 @@ import re
 from datetime import UTC, datetime
 
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from app.core.audit_log import log_action
@@ -31,7 +31,7 @@ def can_request_reset(user: dict | None) -> bool:
     )
 
 
-async def _upsert_open(db: AsyncIOMotorDatabase, user: dict, note: str) -> None:
+async def _upsert_open(db: AsyncDatabase, user: dict, note: str) -> None:
     now = datetime.now(UTC)
     flt = {"userId": user["_id"], "status": "open"}
     update = {
@@ -56,7 +56,7 @@ async def _upsert_open(db: AsyncIOMotorDatabase, user: dict, note: str) -> None:
 
 
 async def handle_reset_request(
-    db: AsyncIOMotorDatabase, user: dict | None, note: str, eligible: bool
+    db: AsyncDatabase, user: dict | None, note: str, eligible: bool
 ) -> None:
     """Same number of awaits whether or not anything is created (no timing/existence oracle)."""
     if eligible and user is not None:

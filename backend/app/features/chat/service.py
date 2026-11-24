@@ -147,7 +147,7 @@ async def list_threads(db: Any, admin_id: ObjectId) -> list[dict]:
     )
     unread = {
         r["_id"]: r["n"]
-        async for r in db.chatmessages.aggregate(
+        async for r in await db.chatmessages.aggregate(
             [
                 {"$match": {"toAdminId": admin_id, "readAt": None}},
                 {"$group": {"_id": "$threadUserId", "n": {"$sum": 1}}},
@@ -156,7 +156,7 @@ async def list_threads(db: Any, admin_id: ObjectId) -> list[dict]:
     }
     last = {
         r["_id"]: r["t"]
-        async for r in db.chatmessages.aggregate(
+        async for r in await db.chatmessages.aggregate(
             [{"$group": {"_id": "$threadUserId", "t": {"$max": "$createdAt"}}}]
         )
     }
@@ -378,7 +378,7 @@ async def unread_admin(db: Any, admin_id: ObjectId) -> dict:
     ]
     rows = [
         {"userId": str(r["_id"]), "count": r["n"]}
-        async for r in db.chatmessages.aggregate(
+        async for r in await db.chatmessages.aggregate(
             [
                 {
                     "$match": {

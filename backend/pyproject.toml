@@ -23,7 +23,7 @@ disallow_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 no_implicit_optional = true
-# Full `strict` demands generic args on every raw Mongo `dict` (Motor calls
+# Full `strict` demands generic args on every raw Mongo `dict` (PyMongo calls
 # return untyped documents everywhere - documents/excel routes work with raw
 # driver dicts, not Pydantic models, by design) - that produces ~50 no-op
 # "Missing type arguments for generic type dict" warnings with zero bug value.

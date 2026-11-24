@@ -10,7 +10,7 @@ that are deleted in the per-test teardown.
 
 The db-connect/close fixture is function-scoped (not module-scoped) on
 purpose: pytest-asyncio gives each async test function its own event loop
-by default, and Motor's AsyncIOMotorClient is bound to the loop it was
+by default, and PyMongo's AsyncMongoClient is bound to the loop it was
 created on - a module-scoped connection opened on test #1's loop raises
 "Future attached to a different loop" once test #2 runs on a fresh one.
 
@@ -26,7 +26,7 @@ import pytest
 import pytest_asyncio
 from google.oauth2 import id_token as google_id_token
 from httpx import ASGITransport, AsyncClient
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.database import close_mongo_connection, connect_to_mongo, get_database
 from app.core.security import hash_password, sign_token
@@ -71,7 +71,7 @@ def _mock_google_payload(monkeypatch: pytest.MonkeyPatch, payload: dict) -> None
     monkeypatch.setattr(google_id_token, "verify_oauth2_token", _fake_verify)
 
 
-async def _insert_admin(db: AsyncIOMotorDatabase) -> str:
+async def _insert_admin(db: AsyncDatabase) -> str:
     email = _unique_email("admin")
     now = datetime.now(UTC)
     await db.users.insert_one(
@@ -348,7 +348,7 @@ class _FirstLookupMisses:
     """Proxy over the real db: the FIRST users.find_one returns None (the "no account yet" read of
     a request that lost the race); the rest is real, so the insert really hits E11000."""
 
-    def __init__(self, real: AsyncIOMotorDatabase) -> None:
+    def __init__(self, real: AsyncDatabase) -> None:
         self._real = real
         self.users = _UsersProxy(real.users)
 

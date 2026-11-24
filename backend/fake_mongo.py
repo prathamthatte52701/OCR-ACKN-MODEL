@@ -1,12 +1,12 @@
 # ruff: noqa: E501, UP017
-"""In-process fake MongoDB for the ACKN backend tests (Motor, PyMongo and GridFS look-alikes).
+"""In-process fake MongoDB for the ACKN backend tests (PyMongo Async, PyMongo sync and GridFS look-alikes).
 
 Written from what ACKN really uses (see the usage scan kept with the project notes), not as a general
 Mongo clone. Anything outside that list raises NotImplementedError that names the operation, so a test
 can never pass because an operator was silently ignored.
 
 Supported
-- Collection (async Motor style and sync PyMongo style, one shared in-memory store):
+- Collection (async PyMongo style and sync PyMongo style, one shared in-memory store):
   insert_one, insert_many, find_one, find (cursor: sort, skip, limit, to_list, async for), count_documents,
   estimated_document_count, update_one, update_many, delete_one, delete_many, find_one_and_update,
   aggregate, create_index, drop_index, list_indexes, distinct, drop.
@@ -43,9 +43,9 @@ _LOCK = threading.RLock()
 _STORE: dict[str, dict[str, _CollData]] = {}
 _MISSING = object()
 REAL_ASYNC_CLIENT: Any = (
-    None  # set by conftest: the real Motor client class (for the differential test)
+    None  # set by conftest: the real pymongo AsyncMongoClient (for the differential test)
 )
-REAL_GRIDFS_BUCKET: Any = None  # set by conftest: the real Motor GridFS bucket class
+REAL_GRIDFS_BUCKET: Any = None  # set by conftest: the real gridfs AsyncGridFSBucket class
 _CHUNK = 255 * 1024
 IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
 
@@ -947,7 +947,7 @@ class _CursorCore:
             return [self.core._out(d, self.projection) for d in docs]  # type: ignore[misc]
 
 
-# ---------------------------------------------------------------- async (Motor) API
+# ---------------------------------------------------------------- async (PyMongo Async) API
 class _AsyncCursor:
     def __init__(self, items: Callable[[], list[dict]]) -> None:
         self._items = items
@@ -1032,13 +1032,18 @@ class _AsyncCollection:
     def find(self, *a: Any, **k: Any) -> _FindCursor:
         return _FindCursor(self._core.find(*a, **k))
 
-    def aggregate(self, pipeline: list[dict], **k: Any) -> _AsyncCursor:
-        core = self._core
-        return _AsyncCursor(lambda: core.aggregate(pipeline, **k))
+    # Unlike Motor, PyMongo Async's aggregate() and list_indexes() are coroutines: the command runs
+    # when awaited (so an unsupported stage fails there, like OperationFailure on a real server)
+    # and the awaited result is the cursor.
+    async def aggregate(self, pipeline: list[dict], **k: Any) -> _AsyncCursor:
+        await _yield()
+        items = self._core.aggregate(pipeline, **k)
+        return _AsyncCursor(lambda: items)
 
-    def list_indexes(self) -> _AsyncCursor:
-        core = self._core
-        return _AsyncCursor(core.list_indexes_docs)
+    async def list_indexes(self) -> _AsyncCursor:
+        await _yield()
+        items = self._core.list_indexes_docs()
+        return _AsyncCursor(lambda: items)
 
 
 def _make_async_method(name: str) -> Callable[..., Any]:
@@ -1099,7 +1104,7 @@ class _AsyncAdmin:
 
 
 class FakeAsyncClient:
-    """Stands in for motor.motor_asyncio.AsyncIOMotorClient."""
+    """Stands in for pymongo.AsyncMongoClient."""
 
     def __init__(self, *_a: Any, tz_aware: bool = False, **_k: Any) -> None:
         self.tz_aware = tz_aware
@@ -1118,8 +1123,8 @@ class FakeAsyncClient:
         with _LOCK:
             _STORE.pop(name, None)
 
-    def close(self) -> None:
-        return None
+    async def close(self) -> None:  # PyMongo Async: close() is a coroutine (Motor's was sync)
+        await _yield()
 
 
 # ---------------------------------------------------------------- sync (PyMongo) API
@@ -1254,7 +1259,7 @@ class FakeGridOut:
 
 
 class FakeGridFSBucket:
-    """Stands in for AsyncIOMotorGridFSBucket (bucket "fs" -> fs.files / fs.chunks)."""
+    """Stands in for gridfs.asynchronous.AsyncGridFSBucket (bucket "fs" -> fs.files / fs.chunks)."""
 
     def __init__(self, db: _AsyncDatabase, bucket_name: str = "fs", **kw: Any) -> None:
         if kw:

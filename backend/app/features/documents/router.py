@@ -573,7 +573,7 @@ async def list_documents(
             cursor = db.documents.find(filter_query).sort("createdAt", -1).skip(skip).limit(lim)
         else:
             direction = -1 if order == "desc" else 1
-            cursor = db.documents.aggregate(
+            cursor = await db.documents.aggregate(
                 _sorted_page_pipeline(filter_query, sort or "createdAt", direction, skip, lim),
                 allowDiskUse=True,
                 collation=_TEXT_COLLATION,
@@ -635,7 +635,8 @@ async def documents_summary(current_user: CurrentUser = Depends(get_current_user
             }
         },
     ]
-    res = await get_database().documents.aggregate(pipeline).to_list(1)
+    cursor = await get_database().documents.aggregate(pipeline)
+    res = await cursor.to_list(1)
     facet = res[0] if res else {}
 
     def n(key: str) -> int:

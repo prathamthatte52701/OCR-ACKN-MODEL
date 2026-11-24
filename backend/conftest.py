@@ -24,20 +24,20 @@ USE_FAKE_MONGO = not TEST_MONGO_URI
 # Always set explicitly so the real MONGO_URI from backend/.env is never read by a test run.
 os.environ["MONGO_URI"] = TEST_MONGO_URI or "mongodb://fake-mongo.invalid:27017/"
 
-import motor.motor_asyncio as _motor  # noqa: E402
+import gridfs.asynchronous as _gridfs_async  # noqa: E402
+import pymongo as _pymongo  # noqa: E402
 
 import fake_mongo  # noqa: E402
 
-# The real Motor classes, kept for the differential test (fake vs a real server) before patching.
-fake_mongo.REAL_ASYNC_CLIENT = _motor.AsyncIOMotorClient
-fake_mongo.REAL_GRIDFS_BUCKET = _motor.AsyncIOMotorGridFSBucket
+# The real PyMongo Async classes, kept for the differential test (fake vs a real server) before patching.
+fake_mongo.REAL_ASYNC_CLIENT = _pymongo.AsyncMongoClient
+fake_mongo.REAL_GRIDFS_BUCKET = _gridfs_async.AsyncGridFSBucket
 
 if USE_FAKE_MONGO:
-    # Patched BEFORE any app module is imported: they do `from motor.motor_asyncio import ...`.
-    import pymongo as _pymongo
-
-    _motor.AsyncIOMotorClient = fake_mongo.FakeAsyncClient  # type: ignore[misc,assignment]
-    _motor.AsyncIOMotorGridFSBucket = fake_mongo.FakeGridFSBucket  # type: ignore[misc,assignment]
+    # Patched BEFORE any app module is imported: they do `from pymongo import AsyncMongoClient` and
+    # `from gridfs.asynchronous import AsyncGridFSBucket`.
+    _pymongo.AsyncMongoClient = fake_mongo.FakeAsyncClient  # type: ignore[misc,assignment]
+    _gridfs_async.AsyncGridFSBucket = fake_mongo.FakeGridFSBucket  # type: ignore[misc,assignment]
     _pymongo.MongoClient = fake_mongo.FakeSyncClient  # type: ignore[misc,assignment]
 
 SESSION_TEST_DB = os.environ.get("ACKN_TEST_DB", "ackn_AI_model_test")

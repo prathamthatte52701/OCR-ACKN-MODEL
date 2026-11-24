@@ -182,9 +182,10 @@ async def read_and_validate(upload: Any) -> Checked:
 
 
 async def used_bytes(db: Any) -> int:
-    agg = await db.chatattachments.aggregate(
+    cursor = await db.chatattachments.aggregate(
         [{"$match": {"expired": False}}, {"$group": {"_id": None, "n": {"$sum": "$size"}}}]
-    ).to_list(1)
+    )
+    agg = await cursor.to_list(1)
     return int(agg[0]["n"]) if agg else 0
 
 
@@ -258,9 +259,10 @@ async def delete_stored(db: Any, stored_id: ObjectId) -> bool:
 
 async def count_files(db: Any, query: dict) -> dict:
     q = {**query, "expired": False}
-    agg = await db.chatattachments.aggregate(
+    cursor = await db.chatattachments.aggregate(
         [{"$match": q}, {"$group": {"_id": None, "n": {"$sum": 1}, "b": {"$sum": "$size"}}}]
-    ).to_list(1)
+    )
+    agg = await cursor.to_list(1)
     return {"files": agg[0]["n"] if agg else 0, "bytes": agg[0]["b"] if agg else 0}
 
 

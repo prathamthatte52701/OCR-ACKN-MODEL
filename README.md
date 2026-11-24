@@ -444,7 +444,7 @@ Take regular `mongodump` backups of the database, and copy the `backend/exports/
 
 | Layer | Technology |
 |---|---|
-| Backend | FastAPI, Motor (async MongoDB), PaddleOCR (CPU), Groq, PyMuPDF, openpyxl, PyJWT, bcrypt, slowapi |
+| Backend | FastAPI, PyMongo Async (async MongoDB), PaddleOCR (CPU), Groq, PyMuPDF, openpyxl, PyJWT, bcrypt, slowapi |
 | User and admin apps | React, Vite, Tailwind, TanStack Query, Zustand |
 | Database and files | MongoDB Atlas, with documents stored in GridFS |
 
