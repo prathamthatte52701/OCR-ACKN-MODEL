@@ -56,7 +56,10 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def _request(port: int, headers: bytes) -> str:
+REQUEST_ATTEMPTS = 10
+
+
+def _request_once(port: int, headers: bytes) -> str:
     s = socket.create_connection(("127.0.0.1", port), timeout=15)
     try:
         s.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n" + headers + b"\r\n")
@@ -66,9 +69,37 @@ def _request(port: int, headers: bytes) -> str:
             if not chunk:
                 break
             data += chunk
+        if not data:
+            raise ConnectionResetError("connection closed before any reply")
         return data.split(b"\r\n")[0].decode(errors="replace")
     finally:
         s.close()
+
+
+def _request(port: int, headers: bytes) -> str:
+    """The status line of the server's reply. A server refusing a huge header may close the socket
+    while the client is still writing, and on a busy machine the client then sees a dropped
+    connection instead of the reply. That shows nothing either way, so the request is sent again;
+    a real reply is still required, and a connection that always drops still fails the test."""
+    for _ in range(REQUEST_ATTEMPTS - 1):
+        try:
+            return _request_once(port, headers)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            continue
+    return _request_once(port, headers)
+
+
+def _start_server(args: list[str], cwd: Path) -> "subprocess.Popen[bytes]":
+    for attempt in range(5):
+        try:
+            return subprocess.Popen(
+                args, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except PermissionError:  # Windows can briefly refuse to start a process on a busy machine
+            if attempt == 4:
+                raise
+            time.sleep(1)
+    raise AssertionError("unreachable")
 
 
 @pytest.fixture
@@ -80,12 +111,7 @@ def server(tmp_path: Path) -> Iterator[int]:
     for i, f in enumerate(flags):
         if f == "--port":
             flags[i + 1] = str(port)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "tiny:app", *flags],
-        cwd=tmp_path,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    proc = _start_server([sys.executable, "-m", "uvicorn", "tiny:app", *flags], tmp_path)
     try:
         for _ in range(100):
             try:
