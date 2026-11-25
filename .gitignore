@@ -75,3 +75,7 @@ admin/e2e/
 
 backend/logs/
 .run/
+
+# Local real-document test data (client data) and generated analysis output - never commit
+ackn testing data/
+graphify-out/
